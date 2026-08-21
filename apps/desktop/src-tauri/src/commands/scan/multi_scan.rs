@@ -1,0 +1,412 @@
+use crate::core::normalized_scan::{
+    batch_outcomes_on_routes, covered_routes, normalize_multi_page_parent, normalize_web_scan,
+    ClaimBasis, ScanCoverageKind, ScanCoverageManifest, ScanRunKind, ScanRunStatus,
+};
+use crate::core::scanner::{self, ScanType};
+use crate::db::Database;
+use std::collections::HashSet;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
+
+use super::control::ScanControlState;
+use super::page_loop::{run_page_loop, session_average, PageLoopOutcome, PageLoopStatus};
+use crate::commands::{emit_event, sanitize_error, validate_url_async};
+
+pub(crate) async fn scan_multi_for_execution(
+    app: AppHandle,
+    db: Arc<Database>,
+    scan_control: &ScanControlState,
+    urls: Vec<String>,
+    environment_url: Option<String>,
+    project_id: Option<i64>,
+    enabled_categories: Option<Vec<String>>,
+    timeout_secs: Option<u64>,
+    axe_enabled: Option<bool>,
+    scan_type: Option<ScanType>,
+    scan_request_id: u64,
+    execution_id: i64,
+) -> Result<scanner::MultiScanResult, String> {
+    if urls.is_empty() {
+        return Err("No URLs to scan".into());
+    }
+
+    for url in &urls {
+        validate_url_async(url).await?;
+    }
+
+    // Page selection order is not an environment boundary. The renderer sends
+    // the active project environment explicitly; the first URL remains a
+    // backward-compatible fallback for older callers.
+    let environment_url = environment_url.unwrap_or_else(|| urls[0].clone());
+    validate_url_async(&environment_url).await?;
+    let base_url = &environment_url;
+    let started_at = chrono::Utc::now().timestamp_millis();
+    let start = std::time::Instant::now();
+    let focus = scan_type.unwrap_or_default();
+    let (site_id, multi_project_id, session_id) = {
+        let db = db.clone();
+        let base_url = base_url.clone();
+        let selected_page_urls = urls.clone();
+        let axe = axe_enabled.unwrap_or(false);
+        crate::commands::run_blocking(move || -> Result<_, String> {
+            let site_id = match project_id {
+                Some(project_id) => db.get_or_create_site_for_project(project_id, &base_url),
+                None => db.get_or_create_site(&base_url),
+            }
+            .map_err(sanitize_error)?;
+            let multi_project_id = match project_id {
+                Some(project_id) => Some(project_id),
+                None => db
+                    .find_project_for_url_result(&base_url)
+                    .map_err(sanitize_error)?,
+            };
+            let session_id = db
+                .start_multi_page_scan_run(
+                    execution_id,
+                    multi_project_id,
+                    site_id,
+                    &base_url,
+                    focus,
+                    &selected_page_urls,
+                    axe,
+                    started_at,
+                )
+                .map_err(sanitize_error)?;
+            Ok((site_id, multi_project_id, session_id))
+        })
+        .await??
+    };
+    let result: Result<scanner::MultiScanResult, String> = async {
+        // Capture active groups before page persistence for lifecycle deltas.
+        let pre_scan_active = match multi_project_id {
+            Some(project_id) => {
+                let db_before = db.clone();
+                let environment_url = base_url.to_string();
+                Some(
+                    crate::commands::run_blocking(move || {
+                        load_active_issue_group_ids(&db_before, project_id, &environment_url)
+                    })
+                    .await
+                    .map_err(|error| format!("pre-scan issue snapshot task failed: {error}"))?
+                    .map_err(|error| format!("failed to load pre-scan issue snapshot: {error}"))?,
+                )
+            }
+            None => None,
+        };
+
+        let loop_outcome = run_page_loop(
+            &urls,
+            session_id,
+            || scan_control.is_cancelled(scan_request_id),
+            |_, url, skip_origin_checks| {
+                let st = focus;
+                let progress_app = app.clone();
+                let progress_fn: std::sync::Arc<scanner::ProgressFn> =
+                    std::sync::Arc::new(move |p| {
+                        let _ = progress_app.emit("scan-progress", p);
+                    });
+                let scan_control_clone = scan_control.clone();
+                let cancel_fn: std::sync::Arc<crate::scan_runtime::CancelFn> =
+                    std::sync::Arc::new(move || scan_control_clone.is_cancelled(scan_request_id));
+                crate::scan_runtime::run_scan_low_priority(
+                    url.to_string(),
+                    Some(progress_fn),
+                    enabled_categories.clone(),
+                    timeout_secs,
+                    st,
+                    skip_origin_checks,
+                    Some(cancel_fn),
+                )
+            },
+            |completed_pages, url, result| {
+                // Persist this page off the async-runtime worker threads: the
+                // scan save + work-items upsert + session-progress update are
+                // synchronous SQLite round-trips that would otherwise park a
+                // runtime worker mid-scan.
+                let db = db.clone();
+                let page_url = url.to_string();
+                let environment_url = base_url.to_string();
+                let project_id = multi_project_id;
+                async move {
+                    match crate::commands::run_blocking(move || {
+                        persist_multi_page_blocking(
+                            &db,
+                            execution_id,
+                            session_id,
+                            completed_pages,
+                            &environment_url,
+                            &page_url,
+                            project_id,
+                            site_id,
+                            &result,
+                        )
+                    })
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(error) => Err(format!("page persistence task failed: {error}")),
+                    }
+                }
+            },
+            |progress| emit_event(&app, "multi-scan-progress", progress),
+        )
+        .await?;
+        let PageLoopOutcome {
+            status: loop_status,
+            page_results,
+            completed_scores,
+            session_signals,
+            session_site_facts,
+        } = loop_outcome;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        // Persist no completed score as NULL, not zero.
+        let session_score = session_average(&completed_scores);
+
+        // Cross-page analysis over the collected page signals. One optional
+        // sitemap fetch feeds the noindex-in-sitemap contradiction check; no
+        // page is re-fetched.
+        let mut site_issues: Vec<crate::checks::CheckResult> = Vec::new();
+        let session_analyzed =
+            loop_status == PageLoopStatus::Complete && session_signals.len() >= 2;
+        if session_analyzed {
+            let sitemap_urls = match url::Url::parse(base_url) {
+                Ok(parsed) => {
+                    let is_local = crate::core::localhost::is_localhost(&parsed);
+                    let is_strict = crate::core::localhost::is_strict_localhost(&parsed);
+                    let client = crate::http_client::for_url(is_strict);
+                    let sitemap =
+                        crate::core::sitemap::discover_sitemap(client, base_url, is_local).await;
+                    if sitemap.urls.is_empty() {
+                        None
+                    } else {
+                        Some(sitemap.urls)
+                    }
+                }
+                Err(_) => None,
+            };
+            site_issues = crate::core::session_analysis::analyze_session(
+                &session_signals,
+                sitemap_urls.as_deref(),
+            );
+            scanner::finalize_check_results(&mut site_issues);
+        }
+
+        // The project was resolved strictly before the session began. Reuse
+        // that exact scope for every page, site-wide finding, and final event.
+        let finalize_project_id = multi_project_id;
+
+        let successful_page_urls: Vec<String> = page_results
+            .iter()
+            .filter(|page| page.scan_id > 0)
+            .map(|page| page.url.clone())
+            .collect();
+        let completed_at = chrono::Utc::now().timestamp_millis();
+        let mut parent_batch = normalize_multi_page_parent(
+            &site_issues,
+            execution_id,
+            finalize_project_id,
+            site_id,
+            base_url.to_string(),
+            urls.clone(),
+            successful_page_urls.clone(),
+            urls.len(),
+            session_score,
+            duration_ms,
+            started_at,
+            completed_at,
+            focus,
+            axe_enabled.unwrap_or(false),
+            session_analyzed,
+        )
+        .map_err(|error| format!("failed to normalize multi-page scan: {error}"))?;
+        parent_batch.environment_scope_key = crate::db::normalize_env_url(Some(base_url));
+        parent_batch.status = match loop_status {
+            PageLoopStatus::Complete => ScanRunStatus::Complete,
+            PageLoopStatus::Failed => ScanRunStatus::Failed,
+            PageLoopStatus::Cancelled => ScanRunStatus::Cancelled,
+        };
+        if loop_status != PageLoopStatus::Complete {
+            parent_batch.raw_score = None;
+            parent_batch.coverage.successful = false;
+            parent_batch.status_detail = Some(
+                match loop_status {
+                    PageLoopStatus::Failed => "all_selected_pages_failed",
+                    PageLoopStatus::Cancelled => "cancelled_by_user",
+                    PageLoopStatus::Complete => unreachable!(),
+                }
+                .to_string(),
+            );
+        }
+        {
+            let db_parent = db.clone();
+            crate::commands::run_blocking(move || -> Result<(), crate::db::DbError> {
+                db_parent.complete_multi_page_scan_run(session_id, parent_batch)?;
+                if loop_status == PageLoopStatus::Complete {
+                    super::baseline::record_baseline_observations(
+                        &db_parent,
+                        site_id,
+                        Some(session_id),
+                        &session_site_facts,
+                    );
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|error| format!("multi-page run completion task failed: {error}"))?
+            .map_err(|error| format!("failed to complete multi-page run: {error}"))?;
+        }
+        // Compare canonical issue groups after every session update is persisted.
+        let (new_issue_count, resolved_issue_count) = match (finalize_project_id, pre_scan_active) {
+            (Some(project_id), Some(before)) => {
+                let db_after = db.clone();
+                let environment_url = base_url.to_string();
+                let after = crate::commands::run_blocking(move || {
+                    load_active_issue_group_ids(&db_after, project_id, &environment_url)
+                })
+                .await
+                .map_err(|error| format!("post-scan issue snapshot task failed: {error}"))?
+                .map_err(|error| format!("failed to load post-scan issue snapshot: {error}"))?;
+                let (new_count, resolved_count) = issue_group_change_counts(&before, &after);
+                (Some(new_count), Some(resolved_count))
+            }
+            _ => (None, None),
+        };
+
+        match loop_status {
+            PageLoopStatus::Cancelled => return Err("Multi-page scan cancelled".into()),
+            PageLoopStatus::Failed => return Err("Every selected page failed to scan".into()),
+            PageLoopStatus::Complete => {}
+        }
+
+        tracing::info!(
+            "Multi-scan complete: {} pages, avg score={}, duration={}ms",
+            page_results.len(),
+            session_score.map_or_else(|| "not scored".to_string(), |s| s.to_string()),
+            duration_ms
+        );
+
+        Ok(scanner::MultiScanResult {
+            session_id,
+            total_pages: urls.len(),
+            completed_pages: successful_page_urls.len(),
+            // The live command uses zero when persistence records no score as NULL.
+            overall_score: session_score.unwrap_or(0),
+            duration_ms,
+            page_results,
+            new_issue_count,
+            resolved_issue_count,
+            site_issues,
+        })
+    }
+    .await;
+
+    // Mark an aborted parent failed while preserving the original error.
+    if let Err(error) = &result {
+        let db = db.clone();
+        let detail = error.clone();
+        let mark_result = crate::commands::run_blocking(move || {
+            db.fail_scan_run(session_id, chrono::Utc::now().timestamp_millis(), &detail)
+                .map_err(String::from)
+        })
+        .await
+        .and_then(|inner| inner);
+        if let Err(mark_error) = mark_result {
+            tracing::error!(
+                "failed to mark aborted scan session {} as errored: {}",
+                session_id,
+                mark_error
+            );
+        }
+    }
+    result
+}
+
+fn load_active_issue_group_ids(
+    db: &Database,
+    project_id: i64,
+    env_url: &str,
+) -> Result<HashSet<String>, crate::db::DbError> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    Ok(db
+        .get_active_issue_groups(project_id, Some(env_url), now_ms)?
+        .into_iter()
+        .filter(|group| !group.status.is_inactive_for_scoring())
+        .map(|group| group.check_id)
+        .collect())
+}
+
+fn issue_group_change_counts(before: &HashSet<String>, after: &HashSet<String>) -> (usize, usize) {
+    (
+        after.difference(before).count(),
+        before.difference(after).count(),
+    )
+}
+
+/// Synchronous per-page persistence for a multi-page scan. The child run,
+/// immutable findings, and coverage-scoped issue projection commit together.
+/// Returns the canonical child run id.
+fn persist_multi_page_blocking(
+    db: &Arc<Database>,
+    execution_id: i64,
+    parent_run_id: i64,
+    completed_pages: usize,
+    environment_url: &str,
+    page_url: &str,
+    project_id: Option<i64>,
+    site_id: i64,
+    result: &scanner::ScanResult,
+) -> Result<i64, String> {
+    let completed_at = chrono::Utc::now().timestamp_millis();
+    let started_at = completed_at.saturating_sub(result.duration_ms as i64);
+    let mut batch = normalize_web_scan(
+        result,
+        execution_id,
+        Some(parent_run_id),
+        project_id,
+        site_id,
+        ScanRunKind::Page,
+        started_at,
+    )
+    .map_err(|error| format!("failed to normalize page scan: {error}"))?;
+    batch.environment_url = Some(environment_url.to_string());
+    batch.environment_scope_key = crate::db::normalize_env_url(Some(environment_url));
+    batch.diagnostics.page_url = Some(page_url.to_string());
+    // Claim authored and effective URLs: coverage exceptions use the authored
+    // route, while findings and resolution use the post-redirect URL.
+    let routes = covered_routes(page_url, &result.url);
+    let outcomes = batch_outcomes_on_routes(&batch, &routes);
+    batch.coverage = ScanCoverageManifest::derive(
+        ScanCoverageKind::Page,
+        routes.iter().map(|route| (*route).to_string()).collect(),
+        &outcomes,
+        ClaimBasis::PerRoute,
+    );
+    let run_id = db
+        .persist_normalized_scan_run(batch)
+        .map_err(|error| format!("failed to save canonical page run: {error}"))?;
+    db.update_multi_page_scan_run_progress(parent_run_id, completed_pages)
+        .map_err(|error| format!("failed to update multi-page run progress: {error}"))?;
+    Ok(run_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::issue_group_change_counts;
+    use std::collections::HashSet;
+
+    #[test]
+    fn issue_group_changes_count_unique_active_rows_in_both_directions() {
+        let before = HashSet::from([
+            "security.hsts".to_string(),
+            "seo.meta-description".to_string(),
+        ]);
+        let after = HashSet::from([
+            "security.hsts".to_string(),
+            "performance.lcp".to_string(),
+            "accessibility.alt-text".to_string(),
+        ]);
+
+        assert_eq!(issue_group_change_counts(&before, &after), (2, 1));
+    }
+}

@@ -1,0 +1,15 @@
+# SSH public keys authorized to sign SiteCMD release tags.
+#
+# This is the public, reviewed mirror of the protected release-tag-trust
+# environment variable. release.yml fails if the two normalized signer lists
+# differ, then verifies the tag using the protected copy. Verify locally with:
+#
+#   git -c gpg.ssh.allowedSignersFile=.github/allowed-signers verify-tag vX.Y.Z
+#
+# Format: <principal> [options] <keytype> <key>. See ssh-keygen(1), "ALLOWED
+# SIGNERS". Retire a key with valid-before rather than deleting its line: git
+# checks the option against the signature timestamp. Rotation steps are in
+# docs/operations/releasing.md.
+
+# Current release signing key.
+admin@brambleworks.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINQFzInd7DQzyjkDrbna+KxU3xqMLcbJI1ODysA7kNFA

@@ -1,0 +1,328 @@
+//! Domain-organized Tauri IPC command handlers.
+
+mod agent_tools;
+mod alerts;
+pub mod catalog;
+mod code_scan;
+pub(crate) mod connected;
+mod connected_alerts;
+mod connected_credentials;
+mod connected_delivery;
+mod connected_notifications;
+mod connected_providers;
+mod connected_recovery;
+mod connected_rotation;
+mod connected_setup;
+mod connected_transfer;
+pub mod correlation;
+mod correlation_preview;
+mod data;
+mod desktop;
+mod desktop_project_commands;
+mod desktop_watch;
+mod events;
+mod fix_attempt_guidance;
+mod fix_attempts;
+mod integrations;
+mod issue_links;
+pub(crate) mod issue_source_capabilities;
+pub(crate) mod issues;
+mod oauth;
+mod privileged_command_broker;
+mod project;
+mod project_dashboard;
+mod project_git;
+mod project_maintenance_items;
+mod project_signal_monitoring;
+mod project_signal_snapshots;
+mod project_signal_state;
+mod project_work_items;
+mod reports;
+pub(crate) mod scan;
+mod scan_scope;
+mod site_baseline;
+mod sitemap;
+mod telemetry;
+pub mod telemetry_schema;
+mod updates;
+mod webhooks;
+
+use std::sync::LazyLock;
+
+pub use tokio::sync::Mutex as TokioMutex;
+
+/// Compiled once, reused on every error path.
+pub(crate) static PATH_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?:/[\w.@\- ]+){2,}").unwrap());
+
+/// Sanitize error messages before returning to the frontend.
+/// Strips filesystem paths to avoid leaking internal directory structure.
+#[tracing::instrument(skip(msg))]
+pub(crate) fn sanitize_error(msg: impl std::fmt::Display) -> String {
+    let stripped = PATH_RE
+        .replace_all(&msg.to_string(), "[internal path]")
+        .into_owned();
+    // Backstop: scrub any secret/token format before the error reaches the UI.
+    crate::log_sanitizer::redact_secrets(&stripped)
+}
+
+/// Validate a scan URL. Local development loopback URLs are allowed, but
+/// private/link-local targets and DNS names resolving to them are rejected.
+#[cfg(test)]
+#[tracing::instrument(skip(url))]
+pub(crate) fn validate_url(url: &str) -> Result<(), String> {
+    crate::network_policy::validate_url_blocking(url, crate::network_policy::UrlPolicy::Scan)
+}
+
+/// Async version of `validate_url`; use this from Tauri commands so DNS
+/// resolution does not occupy Tokio's foreground IPC workers.
+#[tracing::instrument(skip(url))]
+pub(crate) async fn validate_url_async(url: &str) -> Result<(), String> {
+    crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::Scan).await
+}
+
+/// Validate an outbound callback/webhook URL. Unlike scans, external callbacks
+/// cannot target localhost or any private/internal address.
+#[cfg(test)]
+#[tracing::instrument(skip(url))]
+pub(crate) fn validate_external_callback_url(url: &str) -> Result<(), String> {
+    crate::network_policy::validate_url_blocking(
+        url,
+        crate::network_policy::UrlPolicy::ExternalCallback,
+    )
+}
+
+#[tracing::instrument(skip(url))]
+pub(crate) async fn validate_external_callback_url_async(url: &str) -> Result<(), String> {
+    crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::ExternalCallback)
+        .await
+}
+
+pub(crate) async fn run_blocking<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| sanitize_error(format!("Background task failed: {}", e)))
+}
+
+/// Distinguishes a user-declined confirmation from a dialog failure.
+#[derive(Debug)]
+pub(crate) enum SensitiveActionError {
+    Declined,
+    Failed(String),
+}
+
+impl std::fmt::Display for SensitiveActionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SensitiveActionError::Declined => write!(f, "Sensitive operation cancelled"),
+            SensitiveActionError::Failed(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl From<SensitiveActionError> for String {
+    fn from(error: SensitiveActionError) -> String {
+        error.to_string()
+    }
+}
+
+/// Whether a native confirmation dialog is currently on screen. See the swap
+/// in `confirm_sensitive_action` for why this outlives the timeout.
+static CONFIRM_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) async fn confirm_sensitive_action(
+    app: tauri::AppHandle,
+    title: &'static str,
+    message: String,
+    approve_label: &'static str,
+) -> Result<(), SensitiveActionError> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    // Native dialogs cannot be cancelled, so serialize them until each closes.
+    if CONFIRM_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err(SensitiveActionError::Failed(
+            "A confirmation is already waiting for an answer. Answer it before trying again."
+                .to_string(),
+        ));
+    }
+    let dialog = tauri::async_runtime::spawn_blocking(move || {
+        let answer = app
+            .dialog()
+            .message(message)
+            .title(title)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                approve_label.to_string(),
+                "Cancel".to_string(),
+            ))
+            .blocking_show();
+        CONFIRM_IN_FLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+        answer
+    });
+
+    // A dialog nobody can answer must not hold the invoke open forever; see
+    // the constant for what that failure actually looks like.
+    let approved =
+        match tokio::time::timeout(crate::constants::SENSITIVE_CONFIRM_TIMEOUT, dialog).await {
+            Ok(joined) => {
+                joined.map_err(|error| SensitiveActionError::Failed(sanitize_error(error)))?
+            }
+            Err(_) => {
+                // Say what actually happened. "The confirmation dialog did not
+                // open" was false in the common case: the dialog opened and is
+                // still sitting there unanswered, which is exactly why the
+                // deadline expired.
+                return Err(SensitiveActionError::Failed(
+                    "The confirmation was not answered in time. Nothing was changed.".to_string(),
+                ));
+            }
+        };
+
+    if approved {
+        Ok(())
+    } else {
+        Err(SensitiveActionError::Declined)
+    }
+}
+
+pub(crate) use crate::core::app_emit::{emit_event, emit_site_score_changed};
+
+/// Convert a period string like "7d", "30d", "90d" to an integer day count.
+/// Falls back to 30 if the format is unrecognized.
+#[tracing::instrument(fields(period = %period))]
+pub(crate) fn period_to_days(period: &str) -> u32 {
+    match period {
+        "7d" => 7,
+        "30d" => 30,
+        "90d" => 90,
+        "365d" => 365,
+        _ => {
+            // Try parsing number from string like "14d"
+            period.trim_end_matches('d').parse().unwrap_or(30)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_external_callback_url, validate_url, SensitiveActionError};
+
+    /// The decline-versus-failure distinction is the contract callers rely
+    /// on: Cancelled renders as silence in the licensing UI, so a dialog
+    /// that died must never stringify into the decline's exact wording.
+    #[test]
+    fn a_decline_and_a_dead_dialog_stay_distinguishable() {
+        let declined: String = SensitiveActionError::Declined.into();
+        assert_eq!(declined, "Sensitive operation cancelled");
+        let failed: String = SensitiveActionError::Failed("dialog task died".to_string()).into();
+        assert_eq!(failed, "dialog task died");
+        assert_ne!(declined, failed);
+    }
+
+    #[test]
+    fn validate_url_allows_explicit_local_dev_loopback() {
+        assert!(validate_url("http://localhost:5173").is_ok());
+        assert!(validate_url("http://127.0.0.1:5173").is_ok());
+        assert!(validate_url("http://[::1]:5173").is_ok());
+    }
+
+    #[test]
+    fn validate_url_rejects_private_non_loopback_targets() {
+        assert!(validate_url("http://192.168.1.10").is_err());
+        assert!(validate_url("http://10.0.0.5").is_err());
+        assert!(validate_url("http://169.254.169.254").is_err());
+    }
+
+    #[test]
+    fn external_callback_validation_rejects_local_targets() {
+        assert!(validate_external_callback_url("http://localhost:5173").is_err());
+        assert!(validate_external_callback_url("http://127.0.0.1:5173").is_err());
+        assert!(validate_external_callback_url("http://[::1]:5173").is_err());
+    }
+
+    #[test]
+    fn external_callback_validation_rejects_metadata_host() {
+        assert!(validate_external_callback_url("https://metadata.google.internal").is_err());
+    }
+}
+
+/// Update the system tray menu item and tooltip to reflect scan progress.
+#[tauri::command]
+#[tracing::instrument(skip(tray_state, url), fields(scanning, pct))]
+pub async fn update_tray_scan_status(
+    tray_state: tauri::State<'_, crate::TrayState>,
+    scanning: bool,
+    url: Option<String>,
+    pct: Option<u32>,
+) -> Result<(), String> {
+    tray_state
+        .is_scanning
+        .store(scanning, std::sync::atomic::Ordering::Relaxed);
+
+    if scanning {
+        let host = url
+            .as_deref()
+            .and_then(|u| url::Url::parse(u).ok())
+            .and_then(|u| u.host_str().map(String::from))
+            .unwrap_or_else(|| "site".to_string());
+        let p = pct.unwrap_or(0);
+        let _ = tray_state
+            .scan_item
+            .set_text(format!("Scanning {} - {}%", host, p));
+        let _ = tray_state
+            .tray_icon
+            .set_tooltip(Some(&format!("SiteCMD - Scanning {} ({}%)", host, p)));
+    } else {
+        let _ = tray_state.scan_item.set_text("Scan Now");
+        let tooltip = tray_state
+            .summary_tooltip
+            .read()
+            .map(|value| value.clone())
+            .unwrap_or_else(|_| "SiteCMD".to_string());
+        let _ = tray_state.tray_icon.set_tooltip(Some(&tooltip));
+    }
+
+    Ok(())
+}
+
+pub use agent_tools::*;
+pub use alerts::*;
+pub use catalog::*;
+pub use code_scan::*;
+pub use connected::*;
+pub use connected_alerts::*;
+pub use connected_credentials::*;
+pub use connected_delivery::*;
+pub use connected_notifications::*;
+pub use connected_providers::*;
+pub use connected_recovery::*;
+pub use connected_rotation::*;
+pub use connected_setup::*;
+pub use connected_transfer::*;
+pub use correlation::*;
+pub use correlation_preview::*;
+pub use data::*;
+pub use desktop::*;
+pub use desktop_project_commands::*;
+pub use events::*;
+pub use fix_attempts::*;
+pub use integrations::*;
+pub use issue_links::*;
+pub use issues::*;
+pub use oauth::*;
+pub use privileged_command_broker::*;
+pub use project::*;
+pub use project_dashboard::*;
+pub use project_git::*;
+pub use reports::*;
+pub use scan::*;
+pub use scan_scope::*;
+pub use site_baseline::*;
+pub use sitemap::*;
+pub use telemetry::*;
+pub use updates::*;
+pub use webhooks::*;

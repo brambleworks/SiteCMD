@@ -1,0 +1,10 @@
+{
+  "name": "sitecmd-updater-signer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Minimal pinned Tauri updater signer used by the release workflow.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

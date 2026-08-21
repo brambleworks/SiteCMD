@@ -1,0 +1,121 @@
+name: frontend-quality
+
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/src/**"
+      - "apps/mcp-server/src/**"
+      - "apps/mcp-server/test/**"
+      - "apps/mcp-server/package.json"
+      - "apps/mcp-server/tsconfig.json"
+      - "tools/scripts/**"
+      - "docs/engineering/naming-conventions.md"
+      - "eslint.config.js"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "apps/desktop/tsconfig*.json"
+      - "apps/desktop/vite.config.ts"
+      - "apps/desktop/vitest.config.ts"
+      - ".github/workflows/frontend-quality.yml"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Frontend quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The budget ratchet compares the pull request range against its base.
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit frontend filenames
+        run: pnpm naming:audit
+
+      - name: Check repository guardrails
+        run: pnpm guardrails:repo
+
+      - name: Block guardrail-budget increases without bypass token
+        # Enforce the budget ratchet even when local hooks are bypassed.
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          else
+            RANGE="HEAD~1..HEAD"
+          fi
+          node tools/scripts/check-budget-ratchet.mjs --range "$RANGE"
+
+      - name: Check Tauri command surface for registration drift
+        run: node tools/scripts/audit/tauri-command-surface.mjs --check
+
+      - name: Check AGENTS.md staleness (paths + script names)
+        run: node tools/scripts/audit/check-agents-md.mjs
+
+      - name: Audit regex safety
+        run: pnpm audit:regex
+
+      - name: Forbid inline frontend constants outside their home libs
+        # Run the same canonical check locally and in CI.
+        run: bash tools/scripts/audit/forbid-inline-frontend-constants.sh
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      - name: Performance baseline
+        run: pnpm perf:baseline
+
+  mcp-minimum-node:
+    name: MCP on minimum Node.js
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+
+      - name: Install minimum Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.22.1
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test MCP server
+        run: pnpm --filter sitecmd-mcp run test

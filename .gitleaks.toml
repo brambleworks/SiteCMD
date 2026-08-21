@@ -1,0 +1,11 @@
+# Extend Gitleaks' built-in detectors.
+
+[extend]
+useDefault = true
+
+# Allow the reserved `test-fixture-` prefix used by synthetic key-shaped values.
+[allowlist]
+description = "Synthetic test fixtures"
+regexes = [
+    '''test-fixture-[a-z0-9-]+''',
+]

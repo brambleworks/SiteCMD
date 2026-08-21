@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible SiteCMD defect
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve SiteCMD. Do not include credentials, private source code, private URLs, scan findings, or customer data. Report security vulnerabilities privately according to SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: SiteCMD version
+      description: The version shown in SiteCMD or the CLI.
+      placeholder: x.y.z
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - CLI only
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and why it appears incorrect.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe example that reproduces the problem.
+      placeholder: |
+        1. Open ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sanitized logs or screenshots only if they contain no sensitive information.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, private code, private URLs, scan findings, and customer data.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

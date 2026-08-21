@@ -1,0 +1,23 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp4 binary
+*.mov binary
+*.pdf binary
+
+pnpm-lock.yaml linguist-generated=true
+THIRD_PARTY_DEPENDENCIES.json linguist-generated=true
+THIRD_PARTY_LICENSES.txt linguist-generated=true
+product-facts.json linguist-generated=true
+apps/desktop/src/generated/* linguist-generated=true
+apps/desktop/src-tauri/crates/engine/browser/axe.min.js linguist-vendored=true

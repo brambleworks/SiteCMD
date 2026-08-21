@@ -1,0 +1,26 @@
+packages:
+  - "apps/*"
+
+# Reject dependency releases less than one day old.
+minimumReleaseAge: 1440
+
+# Refuse installs with an unsupported runtime or incompatible dependency engines.
+engineStrict: true
+
+# Overrides must bind a capped dependency and include a reason and review date.
+# Exact pins additionally require a `pinned-exact:` justification.
+overrides:
+  # non-security: deduplicate ink and miniflare on ws 8.21.x; remove when their ranges agree.
+  # reviewed: 2026-07-24
+  ws: "^8.21.0"
+  # GHSA-f88m-g3jw-g9cj: miniflare pins vulnerable sharp 0.34.5; remove after it adopts 0.35.x.
+  # reviewed: 2026-07-24
+  sharp: "^0.35.3"
+
+# Allow only the native build and hook-install scripts the workspace requires.
+allowBuilds:
+  better-sqlite3: true
+  lefthook: true
+  esbuild: false
+  sharp: false
+  workerd: false

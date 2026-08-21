@@ -1,0 +1,13 @@
+# Pin Rust and Clippy so local verification matches CI and release builds.
+# When bumping, install the channel locally and resolve its new lints.
+[toolchain]
+channel = "1.97.0"
+components = ["clippy", "rustfmt"]
+# Release targets plus the portable engine's wasm target.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "wasm32-unknown-unknown",
+]

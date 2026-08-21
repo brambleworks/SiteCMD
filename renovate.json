@@ -1,0 +1,123 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":timezone(America/New_York)"],
+  "semanticCommits": "disabled",
+  "commitMessageAction": "Update",
+  "commitMessageLowerCase": "never",
+  "schedule": ["before 6am on Monday"],
+  "prHourlyLimit": 6,
+  "prConcurrentLimit": 12,
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "platformAutomerge": true,
+  "platformCommit": "enabled",
+  "ignoreTests": false,
+  "dependencyDashboardTitle": "Renovate Dashboard",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": false,
+    "schedule": ["at any time"]
+  },
+  "packageRules": [
+    {
+      "description": "Rust toolchain updates require review because a bump can introduce new clippy lints.",
+      "matchManagers": ["rust-toolchain"],
+      "groupName": "Rust toolchain",
+      "automerge": false
+    },
+    {
+      "description": "Dependabot owns GitHub Actions updates.",
+      "matchManagers": ["github-actions"],
+      "enabled": false
+    },
+    {
+      "description": "Group all Tauri JS deps - they version together",
+      "matchPackageNames": ["@tauri-apps/**"],
+      "groupName": "Tauri (JS)",
+      "automerge": false
+    },
+    {
+      "description": "Group React core - react + react-dom + types should bump together",
+      "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+      "groupName": "React core",
+      "automerge": false
+    },
+    {
+      "description": "Group Radix UI - safe to bundle together",
+      "matchPackageNames": ["@radix-ui/**"],
+      "groupName": "Radix UI",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Group ESLint ecosystem",
+      "matchPackageNames": ["eslint**", "@eslint/**", "@typescript-eslint/**", "typescript-eslint"],
+      "groupName": "ESLint",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "TypeScript must stay below 6.1 until the latest typescript-eslint peer range supports 7.x.",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6.1.0",
+      "automerge": false
+    },
+    {
+      "description": "Group testing libraries",
+      "matchPackageNames": ["@testing-library/**", "@vitest/**", "vitest", "jsdom"],
+      "groupName": "Testing libs",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Group prettier + plugins",
+      "matchPackageNames": ["prettier**", "eslint-config-prettier**"],
+      "groupName": "Prettier",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Group all Tauri Rust crates",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["tauri", "tauri-**"],
+      "groupName": "Tauri (Rust)",
+      "automerge": false
+    },
+    {
+      "description": "Group all reqwest/tokio/serde stack updates - rarely safe individually",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["reqwest", "tokio", "serde", "serde_json", "url"],
+      "groupName": "Async + serde stack",
+      "automerge": false
+    },
+    {
+      "description": "Auto-merge minor + patch updates for tooling",
+      "matchPackageNames": ["knip", "size-limit", "@size-limit/file", "lefthook", "react-scan"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Pre-1.0 packages require manual review because minor releases may break compatibility.",
+      "matchCurrentVersion": "/^0\\./",
+      "automerge": false
+    },
+    {
+      "description": "Pinned to ^4 - upstream had a breaking change in v5 that needs review",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["tauri-plugin-prevent-default"],
+      "enabled": true,
+      "rangeStrategy": "in-range-only"
+    }
+  ],
+  "cargo": {
+    "enabled": true
+  },
+  "ignoreDeps": [],
+  "rebaseWhen": "conflicted"
+}

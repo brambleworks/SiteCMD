@@ -1,0 +1,304 @@
+use std::sync::LazyLock;
+
+pub(in crate::core::code_scan) static REQUEST_BODY_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"request\.json\s*\(").unwrap(),
+            regex::Regex::new(r"req\.body\b").unwrap(),
+            regex::Regex::new(r"request\.formData\s*\(").unwrap(),
+            regex::Regex::new(r"await\s+request\.json").unwrap(),
+            regex::Regex::new(r"await\s+req\.json").unwrap(),
+            regex::Regex::new(r"json\.loads\s*\(").unwrap(),
+            // Query-only PHP reads are not request-body handling.
+            regex::Regex::new(r"\$_(?:POST|REQUEST)\s*\[").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"php://input").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\$request->(?:input|all|post|json|validated|safe)\s*\(")
+                .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
+/// PHP superglobal presence checks that do not consume the input value.
+/// These spans are removed before detecting request-body parsing.
+pub(in crate::core::code_scan) static PHP_PRESENCE_CHECK_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| {
+        regex::Regex::new(r"\b(?:empty|isset)\s*\(\s*\$_(?:POST|REQUEST)[^()]*\)")
+            .expect("static PHP pattern regex") // allow-expect: compile-time literal regex
+    });
+
+pub(in crate::core::code_scan) static SERVER_ACTION_INPUT_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![regex::Regex::new(
+            r#"\b(?:formData|data|input|values)\.get\s*\(\s*["'`][A-Za-z0-9_.-]+["'`]\s*\)"#,
+        )
+        .unwrap()]
+    });
+
+pub(in crate::core::code_scan) static SOURCE_ENV_KEY_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        let compile = |source| {
+            regex::Regex::new(source).expect("static source env key pattern") // allow-expect: source comes only from compile-time literal regexes below
+        };
+        vec![
+            compile(r"process\.env\.([A-Z][A-Z0-9_]+)"),
+            compile(r#"process\.env\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]"#),
+            compile(r"import\.meta\.env\.([A-Z][A-Z0-9_]+)"),
+            compile(r#"import\.meta\.env\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\]"#),
+            compile(r#"Deno\.env\.get\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+            compile(r#"std::env::var(?:_os)?\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+            compile(r#"(?:option_env!|env!)\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+            compile(r#"os\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+            compile(
+                r#"os\.environ(?:\.get\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)|\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\])"#,
+            ),
+            compile(r#"os\.Getenv\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+            compile(
+                r#"ENV(?:\.fetch\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)|\[\s*["']([A-Z][A-Z0-9_]+)["']\s*\])"#,
+            ),
+            compile(r#"System\.getenv\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+            compile(r#"Environment\.GetEnvironmentVariable\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+            compile(r#"env\(\s*["']([A-Z][A-Z0-9_]+)["']\s*\)"#),
+        ]
+    });
+
+pub(in crate::core::code_scan) static VALIDATION_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"\bzod\b").unwrap(),
+            regex::Regex::new(r"\bvalibot\b").unwrap(),
+            regex::Regex::new(r"\byup\b").unwrap(),
+            regex::Regex::new(r"\bsafeParse\s*\(").unwrap(),
+            regex::Regex::new(r"\bparse\s*\(").unwrap(),
+            regex::Regex::new(r"\bparseAsync\s*\(").unwrap(),
+            regex::Regex::new(r"\bBaseModel\b").unwrap(),
+            regex::Regex::new(r"\bpydantic\b").unwrap(),
+            regex::Regex::new(r"\bvalidate\w*\s*\(").unwrap(),
+            regex::Regex::new(r"request->validate\s*\(").unwrap(),
+            regex::Regex::new(r"FormRequest").unwrap(),
+            // PHP native, WordPress, and Laravel validation APIs.
+            regex::Regex::new(r"\bfilter_var\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bfilter_input\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bsanitize_[a-z_]+\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"(?:validate|sanitize)_callback").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"Validator::make").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            // Match validating FormRequest subclasses, not the base Request type.
+            regex::Regex::new(r"\b[A-Z][A-Za-z0-9]+Request\s+\$[A-Za-z_]")
+                .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
+pub(in crate::core::code_scan) static OUTBOUND_HTTP_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"\bfetch\s*\(").unwrap(),
+            regex::Regex::new(r"\baxios\.(get|post|put|patch|delete|request)\s*\(").unwrap(),
+            regex::Regex::new(r"\bky\.(get|post|put|patch|delete)\s*\(").unwrap(),
+            regex::Regex::new(r"\bgot\.(get|post|put|patch|delete)\s*\(").unwrap(),
+            regex::Regex::new(r"\brequests\.(get|post|put|patch|delete)\s*\(").unwrap(),
+            regex::Regex::new(r"\bhttpx\.(get|post|put|patch|delete)\s*\(").unwrap(),
+            regex::Regex::new(r"\bstripe\.").unwrap(),
+            regex::Regex::new(r"\bresend\.").unwrap(),
+            regex::Regex::new(r"\bsendgrid\b").unwrap(),
+            regex::Regex::new(r"\bmailgun\b").unwrap(),
+            regex::Regex::new(r"\bpostmark\b").unwrap(),
+            regex::Regex::new(r"\btwilio\b").unwrap(),
+            // Concrete clients avoid prose matches from bare brand names.
+        ]
+    });
+
+pub(in crate::core::code_scan) static OUTBOUND_HTTP_RETRY_SKIP_PATTERNS: LazyLock<
+    Vec<regex::Regex>,
+> = LazyLock::new(|| {
+    vec![
+        regex::Regex::new(r#"\bfetch\s*\(\s*["']/"#).unwrap(),
+        regex::Regex::new(r#"\baxios\.(get|post|put|patch|delete)\s*\(\s*["']/"#).unwrap(),
+    ]
+});
+
+pub(in crate::core::code_scan) static RATE_LIMIT_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"rate[-_ ]?limit").unwrap(),
+            regex::Regex::new(r"ratelimit").unwrap(),
+            regex::Regex::new(r"express-rate-limit").unwrap(),
+            regex::Regex::new(r"upstash/ratelimit").unwrap(),
+            regex::Regex::new(r"\blimiter\b").unwrap(),
+            regex::Regex::new(r"\bthrottle\b").unwrap(),
+            regex::Regex::new(r"\bslowDown\b").unwrap(),
+            regex::Regex::new(r"\bgov(ernor|ernor)\b").unwrap(),
+        ]
+    });
+
+pub(in crate::core::code_scan) static PUBLIC_RISK_ENDPOINT_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"\bauth\b").unwrap(),
+            regex::Regex::new(r"\blogin\b").unwrap(),
+            regex::Regex::new(r"\bsign[ -]?in\b").unwrap(),
+            regex::Regex::new(r"\bsign[ -]?up\b").unwrap(),
+            regex::Regex::new(r"\bregister\b").unwrap(),
+            regex::Regex::new(r"\breset\b").unwrap(),
+            regex::Regex::new(r"\bpassword\b").unwrap(),
+            regex::Regex::new(r"\bsearch\b").unwrap(),
+            regex::Regex::new(r"\bchat\b").unwrap(),
+            regex::Regex::new(r"\bcontact\b").unwrap(),
+            regex::Regex::new(r"\bfeedback\b").unwrap(),
+            regex::Regex::new(r"\bnewsletter\b").unwrap(),
+            regex::Regex::new(r"\bsubscribe\b").unwrap(),
+            regex::Regex::new(r"\bupload\b").unwrap(),
+            regex::Regex::new(r"\bimport\b").unwrap(),
+            regex::Regex::new(r"\bexport\b").unwrap(),
+            regex::Regex::new(r"\binvite\b").unwrap(),
+            regex::Regex::new(r"\bcheckout\b").unwrap(),
+            regex::Regex::new(r"\bpayment\b").unwrap(),
+            regex::Regex::new(r"\bwebhook\b").unwrap(),
+        ]
+    });
+
+pub(in crate::core::code_scan) static UPLOAD_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"\bformData\s*\(").unwrap(),
+            regex::Regex::new(r"\bmultipart\b").unwrap(),
+            regex::Regex::new(r"\bupload\b").unwrap(),
+            regex::Regex::new(r"(?i)\bputobject\b").unwrap(),
+            regex::Regex::new(r"\bPutObjectCommand\b").unwrap(),
+            regex::Regex::new(r"\bS3Client\b").unwrap(),
+            regex::Regex::new(r"\bstorage\.from\s*\(").unwrap(),
+            regex::Regex::new(r"\bcreateSignedUploadUrl\b").unwrap(),
+            regex::Regex::new(r"\buploadBytes\b").unwrap(),
+            regex::Regex::new(r"\bBlob\b").unwrap(),
+            regex::Regex::new(r"\bFile\b").unwrap(),
+            regex::Regex::new(r"\$_FILES\b").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
+pub(in crate::core::code_scan) static UPLOAD_FILE_INPUT_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+        regex::Regex::new(
+            r#"(?is)(?:formData|data|input|values)\.get\s*\(\s*["'`](?:file|image|avatar|document|attachment|blob|upload)["'`]\s*\)"#,
+        )
+        .unwrap(),
+        regex::Regex::new(r#"(?is)\b(?:body|input|payload|params|query|data)\.(?:file|image|avatar|document|attachment|blob|upload)\b"#).unwrap(),
+        // PHP: the upload superglobal and Laravel's file accessors.
+        regex::Regex::new(r"\$_FILES\s*\[").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        regex::Regex::new(r"\$request->(?:file|hasFile)\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+    ]
+    });
+
+pub(in crate::core::code_scan) static UPLOAD_SIZE_GUARD_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r#"\b(?:file|blob|upload)\.size\b"#).unwrap(),
+            regex::Regex::new(r#"\bMAX_[A-Z0-9_]*FILE[A-Z0-9_]*SIZE\b"#).unwrap(),
+            regex::Regex::new(r#"\bmaxFileSize\b"#).unwrap(),
+            regex::Regex::new(r#"\bmaxUploadSize\b"#).unwrap(),
+            regex::Regex::new(r#"\bcontent-length\b"#).unwrap(),
+            regex::Regex::new(r#"\bContent-Length\b"#).unwrap(),
+            regex::Regex::new(r#"\bsize\s*[<>]=?\s*"#).unwrap(),
+            // PHP upload sizes and WordPress limits.
+            regex::Regex::new(r#"\[\s*['"]size['"]\s*\]"#).expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bwp_max_upload_size\b").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            // Laravel FormRequest types carry upload validation.
+            regex::Regex::new(r"\b[A-Z][A-Za-z0-9]+Request\s+\$[A-Za-z_]")
+                .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
+pub(in crate::core::code_scan) static UPLOAD_TYPE_GUARD_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r#"\b(?:file|blob|upload)\.type\b"#).unwrap(),
+            regex::Regex::new(r#"\bmimeType?\b"#).unwrap(),
+            regex::Regex::new(r#"\bcontentType\b"#).unwrap(),
+            regex::Regex::new(r#"\ballowedMime"#).unwrap(),
+            regex::Regex::new(r#"\ballowedTypes\b"#).unwrap(),
+            regex::Regex::new(r#"\bstartsWith\s*\(\s*["'`](?:image|video|audio|application)/"#)
+                .unwrap(),
+            regex::Regex::new(r#"\bincludes\s*\(\s*(?:file|blob|upload)\.type"#).unwrap(),
+            // PHP: reading the upload's type field, a real MIME sniff
+            // (finfo / wp_check_filetype), or a Laravel mimes: rule.
+            regex::Regex::new(r#"\[\s*['"]type['"]\s*\]"#).expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bwp_check_filetype").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bfinfo_file\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bmimes?:[a-z]").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            // Laravel: FormRequest type hint - see the size-guard list.
+            regex::Regex::new(r"\b[A-Z][A-Za-z0-9]+Request\s+\$[A-Za-z_]")
+                .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
+pub(in crate::core::code_scan) static STORAGE_WRITE_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r#"(?i)\bputobject\b"#).unwrap(),
+            regex::Regex::new(r#"\bPutObjectCommand\b"#).unwrap(),
+            regex::Regex::new(r#"\bstorage\.from\s*\("#).unwrap(),
+            regex::Regex::new(r#"\.upload(?:Data|Bytes)?\s*\("#).unwrap(),
+            regex::Regex::new(r#"\bcreateSignedUploadUrl\b"#).unwrap(),
+            regex::Regex::new(r#"\buploadBytes\b"#).unwrap(),
+            // PHP: moving the uploaded temp file into place, the WordPress
+            // upload helper, and Laravel's storage calls.
+            regex::Regex::new(r"\bmove_uploaded_file\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bwp_handle_upload\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"->store(?:As|Publicly|PubliclyAs)?\s*\(")
+                .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
+pub(in crate::core::code_scan) static USER_CONTROLLED_STORAGE_KEY_PATTERNS: LazyLock<
+    Vec<regex::Regex>,
+> = LazyLock::new(|| {
+    vec![
+        regex::Regex::new(
+            r#"(?is)(?:key|path)\s*:\s*(?:body|input|payload|params|query|data)\.[A-Za-z0-9_]+"#,
+        )
+        .unwrap(),
+        regex::Regex::new(
+            r#"(?is)(?:key|path)\s*:\s*[^,\n]{0,220}(?:file|blob|upload)\.name"#,
+        )
+        .unwrap(),
+        regex::Regex::new(
+            r#"(?is)\.upload(?:Data|Bytes)?\s*\(\s*(?:body|input|payload|params|query|data)\.[A-Za-z0-9_]+"#,
+        )
+        .unwrap(),
+        regex::Regex::new(
+            r#"(?is)\.upload(?:Data|Bytes)?\s*\(\s*[^,\n]{0,220}(?:file|blob|upload)\.name"#,
+        )
+        .unwrap(),
+        regex::Regex::new(
+            r#"(?is)createSignedUploadUrl\s*\(\s*(?:body|input|payload|params|query|data)\.[A-Za-z0-9_]+"#,
+        )
+        .unwrap(),
+        // PHP: destination path built from the client-supplied filename.
+        // basename still counts - it stops traversal but not collisions,
+        // overwrites, or attacker-chosen extensions, which is what this
+        // check is about.
+        regex::Regex::new(r#"(?s)\bmove_uploaded_file\s*\([^;]{0,240}\[\s*['"]name['"]\s*\]"#)
+            .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        regex::Regex::new(r"(?s)->storeAs\s*\([^;]{0,160}getClientOriginalName").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+    ]
+});
+
+pub(in crate::core::code_scan) static SCOPED_STORAGE_KEY_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+        regex::Regex::new(
+            r#"(?is)(?:key|path)\s*:\s*[^,\n]{0,260}(?:userId|orgId|organizationId|teamId|workspaceId|tenantId|accountId|customerId|ownerId|session\.user\.[A-Za-z0-9_]+|ctx\.user\.[A-Za-z0-9_]+)"#,
+        )
+        .unwrap(),
+        regex::Regex::new(
+            r#"(?is)\.upload(?:Data|Bytes)?\s*\(\s*[^,\n]{0,260}(?:userId|orgId|organizationId|teamId|workspaceId|tenantId|accountId|customerId|ownerId|session\.user\.[A-Za-z0-9_]+|ctx\.user\.[A-Za-z0-9_]+)"#,
+        )
+        .unwrap(),
+        regex::Regex::new(
+            r#"(?is)createSignedUploadUrl\s*\(\s*[^,\n]{0,260}(?:userId|orgId|organizationId|teamId|workspaceId|tenantId|accountId|customerId|ownerId|session\.user\.[A-Za-z0-9_]+|ctx\.user\.[A-Za-z0-9_]+)"#,
+        )
+        .unwrap(),
+        // PHP: destination scoped by the current WordPress user or by
+        // Laravel's authenticated id.
+        regex::Regex::new(r"(?s)\bmove_uploaded_file\s*\([^;]{0,240}get_current_user_id\s*\(")
+            .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+        regex::Regex::new(r"(?s)->store(?:As)?\s*\([^;]{0,200}auth\(\)->id").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+    ]
+    });

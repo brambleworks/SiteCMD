@@ -1,0 +1,118 @@
+name: SiteCMD gate
+description: Fail a pull request on code findings that are new against the connected baseline.
+
+# Produce a read-only verdict for findings new against the connected baseline.
+# The action neither mutates baseline state nor returns full finding data.
+
+inputs:
+  connection-export:
+    description: >-
+      The encrypted connection export for this site, created in the desktop app
+      under Settings. Store it in a repository secret: it carries the project
+      fingerprint key, which is what makes a code location's identity mean
+      anything, and it is the one part of this setup that is not recoverable.
+    required: true
+  passphrase:
+    description: The passphrase the connection export was encrypted with.
+    required: true
+  ci-token:
+    description: >-
+      The CI token minted for this site in the desktop app. Bound to one site,
+      it can read only the deployment-ordering cursor, run this gate, notify
+      deployments, and submit code evidence. It cannot read findings,
+      lifecycle state, or account data. This action uses it for the gate alone.
+    required: true
+  threshold:
+    description: >-
+      The least severe NEW finding that fails the build: critical, high,
+      medium, or low.
+    required: false
+    default: high
+  strict:
+    description: >-
+      Also fail on findings the service cannot rule out as a detector or corpus
+      change. Off by default, because a merge blocked by an engine upgrade is a
+      merge blocked for a reason the author cannot fix.
+    required: false
+    default: "false"
+  version:
+    description: >-
+      Exact CLI release version. When omitted, use the version declared by the
+      pinned SiteCMD source revision containing this action.
+    required: false
+    default: ""
+
+outputs:
+  verdict:
+    description: pass or fail.
+    value: ${{ steps.gate.outputs.verdict }}
+  new:
+    description: How many findings were new against the baseline.
+    value: ${{ steps.gate.outputs.new }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install the SiteCMD CLI
+      shell: bash
+      env:
+        SITECMD_VERSION: ${{ inputs.version }}
+        SITECMD_INSTALL_DIR: ${{ runner.temp }}/sitecmd-bin
+      run: |
+        set -euo pipefail
+        if ! command -v minisign >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends minisign
+        fi
+        "$GITHUB_ACTION_PATH/../setup-sitecmd/install.sh"
+        echo "$SITECMD_INSTALL_DIR" >> "$GITHUB_PATH"
+
+    - name: Ask whether this branch may merge
+      id: gate
+      shell: bash
+      env:
+        SITECMD_CI_TOKEN: ${{ inputs.ci-token }}
+        SITECMD_CONNECTION_PASSPHRASE: ${{ inputs.passphrase }}
+        SITECMD_CONNECTION_EXPORT: ${{ inputs.connection-export }}
+        SITECMD_DB_PATH: ${{ runner.temp }}/sitecmd-gate/sitecmd.db
+        SITECMD_STRICT: ${{ inputs.strict }}
+        SITECMD_THRESHOLD: ${{ inputs.threshold }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/sitecmd-gate"
+        chmod 700 "${RUNNER_TEMP}/sitecmd-gate"
+        export_path="${RUNNER_TEMP}/sitecmd-gate/connection.json"
+        # The export carries a fingerprint key, so restrict it and always remove it.
+        umask 077
+        printf '%s' "$SITECMD_CONNECTION_EXPORT" > "$export_path"
+        trap 'rm -f "$export_path"' EXIT
+
+        strict_flag=()
+        if [ "$SITECMD_STRICT" = "true" ]; then strict_flag=(--strict); fi
+
+        set +e
+        summary=$(sitecmd gate \
+          --connection-export "$export_path" \
+          --threshold "$SITECMD_THRESHOLD" \
+          "${strict_flag[@]}")
+        status=$?
+        set -e
+        echo "$summary"
+
+        # Exit 1 blocks; exit 2 means the gate failed to produce a verdict.
+        case "$status" in
+          0) verdict=pass ;;
+          1) verdict=fail ;;
+          *) echo "::error::The SiteCMD gate could not run (exit $status)."; exit "$status" ;;
+        esac
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+        echo "new=$(printf '%s' "$summary" | head -n 1 | sed -n 's/.*: \([0-9]*\) new.*/\1/p')" \
+          >> "$GITHUB_OUTPUT"
+        {
+          echo "### SiteCMD gate: $verdict"
+          echo
+          echo '```'
+          echo "$summary"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit "$status"

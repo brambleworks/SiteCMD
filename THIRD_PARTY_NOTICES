@@ -1,0 +1,18 @@
+SiteCMD includes third-party material under its upstream license.
+
+This file identifies third-party material committed directly to this repository.
+Desktop distributions and CLI archives also include THIRD_PARTY_DEPENDENCIES.json,
+the union of resolved production dependencies shipped by the desktop, bundled MCP
+server, and CLI. It records each package's declared license expression and the
+upstream license files available in the installed package. THIRD_PARTY_LICENSES.txt
+contains those discovered files. CLI archives additionally include a
+platform-specific THIRD_PARTY_LICENSES.tsv dependency inventory.
+
+axe-core 4.11.2
+Copyright 2015-2026 Deque Systems, Inc.
+License: Mozilla Public License 2.0
+Source: https://github.com/dequelabs/axe-core
+Vendored file: apps/desktop/src-tauri/crates/engine/browser/axe.min.js
+
+The vendored file preserves Deque's copyright and license notice. The Mozilla
+Public License 2.0 is available at https://mozilla.org/MPL/2.0/.

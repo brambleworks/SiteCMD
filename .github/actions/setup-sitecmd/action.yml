@@ -1,0 +1,42 @@
+name: Set up SiteCMD CLI
+description: Install an exact SiteCMD CLI release after verifying its updater-key signature.
+
+inputs:
+  version:
+    description: >-
+      Exact release version to install. When omitted, use the version declared
+      by the pinned SiteCMD source revision containing this action.
+    required: false
+    default: ""
+  install-dir:
+    description: Destination directory. Defaults to a runner-temporary directory.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install the signature verifier
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v minisign >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends minisign
+        fi
+
+    - name: Download and verify the SiteCMD CLI
+      shell: bash
+      env:
+        SITECMD_VERSION: ${{ inputs.version }}
+        SITECMD_INSTALL_DIR: ${{ inputs.install-dir }}
+      run: "$GITHUB_ACTION_PATH/install.sh"
+
+    - name: Add SiteCMD to PATH
+      shell: bash
+      env:
+        SITECMD_INSTALL_DIR: ${{ inputs.install-dir }}
+      run: |
+        set -euo pipefail
+        install_dir="${SITECMD_INSTALL_DIR:-${RUNNER_TEMP}/sitecmd-bin}"
+        echo "$install_dir" >> "$GITHUB_PATH"

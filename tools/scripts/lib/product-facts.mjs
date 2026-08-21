@@ -1,0 +1,242 @@
+import { PRODUCT_SURFACE_STATUS } from "./product-surfaces.mjs";
+
+const TELEMETRY_WRAPPER = "apps/desktop/src/lib/telemetry.ts";
+const DEEP_LINKS = "apps/desktop/src-tauri/src/desktop_deep_links.rs";
+const COMMERCIAL_MODEL = "apps/desktop/src/lib/commercial-model.json";
+const POLISH_SIGNALS = "apps/desktop/src/generated/polish_signal_manifest.json";
+const ANALYZER = "apps/desktop/src-tauri/src/webview/analyzer.rs";
+const AGENT = "apps/desktop/src-tauri/crates/engine/src/agent.rs";
+const PROBE = "apps/desktop/src-tauri/crates/engine/src/probe.rs";
+const EXPOSED_FILES = "apps/desktop/src-tauri/crates/engine/src/checks/security/exposed_files.rs";
+const CONSTANTS = "apps/desktop/src-tauri/src/constants.rs";
+const CSS_FETCH = "apps/desktop/src-tauri/src/checks/polish/css_fetch.rs";
+
+const SUBRESOURCE_DISCLAIMER = "Tauri does not expose external subresource interception";
+
+function extract(source, pattern, label, file) {
+  const match = source.match(pattern);
+  if (!match) {
+    throw new Error(
+      `product-facts: could not find ${label} in ${file}; update lib/product-facts.mjs`,
+    );
+  }
+  return match[1];
+}
+
+const AXE_WCAG_A_AA_RULES = 55;
+const DEPENDENCY_ENGINE_ECOSYSTEMS = 8;
+
+/** Returns production Rust source before its first inline test module. */
+export function productionHalf(source) {
+  for (const hit of source.matchAll(/#\[cfg\(test\)\]/g)) {
+    let rest = source.slice(hit.index + hit[0].length);
+    for (;;) {
+      const attr = /^\s*#\[[^\]]*\]/.exec(rest);
+      if (attr === null) break;
+      rest = rest.slice(attr[0].length);
+    }
+    rest = rest.trimStart();
+    if (rest.startsWith("pub")) {
+      rest = rest.slice(3);
+      if (rest.startsWith("(")) {
+        const close = rest.indexOf(")");
+        if (close === -1) continue;
+        rest = rest.slice(close + 1);
+      }
+      if (!/^\s/.test(rest)) continue;
+      rest = rest.trimStart();
+    }
+    if (!/^mod\s/.test(rest)) continue;
+    rest = rest.slice(3).trimStart();
+    const name = /^[A-Za-z_][A-Za-z0-9_]*/.exec(rest);
+    if (name === null) continue;
+    if (rest.slice(name[0].length).trimStart().startsWith("{")) {
+      return source.slice(0, hit.index);
+    }
+  }
+  return source;
+}
+
+/** The desktop's check tree and the engine crate's, which modules move into. */
+export const WEB_CHECK_TREES = {
+  desktop: "apps/desktop/src-tauri/src/checks",
+  engine: "apps/desktop/src-tauri/crates/engine/src/checks",
+};
+
+/** Maps emitted web check ids to their source files. */
+export function webCheckIdSources(read, listFiles, trees = Object.values(WEB_CHECK_TREES)) {
+  const sources = new Map();
+  for (const tree of trees) {
+    for (const file of listFiles(tree, (f) => f.endsWith(".rs") && !f.endsWith("_tests.rs"))) {
+      const source = productionHalf(read(file));
+      const add = (id) => sources.set(id, [...(sources.get(id) ?? []), file]);
+      for (const [, id] of source.matchAll(/fn id\(&self\) -> &str \{\s*"([^"]+)"/g)) add(id);
+      for (const [, id] of source.matchAll(/check_id: "([^"]+)"/g)) add(id);
+      for (const [, name, id] of source.matchAll(
+        /const ([A-Z_]*CHECK_IDS?[A-Z_]*): &str = "([^"]+)"/g,
+      )) {
+        if (name.endsWith("_PREFIX")) continue;
+        add(id);
+      }
+    }
+  }
+  return sources;
+}
+
+/** Namespace constants (`accessibility.axe.`) whose real ids are dynamic. */
+export function webCheckIdPrefixes(read, listFiles, trees = Object.values(WEB_CHECK_TREES)) {
+  const prefixes = new Map();
+  for (const tree of trees) {
+    for (const file of listFiles(tree, (f) => f.endsWith(".rs") && !f.endsWith("_tests.rs"))) {
+      for (const [, , id] of productionHalf(read(file)).matchAll(
+        /const ([A-Z_]*CHECK_ID_PREFIX): &str = "([^"]+)"/g,
+      )) {
+        prefixes.set(id, file);
+      }
+    }
+  }
+  return prefixes;
+}
+
+/** Derives the public check total from the owning engine sources. */
+export function deriveCheckCounts(read, listFiles) {
+  const ids = webCheckIdSources(read, listFiles);
+
+  const polishSource = read("apps/desktop/src-tauri/src/checks/polish/mod.rs");
+  const start = polishSource.indexOf("pub fn run_all_signals");
+  const polishBody = polishSource.slice(start, polishSource.indexOf("\n}", start));
+  const polish = [...polishBody.matchAll(/^\s+[a-z_]+::[a-z_]+\(ctx\),/gm)].length;
+
+  const registry = read("apps/desktop/src-tauri/src/core/code_scan/registry.rs");
+  const codeScan = [...registry.matchAll(/^\s*d\("[a-z0-9-]+"/gm)].length;
+
+  return {
+    web: ids.size,
+    polish,
+    codeScan,
+    axe: AXE_WCAG_A_AA_RULES,
+    dependencyEcosystems: DEPENDENCY_ENGINE_ECOSYSTEMS,
+    total: ids.size + polish + codeScan + AXE_WCAG_A_AA_RULES + DEPENDENCY_ENGINE_ECOSYSTEMS,
+  };
+}
+
+/** Reads the analyzer protections promised by the public disclosure. */
+function analyzerProtections(read) {
+  const source = read(ANALYZER);
+  const prose = source.replace(/^\s*\/\/+/gm, " ").replace(/\s+/g, " ");
+  return {
+    validatesScanTarget: source.includes("validate_url_target_blocking"),
+    revalidatesNavigations: source.includes("on_navigation"),
+    usesRedirectPolicy: source.includes("UrlPolicy::Redirect"),
+    isPrivateWindow: source.includes("incognito(true)"),
+    deniesNewWindows: source.includes("NewWindowResponse::Deny"),
+    refusesDownloads: source.includes("on_download(|_, _| false)"),
+    disclaimsSubresourceInterception: prose.includes(SUBRESOURCE_DISCLAIMER),
+  };
+}
+
+/** Evaluates the simple numeric expressions used by Rust constants. */
+function rustNumber(source, name, file) {
+  const expression = extract(
+    source,
+    new RegExp(`const ${name}\\b[^=]*=\\s*([^;]+);`),
+    name,
+    file,
+  ).trim();
+  const seconds = expression.match(/from_secs\((\d+)\)/);
+  const factors = (seconds ? seconds[1] : expression).split("*").map((part) => Number(part.trim()));
+  if (factors.some((factor) => !Number.isFinite(factor))) {
+    throw new Error(`product-facts: ${name} in ${file} is no longer a plain number: ${expression}`);
+  }
+  return factors.reduce((product, factor) => product * factor, 1);
+}
+
+function scannerIdentity(read) {
+  const agentSource = read(AGENT);
+  const docsUrl = extract(
+    agentSource,
+    /SCANNER_DOCS_URL: &str = "([^"]+)"/,
+    "SCANNER_DOCS_URL",
+    AGENT,
+  );
+  const userAgentFormat = extract(
+    agentSource,
+    /format!\("([^"]+)"\)/,
+    "the User-Agent format string",
+    AGENT,
+  ).replace("{SCANNER_DOCS_URL}", docsUrl);
+
+  const methodBlock = extract(
+    read(PROBE),
+    /pub enum ProbeMethod \{([^}]*)\}/,
+    "the ProbeMethod variants",
+    PROBE,
+  );
+  const methods = [...methodBlock.matchAll(/^\s*(\w+),/gm)].map(([, variant]) =>
+    variant.toUpperCase(),
+  );
+  if (methods.length === 0) {
+    throw new Error(`product-facts: no ProbeMethod variants found in ${PROBE}`);
+  }
+
+  const pathBlock = extract(
+    read(EXPOSED_FILES),
+    /SENSITIVE_PATHS: &\[\(&str, &str, Severity\)\] = &\[([\s\S]*?)\n\];/,
+    "SENSITIVE_PATHS",
+    EXPOSED_FILES,
+  );
+  const sensitivePaths = [
+    ...pathBlock.matchAll(/\(\s*"([^"]+)",\s*"([^"]+)",\s*Severity::(\w+)\s*,?\s*\)/g),
+  ].map(([, path, description, severity]) => ({
+    path,
+    description,
+    severity: severity.toLowerCase(),
+  }));
+  if (sensitivePaths.length === 0) {
+    throw new Error(`product-facts: no SENSITIVE_PATHS entries found in ${EXPOSED_FILES}`);
+  }
+
+  const constants = read(CONSTANTS);
+  return {
+    docsUrl,
+    userAgentFormat,
+    methods,
+    sensitivePaths,
+    limits: {
+      redirectHops: rustNumber(constants, "MAX_REDIRECT_HOPS", CONSTANTS),
+      checkTimeoutSeconds: rustNumber(constants, "CHECK_TIMEOUT", CONSTANTS),
+      pageBodyMaxBytes: rustNumber(constants, "MAX_BODY_SIZE", CONSTANTS),
+      probeBodyMaxBytes: rustNumber(constants, "MAX_PROBE_BODY_SIZE", CONSTANTS),
+      assetSampleLimit: rustNumber(constants, "ASSET_SAMPLE_LIMIT", CONSTANTS),
+      stylesheetMaxCount: rustNumber(read(CSS_FETCH), "MAX_CSS_FILES", CSS_FETCH),
+    },
+  };
+}
+
+export function productFacts(read, listFiles) {
+  return {
+    sentryIngestHost: extract(
+      read(TELEMETRY_WRAPPER),
+      /SENTRY_INGEST_HOST = "([^"]+)"/,
+      "SENTRY_INGEST_HOST",
+      TELEMETRY_WRAPPER,
+    ),
+    licenseActivateScheme: extract(
+      read(DEEP_LINKS),
+      /LICENSE_ACTIVATE_SCHEME: &str = "([^"]+)"/,
+      "LICENSE_ACTIVATE_SCHEME",
+      DEEP_LINKS,
+    ),
+    commercialModel: JSON.parse(read(COMMERCIAL_MODEL)),
+    productSurfaceStatus: PRODUCT_SURFACE_STATUS,
+    checkCounts: deriveCheckCounts(read, listFiles),
+    polishSignals: JSON.parse(read(POLISH_SIGNALS)).signals,
+    telemetryEnvelopeTierIsPlaceholder: /tier:\s*"unknown"/.test(
+      read(TELEMETRY_WRAPPER).slice(read(TELEMETRY_WRAPPER).indexOf("function buildEnvelope")),
+    ),
+    analyzerProtections: analyzerProtections(read),
+    scannerIdentity: scannerIdentity(read),
+  };
+}
+
+export const PRODUCT_FACTS_FILE = "product-facts.json";

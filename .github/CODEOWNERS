@@ -1,0 +1,48 @@
+# GitHub CODEOWNERS - https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customization/customizing-your-repository/about-code-owners
+#
+# The repository ruleset must enable code-owner review for these patterns.
+# While there is one maintainer, this records responsibility and prevents
+# sensitive paths from entering an automated merge class.
+
+# Ownership and repository automation.
+/.github/                                  @brambleworks
+/renovate.json                             @brambleworks
+/lefthook.yml                              @brambleworks
+/package.json                              @brambleworks
+/pnpm-lock.yaml                            @brambleworks
+/pnpm-workspace.yaml                       @brambleworks
+
+# Publication, license, and security policy.
+/LICENSE                                   @brambleworks
+/NOTICE                                    @brambleworks
+/THIRD_PARTY_NOTICES                       @brambleworks
+/THIRD_PARTY_DEPENDENCIES.json             @brambleworks
+/THIRD_PARTY_LICENSES.txt                  @brambleworks
+/SECURITY.md                               @brambleworks
+/GOVERNANCE.md                             @brambleworks
+
+# Guardrails and release tooling.
+/install.sh                                @brambleworks
+/tools/scripts/                            @brambleworks
+
+# Desktop security boundaries.
+/apps/desktop/package.json                 @brambleworks
+/apps/desktop/src-tauri/Cargo.toml         @brambleworks
+/apps/desktop/src-tauri/Cargo.lock         @brambleworks
+/apps/desktop/src-tauri/build.rs           @brambleworks
+/apps/desktop/src-tauri/tauri.conf.json    @brambleworks
+/apps/desktop/src-tauri/branding/          @brambleworks
+/apps/desktop/src-tauri/capabilities/      @brambleworks
+/apps/desktop/src-tauri/permissions/       @brambleworks
+/apps/desktop/src-tauri/src/network_policy.rs @brambleworks
+/apps/desktop/src-tauri/src/commands/privileged_command_broker/ @brambleworks
+/apps/desktop/src-tauri/src/licensing/     @brambleworks
+/apps/desktop/src-tauri/src/updates/       @brambleworks
+/apps/desktop/src-tauri/src/catalog/       @brambleworks
+/apps/desktop/src-tauri/src/commands/telemetry.rs @brambleworks
+/apps/desktop/src-tauri/src/commands/telemetry_schema.rs @brambleworks
+/apps/desktop/src/lib/telemetry*           @brambleworks
+/apps/desktop/src/lib/scan-telemetry*      @brambleworks
+/apps/desktop/src/lib/commands/telemetry.ts @brambleworks
+/apps/desktop/src/components/privacy/      @brambleworks
+/apps/mcp-server/package.json              @brambleworks

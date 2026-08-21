@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Initial page (everything index.html loads before first paint)",
+    "path": [
+      "dist/assets/index-*.js",
+      "dist/assets/rolldown-runtime-*.js",
+      "dist/assets/vendor-react-*.js",
+      "dist/assets/vendor-tauri-*.js",
+      "dist/assets/vendor-icons-*.js",
+      "dist/assets/commands-*.js",
+      "dist/assets/format-*.js",
+      "dist/assets/severity-*.js",
+      "dist/assets/store-*.js",
+      "!dist/assets/vendor-react-pdf-*.js"
+    ],
+    "limit": "115 kB",
+    "gzip": true
+  },
+  {
+    "name": "Total app JS (excluding lazy pdf renderer)",
+    "path": ["dist/assets/*.js", "!dist/assets/vendor-react-pdf-core-*.js"],
+    "limit": "615 kB",
+    "gzip": true
+  },
+  {
+    "name": "Dossier rail lazy chunk",
+    "path": "dist/assets/DossierRailDetails-*.js",
+    "limit": "10 kB",
+    "gzip": true
+  },
+  {
+    "name": "PDF renderer chunk (lazy)",
+    "path": "dist/assets/vendor-react-pdf-core-*.js",
+    "limit": "500 kB",
+    "gzip": true
+  }
+]

@@ -1,0 +1,120 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+**/dist/
+dist-ssr/
+target/
+**/target/
+build/
+__pycache__/
+*.py[cod]
+**/.astro/
+**/.wrangler/
+
+# Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/WixTools/
+apps/desktop/src-tauri/gen/
+
+# Environment
+.env*
+!.env.example
+!.env.*.example
+*.local
+
+# Credentials and local data
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Temporary and backup files
+*.bak
+*.orig
+*.rej
+*.tmp
+*.temp
+*.pid
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Editor swap files
+*.swp
+*.swo
+*.sw?
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local agents, design tools, and session state. These match at every depth,
+# not just the repository root - an agent run inside apps/<name>/ drops the same
+# directories there.
+.agents/
+.bg-shell/
+.claude/
+.codex/
+.cursor/
+.design-sync/
+.gemini/
+.gsd/
+.impeccable/
+.superpowers/
+.ds-sync/
+ds-bundle/
+
+# Browser automation, generated reports, and working exports
+.artifacts/
+artifacts/
+design/
+planning/
+docs/audit/
+docs/superpowers/
+docs/qa/acceptance-reviews/
+output/
+.playwright-cli/
+playwright-report/
+**/playwright-report/
+.playwright-mcp/
+**/.playwright-mcp/
+test-results/
+**/test-results/
+coverage/
+**/coverage/
+
+# Rust coverage artifacts
+apps/desktop/src-tauri/lcov.info
+apps/desktop/src-tauri/coverage-summary.txt
+
+# Design import scratch files
+apps/desktop/.ds-theme.css
+apps/desktop/.ds-entry.tsx
+apps/desktop/.ds-tsconfig.json
+apps/desktop/.ds-fonts/

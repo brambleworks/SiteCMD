@@ -1,0 +1,295 @@
+import { useEffect } from "react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { invokeMock, safeListenMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  safeListenMock: vi.fn(),
+}));
+
+vi.mock("@/lib/tauri-invoke", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock("@/lib/tauri-events", () => ({
+  safeListen: (...args: unknown[]) => safeListenMock(...args),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: vi.fn(async () => {}),
+}));
+
+import { useAppShellOrchestration } from "./useAppShellOrchestration";
+import {
+  ProjectProvider,
+  useProject,
+  type EnvironmentRecord,
+  type ProjectRecord,
+} from "./useProject";
+import { resetActiveSelectionForTest, setActiveSelection } from "@/lib/active-selection-store";
+import { createTestQueryClient } from "@/test-utils/query-client";
+
+type ListenHandler = (event: { payload: unknown }) => void;
+
+const registeredHandlers = new Map<string, ListenHandler[]>();
+let queryClient: QueryClient;
+
+function buildEnv(id: number, url: string): EnvironmentRecord {
+  return {
+    id,
+    url,
+    label: `Env ${id}`,
+    environment: "production",
+    source: "manual",
+    lastScannedAt: null,
+    latestScore: 84,
+  };
+}
+
+function buildProject(id: number): ProjectRecord {
+  return {
+    id,
+    name: `Project ${id}`,
+    path: `/tmp/project-${id}`,
+    framework: null,
+    createdAt: `2026-04-14T12:0${id}:00Z`,
+    environments: [buildEnv(id * 10 + 1, `https://project-${id}.example.com`)],
+  };
+}
+
+const navigateTo = vi.fn();
+const openTrayScanConfig = vi.fn();
+const showBackgroundedScan = vi.fn();
+const loadHistory = vi.fn();
+const selectProject = vi.fn();
+const refreshProjectsStub = vi.fn(async () => ({
+  projects: [] as ProjectRecord[],
+  newProject: null,
+}));
+const toast = { success: vi.fn(), info: vi.fn() };
+const desktopPrefs = {
+  backgroundMonitoring: false,
+  desktopNotifications: false,
+  fileWatchSuggestions: false,
+  refreshOnFocus: true,
+};
+const normalizeUrl = (value?: string | null) => value ?? null;
+const loadPrimaryWorkflowCue = vi.fn(async () => null);
+
+function buildHookOptions(overrides: { projects: ProjectRecord[] }) {
+  return {
+    ...overrides,
+    projectsLoading: false,
+    refreshProjects: refreshProjectsStub,
+    selectProject,
+    navigateTo,
+    openTrayScanConfig,
+    showBackgroundedScan,
+    loadHistory,
+    toast,
+    desktopPrefs,
+    normalizeUrl,
+    loadPrimaryWorkflowCue,
+  };
+}
+
+const latest: {
+  projects: ProjectRecord[];
+  activeProject: ProjectRecord | null;
+  activeEnv: EnvironmentRecord | null;
+  projectsLoading: boolean;
+} = {
+  projects: [],
+  activeProject: null,
+  activeEnv: null,
+  projectsLoading: true,
+};
+
+function OrchestrationHarness() {
+  const { activeEnv, activeProject, projects, projectsLoading, refreshProjects, selectProject } =
+    useProject();
+  useEffect(() => {
+    latest.projects = projects;
+    latest.activeProject = activeProject;
+    latest.activeEnv = activeEnv;
+    latest.projectsLoading = projectsLoading;
+  });
+  useAppShellOrchestration({
+    projects,
+    projectsLoading,
+    refreshProjects,
+    selectProject,
+    navigateTo,
+    openTrayScanConfig,
+    showBackgroundedScan,
+    loadHistory,
+    toast,
+    desktopPrefs,
+    normalizeUrl,
+    loadPrimaryWorkflowCue,
+  });
+  return null;
+}
+
+function getProjectsCallCount() {
+  return invokeMock.mock.calls.filter((call) => call[0] === "get_projects").length;
+}
+
+describe("useAppShellOrchestration listener stability", () => {
+  beforeEach(() => {
+    queryClient = createTestQueryClient();
+    registeredHandlers.clear();
+    invokeMock.mockReset();
+    safeListenMock.mockReset();
+    safeListenMock.mockImplementation(async (event: string, handler: ListenHandler) => {
+      const bucket = registeredHandlers.get(event) ?? [];
+      bucket.push(handler);
+      registeredHandlers.set(event, bucket);
+      return () => {};
+    });
+    navigateTo.mockClear();
+    openTrayScanConfig.mockClear();
+    showBackgroundedScan.mockClear();
+    loadHistory.mockClear();
+    selectProject.mockClear();
+    refreshProjectsStub.mockClear();
+    toast.success.mockClear();
+    toast.info.mockClear();
+    loadPrimaryWorkflowCue.mockClear();
+    window.localStorage.clear();
+    resetActiveSelectionForTest();
+    latest.projects = [];
+    latest.activeProject = null;
+    latest.activeEnv = null;
+    latest.projectsLoading = true;
+  });
+
+  it("startup runs one get_projects and registers each shell listener once", async () => {
+    const backendProjects = [buildProject(1), buildProject(2)];
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_projects") return JSON.parse(JSON.stringify(backendProjects));
+      throw new Error(`unmocked command: ${command}`);
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider>
+          <OrchestrationHarness />
+        </ProjectProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(latest.projectsLoading).toBe(false);
+      expect(latest.activeProject?.id).toBe(1);
+    });
+    await waitFor(() => {
+      expect(safeListenMock).toHaveBeenCalledTimes(5);
+    });
+    // Let any stray follow-up sync land before asserting the fetch count.
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(getProjectsCallCount()).toBe(1);
+    for (const handlers of registeredHandlers.values()) {
+      expect(handlers).toHaveLength(1);
+    }
+  });
+
+  it("window focus with unchanged data re-registers nothing and keeps identities", async () => {
+    const backendProjects = [buildProject(1), buildProject(2)];
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_projects") return JSON.parse(JSON.stringify(backendProjects));
+      throw new Error(`unmocked command: ${command}`);
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider>
+          <OrchestrationHarness />
+        </ProjectProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(latest.projectsLoading).toBe(false);
+      expect(latest.activeProject?.id).toBe(1);
+    });
+    await waitFor(() => {
+      expect(safeListenMock).toHaveBeenCalledTimes(5);
+    });
+
+    const registrationsBefore = safeListenMock.mock.calls.length;
+    const projectsBefore = latest.projects;
+    const activeProjectBefore = latest.activeProject;
+    const activeEnvBefore = latest.activeEnv;
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => {
+      expect(getProjectsCallCount()).toBe(2);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(safeListenMock.mock.calls.length).toBe(registrationsBefore);
+    expect(latest.projects).toBe(projectsBefore);
+    expect(latest.activeProject).toBe(activeProjectBefore);
+    expect(latest.activeEnv).toBe(activeEnvBefore);
+    expect(navigateTo).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("never re-registers on selection change and reads the current selection from the store at event time", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      throw new Error(`unmocked command: ${command}`);
+    });
+
+    const project = buildProject(1);
+    const firstEnv = project.environments[0];
+    setActiveSelection(project.id, firstEnv.url);
+
+    const { rerender } = renderHook((props) => useAppShellOrchestration(props), {
+      initialProps: buildHookOptions({ projects: [project] }),
+    });
+
+    await waitFor(() => {
+      expect(safeListenMock).toHaveBeenCalledTimes(5);
+    });
+
+    // A fresh props object must not tear listeners down.
+    rerender(buildHookOptions({ projects: [project] }));
+    expect(safeListenMock).toHaveBeenCalledTimes(5);
+
+    const secondEnv = buildEnv(99, "https://switched.example.com");
+    setActiveSelection(project.id, secondEnv.url);
+    rerender(buildHookOptions({ projects: [project] }));
+    expect(safeListenMock).toHaveBeenCalledTimes(5);
+
+    const scheduledHandlers = registeredHandlers.get("scheduled-scan-complete") ?? [];
+    expect(scheduledHandlers).toHaveLength(1);
+    await act(async () => {
+      scheduledHandlers[0]({
+        payload: {
+          projectId: project.id,
+          url: secondEnv.url,
+          score: 88,
+          issues: 2,
+          scanType: "health",
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(loadHistory).toHaveBeenCalledWith(secondEnv.url, project.id);
+    });
+  });
+});

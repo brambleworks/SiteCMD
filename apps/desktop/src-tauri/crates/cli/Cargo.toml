@@ -1,0 +1,22 @@
+[package]
+name = "sitecmd-cli"
+version = "1.5.4"
+description = "Headless SiteCMD CLI for Web Scan, Code Scan, and connected CI/CD"
+authors = ["Kyle Piontek (Brambleworks LLC)"]
+license = "Apache-2.0"
+publish = false
+edition = "2021"
+rust-version = "1.89.0"
+
+[features]
+default = []
+browser = ["app_lib/browser"]
+
+[[bin]]
+name = "sitecmd_cli"
+path = "src/main.rs"
+
+[dependencies]
+app_lib = { package = "sitecmd", path = "../..", default-features = false }
+env_logger = "0.11"
+tokio = { version = "1", features = ["rt-multi-thread"] }

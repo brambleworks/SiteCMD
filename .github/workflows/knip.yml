@@ -1,0 +1,59 @@
+name: knip
+
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/src/**"
+      - "apps/mcp-server/**"
+      - "tools/scripts/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "apps/desktop/package.json"
+      - "knip.config.ts"
+      - "apps/desktop/vite.config.ts"
+      - "apps/desktop/vitest.config.ts"
+      - "apps/desktop/tsconfig*.json"
+      - ".github/workflows/knip.yml"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: knip-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Detect unused files / deps
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build MCP output so knip can resolve test imports from dist.
+      - name: Build mcp-server (its tests import from dist/)
+        run: pnpm --filter sitecmd-mcp run build
+
+      - name: Run knip
+        # Export warnings have a separate ratchet; this command gates structural errors.
+        run: pnpm knip:files
+
+      - name: Check unused export ratchet
+        run: pnpm knip:exports-budget

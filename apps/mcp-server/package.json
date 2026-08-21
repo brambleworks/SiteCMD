@@ -1,0 +1,36 @@
+{
+  "name": "sitecmd-mcp",
+  "version": "1.5.4",
+  "private": true,
+  "description": "MCP server for SiteCMD - lets AI coding tools read scan results and fix issues",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.1"
+  },
+  "scripts": {
+    "build": "tsc && cp src/*.json dist/",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "test": "pnpm run build && node --test test/*.test.mjs",
+    "start": "node dist/index.js",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brambleworks/SiteCMD",
+    "directory": "apps/mcp-server"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "better-sqlite3": "^13.0.3",
+    "esbuild": "0.28.2",
+    "typescript": "~6.0.3"
+  }
+}

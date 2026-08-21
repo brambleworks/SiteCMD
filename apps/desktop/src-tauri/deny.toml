@@ -1,0 +1,60 @@
+# cargo-deny policy: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Cover the current desktop and CLI release targets.
+targets = [
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+all-features = false
+no-default-features = false
+
+[advisories]
+version = 2
+# Block vulnerabilities and yanks; limit unmaintained checks to direct dependencies.
+yanked = "deny"
+unmaintained = "workspace"
+# Keep justified exceptions synchronized with the cargo-audit allowlist.
+ignore = []
+
+[licenses]
+version = 2
+# Accepted dependency licenses; copyleft licenses require a scoped exception.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",     # webpki-roots (Mozilla CA bundle)
+    "Unicode-3.0",
+    "MPL-2.0",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+]
+confidence-threshold = 0.9
+unused-license-exception = "deny"
+# Exclude workspace-private crates, not third-party dependencies.
+private = { ignore = true }
+exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Internal path crates have no registry version; registry wildcards remain denied.
+allow-wildcard-paths = true
+deny = [
+]
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
