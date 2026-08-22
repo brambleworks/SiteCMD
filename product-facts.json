@@ -185,7 +185,11 @@
     "isPrivateWindow": true,
     "deniesNewWindows": true,
     "refusesDownloads": true,
-    "disclaimsSubresourceInterception": true
+    "disclaimsSubresourceInterception": true,
+    "privateNetworkSubresourceRulePlatforms": [
+      "macos",
+      "windows"
+    ]
   },
   "scannerIdentity": {
     "docsUrl": "https://sitecmd.com/scanner",

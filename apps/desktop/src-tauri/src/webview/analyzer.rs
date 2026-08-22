@@ -64,10 +64,12 @@ pub async fn analyze_url(
         return WebviewAnalysis::failed(format!("Refused to analyze URL: {}", error));
     }
     let allow_local_dev = crate::network_policy::scan_origin_allows_local_dev(&parsed_url);
+    let rules = super::private_network_rules::PrivateNetworkRules { allow_local_dev };
 
     let label = format!("analyzer-{}", chrono::Utc::now().timestamp_millis());
+    let blank = url::Url::parse("about:blank").expect("about:blank parses"); // allow-expect: compile-time literal URL
 
-    let webview = match WebviewWindowBuilder::new(app, &label, WebviewUrl::External(parsed_url))
+    let webview = match WebviewWindowBuilder::new(app, &label, WebviewUrl::External(blank))
         .title("SiteCMD Analyzer")
         .inner_size(1280.0, 800.0)
         .focused(false)
@@ -81,7 +83,9 @@ pub async fn analyze_url(
         .initialization_script(CWV_OBSERVER_SCRIPT)
         .on_navigation(move |target| {
             // Apply public redirect policy to every top-level navigation. Tauri
-            // does not expose external subresource interception here.
+            // does not expose external subresource interception here; the
+            // platform rules from install_private_network_rules cover
+            // subresources on macOS and Windows.
             let allowed = analyzer_navigation_allowed(target.as_str(), allow_local_dev);
             if !allowed {
                 tracing::warn!(
@@ -103,6 +107,35 @@ pub async fn analyze_url(
         Err(e) => return WebviewAnalysis::failed(format!("Failed to create webview: {}", e)),
     };
     let _ = webview.hide();
+
+    // Subresource rules must be live before the first byte of the target
+    // loads, so the webview starts blank and navigates only once the platform
+    // filter reports it is installed. A failed install fails the browser layer
+    // closed rather than scanning with the user's LAN position exposed.
+    let (ready_sender, ready_receiver) = tokio::sync::oneshot::channel::<bool>();
+    if let Err(error) = super::private_network_rules::install_private_network_rules(
+        &webview,
+        rules,
+        super::private_network_rules::RulesReady::new(ready_sender),
+    ) {
+        let _ = webview.close();
+        return WebviewAnalysis::failed(format!(
+            "Failed to install analyzer network rules: {error}"
+        ));
+    }
+    match tokio::time::timeout(crate::constants::WEBVIEW_PAGE_LOAD_WAIT, ready_receiver).await {
+        Ok(Ok(true)) => {}
+        _ => {
+            let _ = webview.close();
+            return WebviewAnalysis::failed(
+                "Analyzer private-network rules are unavailable".to_string(),
+            );
+        }
+    }
+    if let Err(error) = webview.navigate(parsed_url) {
+        let _ = webview.close();
+        return WebviewAnalysis::failed(format!("Failed to navigate analyzer: {error}"));
+    }
 
     wait_for_page_load(&webview).await;
     let browser_build = collect_browser_build(&webview).await;
@@ -162,8 +195,10 @@ async fn poll_webview<T>(
 }
 
 const READY_TITLE_PREFIX: &str = "___SHK_READY___";
-const READY_PROBE_SCRIPT: &str =
-    "if (document.readyState === 'complete') { document.title = '___SHK_READY___'; }";
+/// The analyzer starts on `about:blank` while the private-network rules
+/// compile, and that document is already complete, so readiness must exclude
+/// it or the scan would measure the blank page instead of the target.
+const READY_PROBE_SCRIPT: &str = "if (document.readyState === 'complete' && location.href !== 'about:blank') { document.title = '___SHK_READY___'; }";
 const BROWSER_UA_TITLE_PREFIX: &str = "___SHK_BROWSER_UA___";
 const BROWSER_UA_PROBE_SCRIPT: &str =
     "document.title = '___SHK_BROWSER_UA___' + navigator.userAgent;";
@@ -306,6 +341,9 @@ async fn run_axe_analysis(webview: &tauri::WebviewWindow) -> Result<AxeReport, S
 /// Only an explicitly local scan origin may navigate to loopback; a public
 /// origin cannot gain that exception through a redirect.
 fn analyzer_navigation_allowed(url: &str, allow_local_dev: bool) -> bool {
+    if url == "about:blank" {
+        return true;
+    }
     crate::network_policy::validate_url_blocking(
         url,
         crate::network_policy::UrlPolicy::Redirect { allow_local_dev },
@@ -339,7 +377,10 @@ fn browser_build_from_user_agent(engine: &str, user_agent: &str) -> Option<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{analyzer_navigation_allowed, browser_build_from_user_agent, poll_webview};
+    use super::{
+        analyzer_navigation_allowed, browser_build_from_user_agent, poll_webview,
+        READY_PROBE_SCRIPT,
+    };
     use std::time::Duration;
 
     #[tokio::test(start_paused = true)]
@@ -402,6 +443,18 @@ mod tests {
             false
         ));
         assert!(!analyzer_navigation_allowed("http://[::1]:3000/", false));
+    }
+
+    #[test]
+    fn readiness_probe_never_fires_on_the_blank_start_page() {
+        assert!(READY_PROBE_SCRIPT.contains("location.href !== 'about:blank'"));
+        assert!(READY_PROBE_SCRIPT.contains("document.readyState === 'complete'"));
+    }
+
+    #[test]
+    fn blank_start_page_is_always_allowed() {
+        assert!(analyzer_navigation_allowed("about:blank", false));
+        assert!(analyzer_navigation_allowed("about:blank", true));
     }
 
     #[test]

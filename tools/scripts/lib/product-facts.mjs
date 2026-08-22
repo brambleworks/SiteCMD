@@ -5,6 +5,7 @@ const DEEP_LINKS = "apps/desktop/src-tauri/src/desktop_deep_links.rs";
 const COMMERCIAL_MODEL = "apps/desktop/src/lib/commercial-model.json";
 const POLISH_SIGNALS = "apps/desktop/src/generated/polish_signal_manifest.json";
 const ANALYZER = "apps/desktop/src-tauri/src/webview/analyzer.rs";
+const PRIVATE_NETWORK_RULES = "apps/desktop/src-tauri/src/webview/private_network_rules.rs";
 const AGENT = "apps/desktop/src-tauri/crates/engine/src/agent.rs";
 const PROBE = "apps/desktop/src-tauri/crates/engine/src/probe.rs";
 const EXPOSED_FILES = "apps/desktop/src-tauri/crates/engine/src/checks/security/exposed_files.rs";
@@ -132,7 +133,18 @@ function analyzerProtections(read) {
     deniesNewWindows: source.includes("NewWindowResponse::Deny"),
     refusesDownloads: source.includes("on_download(|_, _| false)"),
     disclaimsSubresourceInterception: prose.includes(SUBRESOURCE_DISCLAIMER),
+    privateNetworkSubresourceRulePlatforms: analyzerRulePlatforms(read(PRIVATE_NETWORK_RULES)),
   };
+}
+
+/** Platforms with a real installer for the analyzer's private-network rules. */
+function analyzerRulePlatforms(rulesSource) {
+  const arms = [
+    ["macos", /#\[cfg\(target_os = "macos"\)\]\s*pub\(crate\) fn install_private_network_rules/],
+    ["windows", /#\[cfg\(windows\)\]\s*pub\(crate\) fn install_private_network_rules/],
+    ["linux", /#\[cfg\(target_os = "linux"\)\]\s*pub\(crate\) fn install_private_network_rules/],
+  ];
+  return arms.filter(([, pattern]) => pattern.test(rulesSource)).map(([platform]) => platform);
 }
 
 /** Evaluates the simple numeric expressions used by Rust constants. */

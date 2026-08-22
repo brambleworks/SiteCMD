@@ -148,8 +148,11 @@ reported, not retried against unseen state.
   reviewed, guardrail-marked transport requirement.
 - Validate scan targets, redirects, callbacks, webhooks, and sitemap fetches
   through `network_policy::validate_url` with the correct policy.
-- The webview gate covers targets and top-level navigation, not browser-engine
-  subresources. Public privacy copy must preserve that distinction.
+- The webview gate covers targets and top-level navigation. Platform content
+  rules block private-network subresources by IP literal and local name on
+  macOS and Windows only; a public hostname resolving to a private address,
+  WebRTC candidate gathering, and every Linux subresource are not covered.
+  Public privacy copy must preserve those distinctions.
 - Release API keys and OAuth tokens use the credential abstraction. Never add a
   production SQLite credential fallback.
 - Webhook HMAC uses `webhooks::compute_webhook_signature` and its OpenSSL

@@ -39,6 +39,12 @@ desktop = [
     "dep:tauri-plugin-autostart",
     "dep:tauri-plugin-single-instance",
     "dep:mac-notification-sys",
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-web-kit",
+    "dep:block2",
+    "dep:webview2-com",
+    "dep:windows",
 ]
 browser = ["dep:headless_chrome"]
 
@@ -121,6 +127,16 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"], option
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = { version = "0.6.12", optional = true }
+# Analyzer webview content rules (WKContentRuleList) for private-network subresources.
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController"] }
+block2 = { version = "0.6", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# Analyzer webview request filter (WebResourceRequested) for private-network subresources.
+webview2-com = { version = "0.38", optional = true }
+windows = { version = "0.61", optional = true, features = ["Win32_System_Com"] }
 
 [dev-dependencies]
 tauri = { version = "2.11.0", features = ["test"] }

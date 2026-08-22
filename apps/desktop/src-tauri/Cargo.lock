@@ -5137,6 +5137,7 @@ version = "1.0.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
+ "block2",
  "chrono",
  "criterion",
  "cvss",
@@ -5153,6 +5154,9 @@ dependencies = [
  "mac-notification-sys",
  "minisign-verify",
  "moka",
+ "objc2",
+ "objc2-foundation",
+ "objc2-web-kit",
  "open",
  "postgres",
  "regex",
@@ -5193,7 +5197,9 @@ dependencies = [
  "url",
  "urlencoding",
  "webpki-roots",
+ "webview2-com",
  "whoami",
+ "windows 0.61.3",
  "x509-parser",
  "zeroize",
 ]
