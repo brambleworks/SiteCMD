@@ -130,7 +130,7 @@ pub async fn analyze_url(
             "Failed to install analyzer network rules: {error}"
         ));
     }
-    match tokio::time::timeout(crate::constants::WEBVIEW_PAGE_LOAD_WAIT, ready_receiver).await {
+    match tokio::time::timeout(crate::constants::WEBVIEW_RULES_INSTALL_WAIT, ready_receiver).await {
         Ok(Ok(true)) => {}
         _ => {
             let _ = webview.close();

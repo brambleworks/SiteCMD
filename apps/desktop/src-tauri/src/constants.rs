@@ -215,6 +215,12 @@ pub const SUPERVISED_MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// Cap for waiting on the analyzer webview's ready state.
 pub const WEBVIEW_PAGE_LOAD_WAIT: Duration = Duration::from_secs(8);
 
+/// Cap for waiting on the analyzer webview's private-network rules to compile
+/// and install. Same budget as the page-load wait today, but a separate knob:
+/// rule compilation and page readiness fail for unrelated reasons, and the
+/// analyzer fails closed when this one expires.
+pub const WEBVIEW_RULES_INSTALL_WAIT: Duration = Duration::from_secs(8);
+
 /// Interval between analyzer webview polls (readyState probes, CWV title reads).
 pub const WEBVIEW_POLL_INTERVAL: Duration = Duration::from_millis(100);
 

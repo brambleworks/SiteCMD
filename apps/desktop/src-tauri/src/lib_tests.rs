@@ -824,7 +824,7 @@ fn git_is_spawned_only_by_the_hardened_runner() {
     );
     assert!(
         findings.is_empty(),
-        "git must be spawned only through core::git::run_git so every invocation carries the config and environment hardening: {:?}",
+        "git must be spawned only through core::git::run_git so every invocation carries the config and environment hardening. This scan covers src/ only, excluding files named *_tests.rs; crates/cli and crates/engine are not scanned: {:?}",
         findings,
     );
 }
@@ -1036,6 +1036,22 @@ fn production_half_retains_the_production_lines_of_every_source_file() {
         thin.is_empty(),
         "production_half must excise each inline test module and keep scanning, never truncate the file at the first one: {:?}",
         thin,
+    );
+}
+
+// The fail-closed wait on the private-network rules is its own budget. While
+// it shared WEBVIEW_PAGE_LOAD_WAIT, retuning page readiness silently retuned
+// how long the analyzer would wait before refusing to scan at all.
+#[test]
+fn the_analyzer_waits_on_rules_install_with_its_own_budget() {
+    let production = production_half(include_str!("webview/analyzer.rs"));
+    assert!(
+        production.contains("WEBVIEW_RULES_INSTALL_WAIT, ready_receiver"),
+        "the private-network rules wait must use constants::WEBVIEW_RULES_INSTALL_WAIT"
+    );
+    assert!(
+        crate::constants::WEBVIEW_RULES_INSTALL_WAIT > std::time::Duration::ZERO,
+        "a zero rules-install budget would fail every scan closed"
     );
 }
 
@@ -1386,13 +1402,50 @@ fn response_bodies_are_read_only_through_the_limited_readers() {
 
     assert!(
         unexpected.is_empty(),
-        "Read response bodies through http_client::read_json_limited or read_text_limited with a cap from constants.rs: {:?}",
+        "Read response bodies through http_client::read_json_limited or read_text_limited with a cap from constants.rs. This scan covers src/ only, excluding src/http_client.rs and files named *_tests.rs; crates/cli and crates/engine are not scanned: {:?}",
         unexpected,
     );
     assert!(
         listed_but_clean.is_empty(),
         "These files no longer contain uncapped reads; remove them from UNCAPPED_BODY_READ_FILES so the ratchet only moves toward zero: {:?}",
         listed_but_clean,
+    );
+}
+
+// The scan roots and the failure messages must not drift apart: a message
+// that claims wider coverage than the walk sends a reader hunting a violation
+// the scan never looks for. This pins what the messages now state.
+#[test]
+fn the_source_scans_cover_only_the_roots_their_messages_name() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest.join("src");
+    let commands_dir = src_dir.join("commands");
+    let crates_dir = manifest.join("crates");
+
+    let mut src_files = Vec::new();
+    rust_source_files(&src_dir, &mut src_files);
+    let mut command_files = Vec::new();
+    rust_source_files(&commands_dir, &mut command_files);
+    let mut crate_files = Vec::new();
+    rust_source_files(&crates_dir, &mut crate_files);
+
+    assert!(!src_files.is_empty(), "src/ scan found no files");
+    assert!(
+        !command_files.is_empty(),
+        "src/commands/ scan found no files"
+    );
+    assert!(
+        !crate_files.is_empty(),
+        "crates/ holds Rust sources the src/ scans never walk, which is exactly what their messages must keep saying"
+    );
+    assert!(
+        src_files.iter().all(|file| !file.starts_with(&crates_dir)),
+        "the git-spawn and uncapped-read scans walk src/ only, never crates/cli or crates/engine"
+    );
+    assert!(
+        command_files.len() < src_files.len()
+            && command_files.iter().all(|file| file.starts_with(&src_dir)),
+        "the inline-git scan walks src/commands/ only, a strict subset of src/"
     );
 }
 
@@ -1485,7 +1538,7 @@ fn sync_git_helpers_are_not_called_inline_from_async_commands() {
     }
     assert!(
         findings.is_empty(),
-        "sync git helpers block on a child process; call git::get_git_status_async or git::get_commits_since_async, or run the helper inside run_blocking: {:?}",
+        "sync git helpers block on a child process; call git::get_git_status_async or git::get_commits_since_async, or run the helper inside run_blocking. This scan covers src/commands/ only, excluding files named *_tests.rs: {:?}",
         findings,
     );
 }
