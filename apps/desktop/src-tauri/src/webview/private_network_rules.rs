@@ -25,9 +25,16 @@ pub(crate) struct PrivateNetworkRules {
 /// `regex` crate share: literals, character classes, groups, `*`, `+`, `?`,
 /// and anchors. WebKit rejects alternation, so every numeric range is spelled
 /// as its own pattern. Tests evaluate them with `regex` as the stand-in for
-/// WebKit. The IPv6 transition prefixes are blocked whole because a regex
-/// cannot decode the embedded IPv4 address; that is stricter than
-/// `network_policy`, never looser.
+/// WebKit.
+///
+/// A regex cannot decode the IPv4 address embedded in an IPv6 literal, so the
+/// transition prefixes are blocked whole: every `2002::/16` 6to4, every
+/// `2001:0::/32` Teredo, every `64:ff9b::/32` NAT64, and every `::`-prefixed
+/// literal is refused rather than only the ones carrying a private address.
+/// The bare `[::1]` loopback form is the one exception, because it stays
+/// gated by `LOOPBACK_HOSTS`. Blocking a Teredo or 6to4 subresource that
+/// happens to embed a public address is not a realistic loss. All of this is
+/// stricter than `network_policy`, never looser.
 const ALWAYS_BLOCKED_HOSTS: &[(&str, &str)] = &[
     ("rfc1918-10", r"10\.[0-9]+\.[0-9]+\.[0-9]+"),
     ("rfc1918-172-16", r"172\.1[6-9]\.[0-9]+\.[0-9]+"),
@@ -49,8 +56,13 @@ const ALWAYS_BLOCKED_HOSTS: &[(&str, &str)] = &[
     ("v6-unique-local", r"\[f[cd][0-9a-f]*:[^\]]*\]"),
     ("v6-link-local", r"\[fe[89ab][0-9a-f]:[^\]]*\]"),
     ("v6-mapped", r"\[::ffff:[0-9a-f.:]+\]"),
+    ("v6-unspecified", r"\[::\]"),
+    ("v6-compatible", r"\[::[02-9a-f][^\]]*\]"),
+    ("v6-compatible-past-one", r"\[::1[0-9a-f:][^\]]*\]"),
     ("v6-nat64", r"\[64:ff9b:[^\]]*\]"),
     ("v6-6to4", r"\[2002:[^\]]*\]"),
+    ("v6-teredo", r"\[2001:0:[^\]]*\]"),
+    ("v6-teredo-compressed", r"\[2001::[^\]]*\]"),
     ("v6-multicast", r"\[ff[0-9a-f][0-9a-f]:[^\]]*\]"),
     ("metadata", r"metadata\.google\.internal"),
 ];
@@ -310,26 +322,69 @@ mod tests {
         },
     ];
 
+    /// One representative literal per branch of
+    /// `network_policy::is_private_or_internal_ip`, so a branch that gains no
+    /// rule pattern fails the parity tests instead of passing unnoticed. The
+    /// two loopback branches live in `LOOPBACK_TARGETS` because they are the
+    /// only ones the local-dev mode may admit.
     const PRIVATE_TARGETS: &[&str] = &[
+        // IPv4 is_private
         "http://10.0.0.5/admin",
         "https://172.16.0.1:8443/x.css",
+        "http://172.20.0.1/",
+        "http://172.31.0.1/",
         "http://192.168.1.1/reboot",
+        // IPv4 is_link_local
         "http://169.254.169.254/latest/meta-data/",
+        // IPv4 is_unspecified, and the rest of 0.0.0.0/8
         "http://0.0.0.0:8080/",
+        "http://0.1.2.3/",
+        // IPv4 is_broadcast
+        "http://255.255.255.255/",
+        // IPv4 carrier-grade NAT
         "http://100.64.0.1/",
+        "http://100.127.0.1/",
+        // IPv4 IETF protocol assignments
         "http://192.0.0.9/",
+        // IPv4 benchmarking
         "http://198.18.0.1/",
+        // IPv4 is_multicast
         "http://224.0.0.1/",
+        "http://239.255.255.250/",
+        // IPv4 reserved 240.0.0.0/4
         "http://240.0.0.1/",
+        // IPv6 unique local
         "http://[fc00::1]/",
+        // IPv6 unicast link local
         "http://[fe80::1]/",
+        // IPv6 is_multicast
+        "http://[ff02::1]/",
+        // IPv6 is_unspecified
+        "http://[::]/",
+        // IPv6 embedded IPv4-mapped, in both spellings
         "http://[::ffff:10.0.0.1]/",
+        "http://[::ffff:a00:1]/",
+        // IPv6 embedded IPv4-compatible, private and loopback
+        "http://[::a00:1]/",
+        "http://[::7f00:1]/",
+        // IPv6 NAT64 well-known prefix
         "http://[64:ff9b::a00:1]/",
+        // IPv6 NAT64 local-use prefix
+        "http://[64:ff9b:1::808:808]/",
+        // IPv6 6to4
+        "http://[2002:a00:1::]/",
+        // IPv6 Teredo server address, then the inverted client address
+        "http://[2001:0:a00:1::]/",
+        "http://[2001:0:808:808::f5ff:fffe]/",
+        // Cloud metadata name
+        "http://metadata.google.internal/computeMetadata/v1/",
+        // Non-http schemes and userinfo reach the same decision
         "ws://10.0.0.5:9000/socket",
         "http://user:pass@10.0.0.5/",
-        "http://metadata.google.internal/computeMetadata/v1/",
     ];
 
+    /// The `is_loopback` branches for both address families. Public scans
+    /// refuse them; a scan whose own origin is loopback keeps them.
     const LOOPBACK_TARGETS: &[&str] = &[
         "http://127.0.0.1:5173/app.css",
         "http://localhost:3000/api",
@@ -345,9 +400,39 @@ mod tests {
         "https://198.17.0.1/",
         "https://192.0.1.1/",
         "https://[2606:4700::1111]/",
+        "https://[2001:4860:4860::8888]/",
         "https://localhost.run/",
         "https://127.0.0.1.example.com/",
     ];
+
+    /// WebKit's rule compiler accepts a strict subset of what the `regex`
+    /// crate parses, so a pattern the tests happily evaluate can still fail
+    /// the whole rule list at run time and take every macOS scan down with
+    /// it. Alternation, counted repetition, non-capturing groups, and any
+    /// escape outside the three used here are the ones that bite.
+    #[test]
+    fn every_filter_stays_inside_the_webkit_dialect() {
+        for rules in BOTH_MODES {
+            for filter in rules.url_filters() {
+                assert!(filter.starts_with('^'), "unanchored: {filter}");
+                for unsupported in ["|", "{", "(?"] {
+                    assert!(!filter.contains(unsupported), "{unsupported} in {filter}");
+                }
+                let bytes = filter.as_bytes();
+                for (index, byte) in bytes.iter().enumerate() {
+                    if *byte != b'\\' {
+                        continue;
+                    }
+                    let escaped = bytes.get(index + 1).copied().unwrap_or(b' ');
+                    assert!(
+                        matches!(escaped, b'.' | b'[' | b']'),
+                        "unsupported escape {} in {filter}",
+                        escaped as char
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn webkit_rules_block_everything_the_policy_refuses() {
