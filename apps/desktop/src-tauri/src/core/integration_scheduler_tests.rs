@@ -499,3 +499,111 @@ fn paid_cadence_is_unchanged() {
         base
     );
 }
+
+// credentials_from_configs: a plaintext SQLite credential left by a failed
+// keyring migration must never reach an adapter's outbound poll. This is the
+// pure core `resolve_credentials` delegates to (mirroring how
+// `github_context_from_configs` separates from `resolve_github_context`), so
+// it is testable without a live `AppHandle`.
+
+/// Counts audit-log lines matching both an op and an integration, so the
+/// assertion is immune to unrelated entries other tests append to the same
+/// process-wide file. These tests run as plain `#[test]` (no tokio runtime),
+/// so `audit_log::record`'s `Handle::try_current()` check fails and the write
+/// happens inline before `credentials_from_configs` returns - no race to poll
+/// for.
+fn count_audit_log_entries_for(op: &str, integration: &str) -> usize {
+    let Some(path) = crate::app_identity::default_storage_dir().map(|dir| dir.join("audit.log"))
+    else {
+        return 0;
+    };
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return 0;
+    };
+    let needle_op = format!(r#""op":"{op}""#);
+    let needle_integration = format!(r#""integration":"{integration}""#);
+    contents
+        .lines()
+        .filter(|line| line.contains(&needle_op) && line.contains(&needle_integration))
+        .count()
+}
+
+#[test]
+fn credentials_from_configs_refuses_unmigrated_plaintext_api_key() {
+    use crate::integrations::{IntegrationConfig, IntegrationType};
+
+    let config = IntegrationConfig {
+        integration_type: IntegrationType::Plausible,
+        api_key: Some("plausible-live-secret-value".to_string()),
+        site_id: Some("sitecmd.com".to_string()),
+        extra: None,
+        enabled: true,
+    };
+
+    let before = count_audit_log_entries_for("credential_refused_unmigrated", "plausible");
+
+    // get_api_key panics if called: once refused, the api_key no longer
+    // equals the placeholder, so that hydration path must never run. There is
+    // no `extra.tokens` here, so get_tokens still runs as the normal fallback
+    // and simulates the keychain having nothing either (the migration never
+    // completed, which is why the plaintext value was still in SQLite).
+    let creds = credentials_from_configs(
+        vec![config],
+        IntegrationType::Plausible,
+        None,
+        false,
+        keyring_untouched,
+        || Ok(None),
+    );
+
+    assert_eq!(
+        creds.api_key, None,
+        "a plaintext SQLite api_key must never reach the adapter poll"
+    );
+    let after = count_audit_log_entries_for("credential_refused_unmigrated", "plausible");
+    assert!(
+        after > before,
+        "expected a new credential_refused_unmigrated audit entry for plausible"
+    );
+}
+
+#[test]
+fn credentials_from_configs_refuses_unmigrated_plaintext_oauth_token() {
+    use crate::integrations::{IntegrationConfig, IntegrationType};
+
+    let config = IntegrationConfig {
+        integration_type: IntegrationType::GoogleSearchConsole,
+        api_key: None,
+        site_id: Some("https://sitecmd.com/".to_string()),
+        extra: Some(serde_json::json!({
+            "tokens": { "access_token": "gsc-live-oauth-secret" }
+        })),
+        enabled: true,
+    };
+
+    let before =
+        count_audit_log_entries_for("credential_refused_unmigrated", "googlesearchconsole");
+
+    // get_api_key panics if called: there is no api_key on this config, so
+    // the placeholder-hydration path must never run. get_tokens simulates
+    // the keychain having nothing either, matching a migration that never
+    // completed (the reason the plaintext token was still in SQLite).
+    let creds = credentials_from_configs(
+        vec![config],
+        IntegrationType::GoogleSearchConsole,
+        None,
+        false,
+        keyring_untouched,
+        || Ok(None),
+    );
+
+    assert_eq!(
+        creds.oauth_token, None,
+        "a plaintext SQLite OAuth token must never reach the adapter poll"
+    );
+    let after = count_audit_log_entries_for("credential_refused_unmigrated", "googlesearchconsole");
+    assert!(
+        after > before,
+        "expected a new credential_refused_unmigrated audit entry for googlesearchconsole"
+    );
+}

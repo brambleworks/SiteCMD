@@ -357,7 +357,7 @@ fn hardened_command_neutralizes_config_and_rebuilds_the_environment() {
     );
     assert_eq!(env.get("GIT_TERMINAL_PROMPT"), Some(&Some("0".to_string())));
     assert!(
-        env.get("PATH").is_some(),
+        env.contains_key("PATH"),
         "PATH must be re-added after env_clear or git cannot be found"
     );
     let allowed: std::collections::BTreeSet<&str> = GIT_INHERITED_ENV

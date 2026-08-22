@@ -85,6 +85,9 @@ pub(super) fn store_integration_secrets_with_durable_store<R: tauri::Runtime>(
 /// so the integration reports "reconnect" instead of running with a secret
 /// the keychain never accepted. Returns whether anything was refused.
 pub fn refuse_unmigrated_plaintext_secrets(config: &mut IntegrationConfig) -> bool {
+    // Vestigial while durable_secret_store_enabled() always returns true, but
+    // kept as the single switch if the durable store ever becomes conditional
+    // again.
     if !durable_secret_store_enabled() {
         return false;
     }
