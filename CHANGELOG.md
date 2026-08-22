@@ -11,6 +11,8 @@ public repository history.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-21
+
 ### Added
 
 - Initial public release of SiteCMD. The desktop app scans websites and linked
