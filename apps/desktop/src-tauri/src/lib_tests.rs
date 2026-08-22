@@ -239,10 +239,23 @@ fn rust_source_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// Production source before the first inline test module. Source-scanning
-/// guardrails use it so test-only spawns and reads do not count.
+/// Source with any inline test module removed. Finds the first
+/// `#[cfg(test)]` attribute that is followed, after optional whitespace and
+/// other attribute lines, by `mod <ident> {` (a module with a body), and
+/// returns everything before it. A `#[cfg(test)] mod tests;` declaration, or
+/// a `#[cfg(test)]` on a `use`, field, or function, does not match, so it
+/// cannot truncate a file's production code. Returns the source unchanged
+/// when no inline test module is present. Source-scanning guardrails use
+/// this so an inline test module's contents do not count as production.
 fn production_half(source: &str) -> &str {
-    source.split("#[cfg(test)]").next().unwrap_or(source)
+    let inline_test_module = regex::Regex::new(
+        r"#\[cfg\(test\)\](?:\s*#\[[^\]]*\])*\s*mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
+    )
+    .expect("inline test module pattern");
+    match inline_test_module.find(source) {
+        Some(found) => &source[..found.start()],
+        None => source,
+    }
 }
 
 fn tracing_instrument_attributes(source: &str) -> Vec<(usize, &str)> {
@@ -628,6 +641,44 @@ fn git_spawn_guard_detects_every_spelling() {
         assert!(spawn.is_match(source), "{source}");
     }
     assert!(!spawn.is_match(r#"Command::new("gitleaks")"#));
+}
+
+// Negative control: an external test-module declaration must not truncate
+// the production code that follows it.
+#[test]
+fn production_half_keeps_code_after_an_external_test_module_declaration() {
+    let source = concat!(
+        "#[cfg(test)]\n",
+        "mod tests;\n",
+        "\n",
+        "fn spawn_git() {\n",
+        "    Command::new(\"git\");\n",
+        "}\n",
+    );
+    assert!(
+        production_half(source).contains(r#"Command::new("git")"#),
+        "an external test module declaration must not truncate production code"
+    );
+}
+
+#[test]
+fn production_half_strips_an_inline_test_module() {
+    let source = concat!(
+        "fn production() {}\n",
+        "\n",
+        "#[cfg(test)]\n",
+        "mod tests {\n",
+        "    fn spawn_git() {\n",
+        "        Command::new(\"git\");\n",
+        "    }\n",
+        "}\n",
+    );
+    let half = production_half(source);
+    assert!(half.contains("fn production"));
+    assert!(
+        !half.contains(r#"Command::new("git")"#),
+        "an inline test module's contents must be stripped"
+    );
 }
 
 #[test]
