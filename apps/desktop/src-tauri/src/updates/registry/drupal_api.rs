@@ -135,7 +135,13 @@ async fn fetch_latest(
             status, module
         ));
     }
-    let body = resp.text().await.map_err(|e| e.to_string())?;
+    let body = crate::http_client::read_text_limited(
+        resp,
+        crate::constants::DRUPAL_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(build_update_from_response(name, current, source, &body))
 }
 

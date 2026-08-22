@@ -981,3 +981,78 @@ fn tracing_instrument_fields_do_not_record_raw_or_secretish_values() {
         findings,
     );
 }
+
+/// Files that still read a response body without a byte cap. Every listed
+/// file must keep at least one such read, so the list can only shrink as
+/// sites move to `http_client::read_json_limited`/`read_text_limited`. It
+/// reaches empty in the third body-cap commit and stays empty.
+const UNCAPPED_BODY_READ_FILES: &[&str] = &[
+    "src/integrations/bing.rs",
+    "src/integrations/cloudflare.rs",
+    "src/integrations/github.rs",
+    "src/integrations/github_issues.rs",
+    "src/integrations/google_analytics.rs",
+    "src/integrations/jira.rs",
+    "src/integrations/pagespeed.rs",
+    "src/integrations/plausible.rs",
+    "src/integrations/uptimerobot.rs",
+    "src/integrations/search_console/analytics.rs",
+    "src/integrations/search_console/inspection.rs",
+    "src/integrations/search_console/query_comparison.rs",
+    "src/integrations/search_console/sites.rs",
+    "src/licensing/api.rs",
+];
+
+#[test]
+fn response_bodies_are_read_only_through_the_limited_readers() {
+    let uncapped = regex::Regex::new(r"\.(?:json|text)(?:::<[^>]*>)?\(\)\s*\.await")
+        .expect("uncapped read pattern");
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+
+    let mut unexpected = Vec::new();
+    let mut listed_but_clean: Vec<&str> = UNCAPPED_BODY_READ_FILES.to_vec();
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        if relative == "src/http_client.rs" || relative.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        let hits = uncapped.find_iter(production_half(&source)).count();
+        if hits == 0 {
+            continue;
+        }
+        if UNCAPPED_BODY_READ_FILES.contains(&relative.as_str()) {
+            listed_but_clean.retain(|listed| *listed != relative);
+        } else {
+            unexpected.push(format!("{relative} ({hits})"));
+        }
+    }
+
+    assert!(
+        unexpected.is_empty(),
+        "Read response bodies through http_client::read_json_limited or read_text_limited with a cap from constants.rs: {:?}",
+        unexpected,
+    );
+    assert!(
+        listed_but_clean.is_empty(),
+        "These files no longer contain uncapped reads; remove them from UNCAPPED_BODY_READ_FILES so the ratchet only moves toward zero: {:?}",
+        listed_but_clean,
+    );
+}
+
+// Negative control: the pattern sees the turbofish and the multi-line form.
+#[test]
+fn uncapped_read_guard_detects_every_spelling() {
+    let uncapped = regex::Regex::new(r"\.(?:json|text)(?:::<[^>]*>)?\(\)\s*\.await")
+        .expect("uncapped read pattern");
+    assert!(uncapped.is_match("resp.json().await"));
+    assert!(uncapped.is_match("resp.json::<OsvVuln>().await"));
+    assert!(uncapped.is_match("resp\n        .text()\n        .await"));
+    assert!(!uncapped.is_match(".json(&body).send().await"));
+}
