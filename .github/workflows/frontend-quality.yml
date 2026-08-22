@@ -114,8 +114,10 @@ jobs:
           node-version: 22.22.1
           cache: pnpm
 
+      # This job deliberately runs the MCP server's minimum supported Node,
+      # below the repo's devEngines floor, so the engine gate is advisory here.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm --runtime-on-fail=warn install --frozen-lockfile
 
       - name: Test MCP server
-        run: pnpm --filter sitecmd-mcp run test
+        run: pnpm --runtime-on-fail=warn --filter sitecmd-mcp run test

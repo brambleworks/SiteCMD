@@ -616,7 +616,7 @@ jobs:
         run: |
           set -euo pipefail
           BUNDLE="$GITHUB_WORKSPACE/apps/desktop/src-tauri/target/${RUST_TARGET}/release/bundle"
-          DMG=$(ls "$BUNDLE"/dmg/*.dmg | head -1)
+          DMG=$(find "$BUNDLE/dmg" -name '*.dmg' -print -quit)
           MP=$(mktemp -d)
           hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MP" >/dev/null
           fail=0
