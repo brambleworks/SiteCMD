@@ -332,7 +332,7 @@ impl IntegrationScheduler {
             }
         };
         github_context_from_configs(
-            configs,
+            crate::keyring::without_unmigrated_plaintext_secrets(configs),
             || crate::keyring::get_api_key(app, db, project_id, "github"),
             || crate::keyring::get_tokens(app, db, project_id, "github"),
         )

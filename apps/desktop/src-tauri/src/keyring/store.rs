@@ -95,14 +95,43 @@ impl ReadFailureCache {
 
 static READ_FAILURES: LazyLock<ReadFailureCache> = LazyLock::new(ReadFailureCache::default);
 
-/// Use the OS keychain only in signed release builds.
-/// Debug builds use `DEBUG_SECRET_STORE` to avoid unstable-signature prompts.
-fn keyring_enabled() -> bool {
-    !cfg!(debug_assertions)
+/// Debug builds opt into the plaintext `dev-secrets.json` store by setting
+/// this variable to `1` before launch. Without it a debug build uses the OS
+/// keychain exactly like a release build. Tests always use the in-memory
+/// debug store and never touch the keychain.
+pub(crate) const DEV_PLAINTEXT_SECRETS_ENV: &str = "SITECMD_DEV_PLAINTEXT_SECRETS";
+
+#[cfg(debug_assertions)]
+fn dev_store_opted_in(value: Option<&str>, is_test: bool) -> bool {
+    is_test || value == Some("1")
 }
 
+#[cfg(debug_assertions)]
+fn plaintext_dev_store_enabled() -> bool {
+    static ENABLED: LazyLock<bool> = LazyLock::new(|| {
+        let value = std::env::var(DEV_PLAINTEXT_SECRETS_ENV).ok();
+        dev_store_opted_in(value.as_deref(), cfg!(test))
+    });
+    *ENABLED
+}
+
+/// Use the OS keychain unless a debug build explicitly opted into the
+/// plaintext dev store.
+fn keyring_enabled() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        !plaintext_dev_store_enabled()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        true
+    }
+}
+
+/// Both stores survive a restart (the keychain, or `dev-secrets.json` at
+/// mode 0600), so SQLite never needs to hold a plaintext credential.
 pub(super) fn durable_secret_store_enabled() -> bool {
-    keyring_enabled() || cfg!(test)
+    true
 }
 
 pub(super) fn secure_store_available_for_migration() -> bool {
@@ -317,5 +346,19 @@ mod read_failure_cache_tests {
         // read hits the OS keychain again instead of staying stuck unavailable.
         cache.clear(cloudflare);
         assert!(!cache.contains(cloudflare));
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod dev_store_gate_tests {
+    use super::dev_store_opted_in;
+
+    #[test]
+    fn plaintext_store_requires_an_explicit_opt_in_outside_tests() {
+        assert!(!dev_store_opted_in(None, false));
+        assert!(!dev_store_opted_in(Some("0"), false));
+        assert!(!dev_store_opted_in(Some("true"), false));
+        assert!(dev_store_opted_in(Some("1"), false));
+        assert!(dev_store_opted_in(None, true), "tests stay memory-only");
     }
 }

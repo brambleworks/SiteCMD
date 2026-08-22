@@ -572,3 +572,67 @@ fn migrate_restored_credentials_does_not_consult_legacy_id_keyring_entries() {
     delete_secret(app.handle(), &legacy_key_name(project_id, "github"))
         .expect("cleanup legacy api key");
 }
+
+#[test]
+fn hydrate_refuses_unmigrated_plaintext_credentials() {
+    let _guard = SECRET_TEST_GUARD.lock().expect("secret test guard");
+    #[cfg(debug_assertions)]
+    clear_debug_secret_store();
+
+    let app = mock_app();
+    let db = temp_db();
+    let project_id = db
+        .upsert_project("Unmigrated", "/tmp/unmigrated", Some("astro"))
+        .expect("project");
+    let mut config = IntegrationConfig {
+        integration_type: IntegrationType::Plausible,
+        api_key: Some("still-plaintext".to_string()),
+        site_id: Some("sitecmd.com".to_string()),
+        extra: Some(serde_json::json!({
+            "tokens": { "access_token": "still-plaintext" },
+            "label": "dev"
+        })),
+        enabled: true,
+    };
+
+    super::hydrate_integration_secrets(app.handle(), &db, project_id, &mut config);
+
+    assert_eq!(
+        config.api_key, None,
+        "a plaintext SQLite key must never be used once the durable store is the boundary"
+    );
+    assert!(config
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("tokens"))
+        .is_none());
+    assert_eq!(
+        config
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("label"))
+            .and_then(|value| value.as_str()),
+        Some("dev")
+    );
+}
+
+#[test]
+fn scheduler_configs_drop_unmigrated_plaintext_before_resolution() {
+    let plaintext = IntegrationConfig {
+        integration_type: IntegrationType::GitHub,
+        api_key: Some("ghp_plaintext".to_string()),
+        site_id: Some("owner/repo".to_string()),
+        extra: None,
+        enabled: true,
+    };
+    let placeholder = IntegrationConfig {
+        integration_type: IntegrationType::GitHub,
+        api_key: Some(KEYRING_PLACEHOLDER.to_string()),
+        site_id: Some("owner/repo".to_string()),
+        extra: None,
+        enabled: true,
+    };
+    let cleaned = super::without_unmigrated_plaintext_secrets(vec![plaintext, placeholder]);
+    assert_eq!(cleaned[0].api_key, None);
+    assert_eq!(cleaned[1].api_key.as_deref(), Some(KEYRING_PLACEHOLDER));
+}

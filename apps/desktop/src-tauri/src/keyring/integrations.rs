@@ -80,12 +80,63 @@ pub(super) fn store_integration_secrets_with_durable_store<R: tauri::Runtime>(
     Ok(sanitized)
 }
 
+/// A plaintext credential still in SQLite while the durable store is the
+/// boundary means a migration failed. It is never used: the value is dropped
+/// so the integration reports "reconnect" instead of running with a secret
+/// the keychain never accepted. Returns whether anything was refused.
+pub fn refuse_unmigrated_plaintext_secrets(config: &mut IntegrationConfig) -> bool {
+    if !durable_secret_store_enabled() {
+        return false;
+    }
+    let mut refused = false;
+    if config
+        .api_key
+        .as_deref()
+        .is_some_and(|key| !key.is_empty() && key != KEYRING_PLACEHOLDER)
+    {
+        config.api_key = None;
+        refused = true;
+    }
+    if let Some(serde_json::Value::Object(map)) = config.extra.as_mut() {
+        if map.remove("tokens").is_some() {
+            refused = true;
+        }
+    }
+    if refused {
+        let integration_type = integration_type_name(config);
+        tracing::warn!(
+            "Refusing unmigrated plaintext credential for {}; reconnect the integration",
+            integration_type
+        );
+        crate::audit_log::record(
+            "credential_refused_unmigrated",
+            serde_json::json!({ "integration": integration_type }),
+            "refused",
+        );
+    }
+    refused
+}
+
+/// `refuse_unmigrated_plaintext_secrets` over a loaded config list.
+pub fn without_unmigrated_plaintext_secrets(
+    configs: Vec<IntegrationConfig>,
+) -> Vec<IntegrationConfig> {
+    configs
+        .into_iter()
+        .map(|mut config| {
+            refuse_unmigrated_plaintext_secrets(&mut config);
+            config
+        })
+        .collect()
+}
+
 pub fn hydrate_integration_secrets<R: tauri::Runtime>(
     app: &AppHandle<R>,
     db: &crate::db::Database,
     project_id: i64,
     config: &mut IntegrationConfig,
 ) {
+    refuse_unmigrated_plaintext_secrets(config);
     let integration_type = integration_type_name(config);
 
     if config.api_key.as_deref() == Some(KEYRING_PLACEHOLDER) {
