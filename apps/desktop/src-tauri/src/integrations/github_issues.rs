@@ -122,10 +122,13 @@ pub async fn create_github_issue(
         return Err(format!("GitHub create issue returned {}", status));
     }
 
-    let created: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("GitHub create issue parse error: {}", e))?;
+    let created: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GITHUB_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("GitHub create issue parse error: {}", e))?;
 
     let number = created["number"]
         .as_u64()

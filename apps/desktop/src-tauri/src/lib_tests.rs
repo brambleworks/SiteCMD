@@ -987,15 +987,6 @@ fn tracing_instrument_fields_do_not_record_raw_or_secretish_values() {
 /// sites move to `http_client::read_json_limited`/`read_text_limited`. It
 /// reaches empty in the third body-cap commit and stays empty.
 const UNCAPPED_BODY_READ_FILES: &[&str] = &[
-    "src/integrations/bing.rs",
-    "src/integrations/cloudflare.rs",
-    "src/integrations/github.rs",
-    "src/integrations/github_issues.rs",
-    "src/integrations/google_analytics.rs",
-    "src/integrations/jira.rs",
-    "src/integrations/pagespeed.rs",
-    "src/integrations/plausible.rs",
-    "src/integrations/uptimerobot.rs",
     "src/integrations/search_console/analytics.rs",
     "src/integrations/search_console/inspection.rs",
     "src/integrations/search_console/query_comparison.rs",

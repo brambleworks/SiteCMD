@@ -125,14 +125,23 @@ pub async fn fetch_pagespeed_report(
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = crate::http_client::read_text_limited(
+            resp,
+            crate::constants::INTEGRATION_ERROR_BODY_MAX_BYTES,
+            crate::constants::BODY_READ_TIMEOUT,
+        )
+        .await
+        .unwrap_or_default();
         return Err(format_pagespeed_http_error(status, &body));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse PageSpeed response: {}", e))?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::PAGESPEED_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse PageSpeed response: {}", e))?;
 
     parse_psi_response(&json, url, strategy)
 }

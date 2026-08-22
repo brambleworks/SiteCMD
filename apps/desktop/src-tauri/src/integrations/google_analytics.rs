@@ -196,13 +196,23 @@ async fn run_report(
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = crate::http_client::read_text_limited(
+            resp,
+            crate::constants::INTEGRATION_ERROR_BODY_MAX_BYTES,
+            crate::constants::BODY_READ_TIMEOUT,
+        )
+        .await
+        .unwrap_or_default();
         return Err(format!("GA4 API returned {} - {}", status, body));
     }
 
-    resp.json()
-        .await
-        .map_err(|e| format!("GA4 parse error: {}", e))
+    crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GOOGLE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("GA4 parse error: {}", e))
 }
 
 fn parse_metric_u64(vals: &[serde_json::Value], idx: usize) -> u64 {
@@ -263,14 +273,23 @@ pub async fn list_properties(access_token: &str) -> Result<Vec<GA4Property>, Str
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = crate::http_client::read_text_limited(
+            resp,
+            crate::constants::INTEGRATION_ERROR_BODY_MAX_BYTES,
+            crate::constants::BODY_READ_TIMEOUT,
+        )
+        .await
+        .unwrap_or_default();
         return Err(format!("GA4 Admin API returned {} - {}", status, body));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("GA4 Admin parse error: {}", e))?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GOOGLE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("GA4 Admin parse error: {}", e))?;
 
     let mut properties = Vec::new();
     if let Some(accounts) = json["accountSummaries"].as_array() {

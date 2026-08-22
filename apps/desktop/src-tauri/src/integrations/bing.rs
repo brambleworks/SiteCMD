@@ -185,7 +185,13 @@ pub async fn fetch_search_stats(api_key: &str, site_url: &str) -> Result<BingSea
         .await
     {
         Ok(resp) if resp.status().is_success() => {
-            if let Ok(data) = resp.json::<serde_json::Value>().await {
+            if let Ok(data) = crate::http_client::read_json_limited::<serde_json::Value>(
+                resp,
+                crate::constants::BING_API_RESPONSE_MAX_BYTES,
+                crate::constants::BODY_READ_TIMEOUT,
+            )
+            .await
+            {
                 let (d, c, i) = parse_traffic_stats(&data);
                 daily_stats = d;
                 total_clicks = c;
@@ -194,7 +200,13 @@ pub async fn fetch_search_stats(api_key: &str, site_url: &str) -> Result<BingSea
         }
         Ok(resp) => {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            let body = crate::http_client::read_text_limited(
+                resp,
+                crate::constants::INTEGRATION_ERROR_BODY_MAX_BYTES,
+                crate::constants::BODY_READ_TIMEOUT,
+            )
+            .await
+            .unwrap_or_default();
             tracing::warn!(
                 "Bing traffic stats returned {}: {}",
                 status,
@@ -215,7 +227,13 @@ pub async fn fetch_search_stats(api_key: &str, site_url: &str) -> Result<BingSea
         .await
     {
         Ok(resp) if resp.status().is_success() => {
-            if let Ok(data) = resp.json::<serde_json::Value>().await {
+            if let Ok(data) = crate::http_client::read_json_limited::<serde_json::Value>(
+                resp,
+                crate::constants::BING_API_RESPONSE_MAX_BYTES,
+                crate::constants::BODY_READ_TIMEOUT,
+            )
+            .await
+            {
                 top_queries = aggregate_query_stats(&data);
             }
         }
@@ -231,7 +249,13 @@ pub async fn fetch_search_stats(api_key: &str, site_url: &str) -> Result<BingSea
         .await
     {
         Ok(resp) if resp.status().is_success() => {
-            if let Ok(data) = resp.json::<serde_json::Value>().await {
+            if let Ok(data) = crate::http_client::read_json_limited::<serde_json::Value>(
+                resp,
+                crate::constants::BING_API_RESPONSE_MAX_BYTES,
+                crate::constants::BODY_READ_TIMEOUT,
+            )
+            .await
+            {
                 top_pages = aggregate_page_stats(&data);
             }
         }
