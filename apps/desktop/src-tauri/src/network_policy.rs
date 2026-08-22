@@ -284,6 +284,7 @@ fn is_private_or_internal_ip(ip: IpAddr) -> bool {
                 || ip.is_multicast()
                 || is_unique_local_ipv6(ip)
                 || is_unicast_link_local_ipv6(ip)
+                || is_site_local_ipv6(ip)
                 || is_local_use_nat64(ip)
                 || embedded_ipv4_addresses(ip)
                     .into_iter()
@@ -329,6 +330,13 @@ fn is_unique_local_ipv6(ip: Ipv6Addr) -> bool {
 
 fn is_unicast_link_local_ipv6(ip: Ipv6Addr) -> bool {
     (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
+/// fec0::/10 site-local unicast (RFC 3879 deprecated it, stacks still route
+/// it). It sits just outside the fe80::/10 link-local mask, so it needs its
+/// own check rather than a wider mask that would also swallow fe00::/9.
+fn is_site_local_ipv6(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfec0
 }
 
 #[cfg(test)]
@@ -446,6 +454,32 @@ mod tests {
             validate_ip_target(IpAddr::V6(Ipv6Addr::LOCALHOST), UrlPolicy::ExternalCallback)
                 .is_err()
         );
+    }
+
+    // fec0::/10 sits outside the fe80::/10 link-local mask, so it needed its
+    // own branch; fe00::/9 and the public 2000::/3 space must stay allowed.
+    #[test]
+    fn ip_target_rejects_ipv6_site_local_addresses() {
+        for site_local in ["fec0::1", "feff:ffff::1", "fed0::8888"] {
+            assert!(
+                validate_ip_target(
+                    IpAddr::V6(site_local.parse::<Ipv6Addr>().unwrap()),
+                    UrlPolicy::ExternalCallback
+                )
+                .is_err(),
+                "{site_local} is site-local and must be refused"
+            );
+        }
+        for public in ["2606:4700::1111", "2001:4860:4860::8888"] {
+            assert!(
+                validate_ip_target(
+                    IpAddr::V6(public.parse::<Ipv6Addr>().unwrap()),
+                    UrlPolicy::ExternalCallback
+                )
+                .is_ok(),
+                "{public} is public and must stay allowed"
+            );
+        }
     }
 
     #[test]

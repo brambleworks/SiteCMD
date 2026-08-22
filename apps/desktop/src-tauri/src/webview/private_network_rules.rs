@@ -10,10 +10,18 @@
 
 use std::sync::{Arc, Mutex};
 
-/// Identifier under which WebKit caches the compiled rule list. Bump the
-/// suffix whenever the patterns change so a stale compiled list is not reused.
-#[cfg(target_os = "macos")]
-pub(crate) const PRIVATE_NETWORK_RULES_IDENTIFIER: &str = "sitecmd-private-network-v1";
+/// Identifier under which WebKit stores the compiled rule list.
+/// `compileContentRuleList(forIdentifier:)` always recompiles and overwrites
+/// whatever that identifier held (only `lookUpContentRuleList` returns a
+/// cached list), so two analyzer webviews compiling concurrently under one
+/// identifier would overwrite each other's document. The two `allow_local_dev`
+/// modes compile different documents and therefore get their own identifiers.
+/// Bump the version whenever the patterns change.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PRIVATE_NETWORK_RULES_IDENTIFIER_STRICT: &str = "sitecmd-private-network-v1-strict";
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PRIVATE_NETWORK_RULES_IDENTIFIER_LOCAL_DEV: &str = "sitecmd-private-network-v1-local-dev";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PrivateNetworkRules {
@@ -55,6 +63,7 @@ const ALWAYS_BLOCKED_HOSTS: &[(&str, &str)] = &[
     ("reserved-250", r"25[0-5]\.[0-9]+\.[0-9]+\.[0-9]+"),
     ("v6-unique-local", r"\[f[cd][0-9a-f]*:[^\]]*\]"),
     ("v6-link-local", r"\[fe[89ab][0-9a-f]:[^\]]*\]"),
+    ("v6-site-local", r"\[fe[cdef][0-9a-f]:[^\]]*\]"),
     ("v6-mapped", r"\[::ffff:[0-9a-f.:]+\]"),
     ("v6-unspecified", r"\[::\]"),
     ("v6-compatible", r"\[::[02-9a-f][^\]]*\]"),
@@ -87,13 +96,27 @@ impl PrivateNetworkRules {
     }
 
     /// One `url-filter` per host pattern: any scheme, optional userinfo, the
-    /// host, then the port, path, query, or fragment separator that always
-    /// follows a host in the canonical URL WebKit matches against.
+    /// host, an optional trailing dot, then the port, path, query, or fragment
+    /// separator that always follows a host in the canonical URL WebKit
+    /// matches against. WHATWG parsing keeps the trailing dot on a domain host
+    /// (`http://localhost./x`), and `network_policy` trims it before deciding,
+    /// so the filters must tolerate it or macOS would admit what every other
+    /// layer refuses.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn url_filters(self) -> Vec<String> {
         self.host_patterns()
-            .map(|(_, host)| format!(r"^[a-z][a-z0-9+.-]*://([^/?#@]*@)?({host})[:/?#]"))
+            .map(|(_, host)| format!(r"^[a-z][a-z0-9+.-]*://([^/?#@]*@)?({host})\.?[:/?#]"))
             .collect()
+    }
+
+    /// The identifier this mode's rule document is compiled under.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn rules_identifier(self) -> &'static str {
+        if self.allow_local_dev {
+            PRIVATE_NETWORK_RULES_IDENTIFIER_LOCAL_DEV
+        } else {
+            PRIVATE_NETWORK_RULES_IDENTIFIER_STRICT
+        }
     }
 
     /// The WKContentRuleList document WebKit compiles.
@@ -118,11 +141,13 @@ impl PrivateNetworkRules {
     /// The per-request decision the Windows filter applies: the same
     /// nonblocking policy the redirect and subresource checks use. Only
     /// network schemes are judged; `data:`, `blob:`, and `about:` carry no
-    /// network request.
+    /// network request and all parse. A URI that does not parse at all is
+    /// blocked: the filter cannot judge what it cannot read, and failing open
+    /// there would hand the page an unvetted request.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn blocks(self, raw_url: &str) -> bool {
         let Ok(mut url) = url::Url::parse(raw_url) else {
-            return false;
+            return true;
         };
         match url.scheme() {
             "http" | "https" => {}
@@ -165,6 +190,7 @@ pub(crate) fn install_private_network_rules(
     ready: RulesReady,
 ) -> Result<(), String> {
     let encoded_rules = rules.to_webkit_json();
+    let rules_identifier = rules.rules_identifier();
     webview
         .with_webview(move |platform| {
             use objc2::rc::Retained;
@@ -193,7 +219,7 @@ pub(crate) fn install_private_network_rules(
                 ready.signal(false);
                 return;
             };
-            let identifier = NSString::from_str(PRIVATE_NETWORK_RULES_IDENTIFIER);
+            let identifier = NSString::from_str(rules_identifier);
             let encoded = NSString::from_str(&encoded_rules);
             let completion =
                 block2::RcBlock::new(move |list: *mut WKContentRuleList, _error: *mut NSError| {
@@ -357,6 +383,9 @@ mod tests {
         "http://[fc00::1]/",
         // IPv6 unicast link local
         "http://[fe80::1]/",
+        // IPv6 site local (fec0::/10)
+        "http://[fec0::1]/",
+        "http://[feff:ffff::1]/",
         // IPv6 is_multicast
         "http://[ff02::1]/",
         // IPv6 is_unspecified
@@ -376,8 +405,9 @@ mod tests {
         // IPv6 Teredo server address, then the inverted client address
         "http://[2001:0:a00:1::]/",
         "http://[2001:0:808:808::f5ff:fffe]/",
-        // Cloud metadata name
+        // Cloud metadata name, bare and with the trailing dot WHATWG keeps
         "http://metadata.google.internal/computeMetadata/v1/",
+        "http://metadata.google.internal./v1",
         // Non-http schemes and userinfo reach the same decision
         "ws://10.0.0.5:9000/socket",
         "http://user:pass@10.0.0.5/",
@@ -390,6 +420,11 @@ mod tests {
         "http://localhost:3000/api",
         "http://app.localhost:3000/",
         "http://[::1]:3000/",
+        // WHATWG keeps the trailing dot on a domain host, so these reach the
+        // same loopback services under a spelling the filters must also see.
+        "http://localhost./x",
+        "http://localhost.:3000/x",
+        "http://app.localhost./x",
     ];
 
     const PUBLIC_TARGETS: &[&str] = &[
@@ -483,6 +518,58 @@ mod tests {
                 assert!(!rules.blocks(url), "{url}");
             }
         }
+    }
+
+    // A trailing dot survives WHATWG parsing on a domain host, so before this
+    // the macOS content rules admitted `http://localhost./x` while
+    // `network_policy` (which trims the dot) refused it.
+    #[test]
+    fn a_trailing_dot_does_not_slip_a_host_past_the_content_rules() {
+        let [public, local] = BOTH_MODES;
+        for url in [
+            "http://localhost./x",
+            "http://localhost.:3000/x",
+            "http://app.localhost./x",
+        ] {
+            assert!(webkit_blocks(public, url), "public: {url}");
+            assert!(!webkit_blocks(local, url), "local dev: {url}");
+        }
+        for rules in BOTH_MODES {
+            for url in [
+                "http://metadata.google.internal./v1",
+                "http://10.0.0.5./x",
+                "http://169.254.169.254./latest/",
+            ] {
+                assert!(rules.blocks(url), "policy: {url}");
+                assert!(webkit_blocks(rules, url), "webkit: {url}");
+            }
+            // A public host that merely starts with a blocked name still passes.
+            for url in ["https://localhost.run/", "https://127.0.0.1.example.com/"] {
+                assert!(!rules.blocks(url), "policy: {url}");
+                assert!(!webkit_blocks(rules, url), "webkit: {url}");
+            }
+        }
+    }
+
+    // The Windows filter cannot judge a URI it cannot read, and failing open
+    // there would hand the scanned page an unvetted request.
+    #[test]
+    fn an_unparseable_uri_is_blocked_under_both_modes() {
+        for rules in BOTH_MODES {
+            for raw in ["", "http://", "://nowhere", "http://[::1", "not a url"] {
+                assert!(rules.blocks(raw), "{raw:?} must fail closed");
+            }
+        }
+    }
+
+    // Two analyzer webviews can compile concurrently; one identifier for both
+    // documents would have each overwrite the other's rules.
+    #[test]
+    fn each_mode_compiles_under_its_own_identifier() {
+        let [public, local] = BOTH_MODES;
+        assert_ne!(public.rules_identifier(), local.rules_identifier());
+        assert!(public.rules_identifier().ends_with("-strict"));
+        assert!(local.rules_identifier().ends_with("-local-dev"));
     }
 
     #[test]
