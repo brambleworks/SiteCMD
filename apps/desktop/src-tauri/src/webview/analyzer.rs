@@ -144,7 +144,10 @@ pub async fn analyze_url(
         return WebviewAnalysis::failed(format!("Failed to navigate analyzer: {error}"));
     }
 
-    wait_for_page_load(&webview, &gate, &mut deferred).await;
+    if let Err(error) = wait_for_page_load(&webview, &gate, &mut deferred).await {
+        let _ = webview.close();
+        return WebviewAnalysis::failed(error);
+    }
     let browser_build = collect_browser_build(&webview).await;
 
     // Collect CWV data before running axe (axe manipulates the DOM which could affect CLS)
@@ -212,13 +215,14 @@ const BROWSER_UA_PROBE_SCRIPT: &str =
 
 /// Wait for page completion while admitting deferred redirect hops, then allow
 /// a short late-metric settle within the cap. Each deferred hop is
-/// DNS-validated on this runtime and re-navigated, and the chain stops after
-/// `MAX_REDIRECT_HOPS`.
+/// DNS-validated on this runtime and re-navigated; a hop that cannot be
+/// admitted, and the hop past `MAX_REDIRECT_HOPS`, end the wait with the
+/// failure the analysis reports.
 async fn wait_for_page_load(
     webview: &tauri::WebviewWindow,
     gate: &NavigationGate,
     deferred: &mut tokio::sync::mpsc::UnboundedReceiver<url::Url>,
-) {
+) -> Result<(), String> {
     // Each probe first reads the title (picking up the previous iteration's
     // eval), then issues the next readiness eval; eval results can't be read
     // back directly in Tauri v2.
@@ -238,10 +242,17 @@ async fn wait_for_page_load(
             _ = tokio::time::sleep(crate::constants::WEBVIEW_POLL_INTERVAL) => {}
             hop = deferred.recv() => match hop {
                 Some(hop) => {
-                    follow_deferred_hop(gate, hop, &mut hops, &mut |target| {
+                    let outcome = follow_deferred_hop(gate, hop, &mut hops, &mut |target| {
                         let _ = webview.navigate(target);
                     })
                     .await;
+                    if let Some(failure) = outcome.scan_failure() {
+                        return Err(failure);
+                    }
+                    // A local name is admitted without ever reaching the
+                    // resolver, so this arm can complete without suspending;
+                    // yield so a burst of hops cannot starve the runtime.
+                    tokio::task::yield_now().await;
                 }
                 None => tokio::time::sleep(crate::constants::WEBVIEW_POLL_INTERVAL).await,
             }
@@ -251,6 +262,7 @@ async fn wait_for_page_load(
     if ready {
         tokio::time::sleep(crate::constants::WEBVIEW_POST_LOAD_SETTLE).await;
     }
+    Ok(())
 }
 
 async fn collect_browser_build(webview: &tauri::WebviewWindow) -> Option<String> {
@@ -452,17 +464,56 @@ fn normalized_domain(url: &url::Url) -> Option<String> {
     }
 }
 
+/// `network_policy` reports a failed lookup with this prefix; every other
+/// error it returns is a policy refusal.
+const RESOLUTION_FAILURE_PREFIX: &str = "Could not resolve URL host";
+
 /// What the drain did with one deferred hop.
 #[derive(Debug, PartialEq, Eq)]
 enum HopOutcome {
     Followed,
-    Refused,
+    /// The hop passed the inline checks but resolved to an address the policy
+    /// refuses, so a public-looking hostname pointed into a private range.
+    RefusedByPolicy,
+    /// The hop's host did not resolve, so it can never be validated.
+    Unresolvable,
+    /// The cross-host redirect chain reached `MAX_REDIRECT_HOPS`.
     HopLimitReached,
 }
 
+impl HopOutcome {
+    /// The analysis failure this outcome reports, or `None` when the hop was
+    /// followed. A hop the runtime cannot admit leaves the analyzer unable to
+    /// reach its target, so the scan fails closed instead of reporting a
+    /// completed browser run with missing metrics.
+    fn scan_failure(&self) -> Option<String> {
+        match self {
+            Self::Followed => None,
+            Self::RefusedByPolicy => Some(
+                "Analyzer refused a redirect that resolved to a private network address"
+                    .to_string(),
+            ),
+            Self::Unresolvable => Some("Analyzer could not resolve a redirect target".to_string()),
+            Self::HopLimitReached => Some(format!(
+                "Analyzer stopped after {} cross-host redirects",
+                crate::constants::MAX_REDIRECT_HOPS
+            )),
+        }
+    }
+}
+
+/// Whether a refused admission was a failed lookup or a policy refusal.
+fn classify_admission_error(error: &str) -> HopOutcome {
+    if error.starts_with(RESOLUTION_FAILURE_PREFIX) {
+        HopOutcome::Unresolvable
+    } else {
+        HopOutcome::RefusedByPolicy
+    }
+}
+
 /// Validate one deferred hop on the async runtime and re-navigate to it. The
-/// hop counter is shared across the whole page load so a redirect chain
-/// cannot outlive `MAX_REDIRECT_HOPS`.
+/// hop counter is shared across the whole page load, so a chain of cross-host
+/// redirects cannot outlive `MAX_REDIRECT_HOPS`.
 async fn follow_deferred_hop(
     gate: &NavigationGate,
     hop: url::Url,
@@ -472,7 +523,7 @@ async fn follow_deferred_hop(
     *hops += 1;
     if *hops > crate::constants::MAX_REDIRECT_HOPS {
         tracing::warn!(
-            "Analyzer stopped following redirects after {} hops",
+            "Analyzer stopped following cross-host redirects after {} hops",
             *hops - 1
         );
         return HopOutcome::HopLimitReached;
@@ -488,7 +539,7 @@ async fn follow_deferred_hop(
                 crate::log_sanitizer::log_safe_url_target(hop.as_str()),
                 error
             );
-            HopOutcome::Refused
+            classify_admission_error(&error)
         }
     }
 }
@@ -518,178 +569,5 @@ fn browser_build_from_user_agent(engine: &str, user_agent: &str) -> Option<Strin
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        browser_build_from_user_agent, follow_deferred_hop, poll_webview, HopOutcome,
-        NavigationGate, READY_PROBE_SCRIPT,
-    };
-    use std::time::Duration;
-    use url::Url;
-
-    fn parse(url: &str) -> Url {
-        Url::parse(url).expect("test url")
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn poll_webview_returns_immediately_when_probe_is_ready() {
-        let start = tokio::time::Instant::now();
-        let result = poll_webview(Duration::from_millis(100), Duration::from_secs(8), || {
-            Some(42)
-        })
-        .await;
-        assert_eq!(result, Some(42));
-        assert_eq!(start.elapsed(), Duration::ZERO);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn poll_webview_returns_as_soon_as_probe_succeeds() {
-        let start = tokio::time::Instant::now();
-        let mut calls = 0;
-        let result = poll_webview(Duration::from_millis(100), Duration::from_secs(8), || {
-            calls += 1;
-            (calls >= 5).then_some(())
-        })
-        .await;
-        assert_eq!(result, Some(()));
-        // 5th probe fires after 4 sleeps: 400ms, nowhere near the 8s cap.
-        assert_eq!(start.elapsed(), Duration::from_millis(400));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn poll_webview_gives_up_at_the_cap() {
-        let start = tokio::time::Instant::now();
-        let result = poll_webview(Duration::from_millis(100), Duration::from_secs(1), || {
-            None::<()>
-        })
-        .await;
-        assert_eq!(result, None);
-        assert!(start.elapsed() <= Duration::from_secs(1));
-        assert!(start.elapsed() >= Duration::from_millis(900));
-    }
-
-    #[test]
-    fn gate_refuses_private_literals_inline_without_deferring() {
-        let (gate, mut deferred) = NavigationGate::new(&parse("https://example.com/"), false);
-        for url in [
-            "http://169.254.169.254/latest/meta-data/",
-            "http://192.168.1.1/",
-            "http://10.0.0.5/",
-            "http://172.16.0.1/",
-            "http://127.0.0.1:3000/",
-            "http://[::1]:3000/",
-            "http://localhost:3000/",
-            "http://metadata.google.internal/",
-        ] {
-            assert!(!gate.decide(&parse(url)), "{url}");
-        }
-        assert!(
-            deferred.try_recv().is_err(),
-            "literals and local names are decided inline, never deferred to DNS"
-        );
-    }
-
-    #[test]
-    fn gate_allows_the_origin_and_defers_unknown_hosts_until_dns_admits_them() {
-        let (gate, mut deferred) = NavigationGate::new(&parse("https://example.com/"), false);
-        assert!(gate.decide(&parse("https://example.com/page")));
-        assert!(gate.decide(&parse("https://EXAMPLE.com./other")));
-        assert!(gate.decide(&parse("about:blank")));
-
-        assert!(!gate.decide(&parse("https://cdn.example.net/")));
-        assert_eq!(
-            deferred.try_recv().expect("deferred hop").as_str(),
-            "https://cdn.example.net/"
-        );
-        gate.allow_host("cdn.example.net");
-        assert!(gate.decide(&parse("https://cdn.example.net/")));
-    }
-
-    #[tokio::test]
-    async fn dns_admission_validates_before_allowing() {
-        let (gate, _deferred) = NavigationGate::new(&parse("https://example.com/"), false);
-        assert!(gate
-            .admit_after_dns(&parse("http://10.0.0.5/"))
-            .await
-            .is_err());
-        assert!(gate
-            .admit_after_dns(&parse("http://localhost/"))
-            .await
-            .is_err());
-        assert!(!gate.decide(&parse("http://localhost/")));
-    }
-
-    #[tokio::test]
-    async fn deferred_hops_are_validated_navigated_and_capped() {
-        let (gate, mut deferred) = NavigationGate::new(&parse("http://localhost:3000/"), true);
-        assert!(!gate.decide(&parse("http://app.localhost:4000/")));
-        let hop = deferred.try_recv().expect("deferred hop");
-
-        let mut navigated: Vec<Url> = Vec::new();
-        let mut hops = 0usize;
-        assert_eq!(
-            follow_deferred_hop(&gate, hop, &mut hops, &mut |target| navigated.push(target)).await,
-            HopOutcome::Followed
-        );
-        assert_eq!(navigated.len(), 1);
-        assert!(gate.decide(&parse("http://app.localhost:4000/")));
-
-        assert_eq!(
-            follow_deferred_hop(
-                &gate,
-                parse("http://192.168.1.1/"),
-                &mut hops,
-                &mut |target| { navigated.push(target) }
-            )
-            .await,
-            HopOutcome::Refused
-        );
-        assert_eq!(navigated.len(), 1, "a refused hop is never navigated");
-
-        hops = crate::constants::MAX_REDIRECT_HOPS;
-        assert_eq!(
-            follow_deferred_hop(
-                &gate,
-                parse("http://other.localhost:5000/"),
-                &mut hops,
-                &mut |target| navigated.push(target)
-            )
-            .await,
-            HopOutcome::HopLimitReached
-        );
-        assert_eq!(navigated.len(), 1, "the hop budget stops the chain");
-    }
-
-    #[test]
-    fn readiness_probe_never_fires_on_the_blank_start_page() {
-        assert!(READY_PROBE_SCRIPT.contains("location.href !== 'about:blank'"));
-        assert!(READY_PROBE_SCRIPT.contains("document.readyState === 'complete'"));
-    }
-
-    #[test]
-    fn explicit_local_scan_keeps_loopback_navigation() {
-        let (gate, _deferred) = NavigationGate::new(&parse("http://localhost:3000/"), true);
-        assert!(gate.decide(&parse("http://127.0.0.1:3000/")));
-        assert!(gate.decide(&parse("http://localhost:3000/")));
-        assert!(!gate.decide(&parse("http://192.168.1.1/")));
-    }
-
-    #[test]
-    fn browser_build_is_derived_from_the_runtime_user_agent() {
-        assert_eq!(
-            browser_build_from_user_agent(
-                "webkit",
-                "Mozilla/5.0 AppleWebKit/621.1.15 (KHTML, like Gecko) Version/18.5 Safari/621.1.15",
-            )
-            .as_deref(),
-            Some("621.1.15")
-        );
-        assert_eq!(
-            browser_build_from_user_agent(
-                "webview2",
-                "Mozilla/5.0 Chrome/136.0.7103.49 Safari/537.36 Edg/136.0.3240.50",
-            )
-            .as_deref(),
-            Some("136.0.3240.50")
-        );
-    }
-}
+#[path = "analyzer_tests.rs"]
+mod tests;
