@@ -121,6 +121,10 @@ pub const PAGESPEED_RESPONSE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// kilobytes is all that fragment can use.
 pub const INTEGRATION_ERROR_BODY_MAX_BYTES: u64 = 64 * 1024;
 
+/// License activation, validation, and deactivation responses are one small
+/// JSON object each.
+pub const LICENSE_API_RESPONSE_MAX_BYTES: u64 = 64 * 1024;
+
 /// Maximum response body size (10 MB). Responses larger than this are rejected.
 pub const MAX_BODY_SIZE: u64 = 10 * 1024 * 1024;
 

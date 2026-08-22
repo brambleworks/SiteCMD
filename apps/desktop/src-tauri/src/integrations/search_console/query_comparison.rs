@@ -104,7 +104,13 @@ async fn fetch_query_window(
     if !resp.status().is_success() {
         return Err(format!("GSC query window returned {}", resp.status()));
     }
-    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GOOGLE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     let rows = json
         .get("rows")
         .and_then(|r| r.as_array())

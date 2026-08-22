@@ -22,14 +22,23 @@ pub async fn fetch_url_inspection(
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = crate::http_client::read_text_limited(
+            resp,
+            crate::constants::INTEGRATION_ERROR_BODY_MAX_BYTES,
+            crate::constants::BODY_READ_TIMEOUT,
+        )
+        .await
+        .unwrap_or_default();
         return Err(format!("GSC URL inspection returned {}: {}", status, body));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse GSC URL inspection response: {}", e))?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GOOGLE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse GSC URL inspection response: {}", e))?;
 
     parse_url_inspection(&json, page_url)
 }

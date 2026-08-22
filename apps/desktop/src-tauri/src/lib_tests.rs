@@ -982,17 +982,9 @@ fn tracing_instrument_fields_do_not_record_raw_or_secretish_values() {
     );
 }
 
-/// Files that still read a response body without a byte cap. Every listed
-/// file must keep at least one such read, so the list can only shrink as
-/// sites move to `http_client::read_json_limited`/`read_text_limited`. It
-/// reaches empty in the third body-cap commit and stays empty.
-const UNCAPPED_BODY_READ_FILES: &[&str] = &[
-    "src/integrations/search_console/analytics.rs",
-    "src/integrations/search_console/inspection.rs",
-    "src/integrations/search_console/query_comparison.rs",
-    "src/integrations/search_console/sites.rs",
-    "src/licensing/api.rs",
-];
+/// Empty by design: every response body is read through the limited readers.
+/// Adding an entry here is a regression, not a migration step.
+const UNCAPPED_BODY_READ_FILES: &[&str] = &[];
 
 #[test]
 fn response_bodies_are_read_only_through_the_limited_readers() {

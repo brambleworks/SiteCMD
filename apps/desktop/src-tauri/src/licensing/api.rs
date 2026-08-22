@@ -186,10 +186,13 @@ pub async fn activate(key: &str, instance_name: &str) -> Result<LicenseResult, S
         .map_err(|e| format!("License activation request failed: {}", e))?;
 
     let status_code = resp.status().as_u16();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read activation response: {}", e))?;
+    let body = crate::http_client::read_text_limited(
+        resp,
+        crate::constants::LICENSE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to read activation response: {}", e))?;
 
     parse_activate_response(&body, config::store_id(), status_code)
 }
@@ -271,10 +274,13 @@ pub async fn validate(key: &str, instance_id: &str) -> Result<LicenseResult, Str
         .map_err(|e| format!("License validation request failed: {}", e))?;
 
     let status = resp.status().as_u16();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read validation response: {}", e))?;
+    let body = crate::http_client::read_text_limited(
+        resp,
+        crate::constants::LICENSE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to read validation response: {}", e))?;
 
     classify_validate_response(status, &body, instance_id, config::store_id())
 }
@@ -348,10 +354,13 @@ pub async fn deactivate(key: &str, instance_id: &str) -> Result<(), String> {
         .map_err(|e| format!("License deactivation request failed: {}", e))?;
 
     let status = resp.status().as_u16();
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read deactivation response: {}", e))?;
+    let body = crate::http_client::read_text_limited(
+        resp,
+        crate::constants::LICENSE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to read deactivation response: {}", e))?;
 
     parse_deactivate_response(status, &body)
 }
