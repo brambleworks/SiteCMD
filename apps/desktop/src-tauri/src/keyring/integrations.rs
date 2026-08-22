@@ -97,12 +97,8 @@ pub fn audit_to_log(op: &str, detail: serde_json::Value, result: &str) {
 /// integration reports "reconnect" rather than "no API key configured", and a
 /// half-migrated row (keychain written, SQLite not cleaned) still recovers
 /// from the keychain. Tokens have no placeholder form, so they are removed.
-/// Returns whether anything was refused.
-pub fn refuse_unmigrated_plaintext_secrets(config: &mut IntegrationConfig) -> bool {
-    refuse_unmigrated_plaintext_secrets_with(config, &audit_to_log)
-}
-
-/// `refuse_unmigrated_plaintext_secrets` with the audit sink injected.
+/// Returns whether anything was refused. Takes the audit sink injected;
+/// production passes `audit_to_log`.
 pub fn refuse_unmigrated_plaintext_secrets_with(
     config: &mut IntegrationConfig,
     audit: RefusalAudit<'_>,
