@@ -239,6 +239,12 @@ fn rust_source_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// Production source before the first inline test module. Source-scanning
+/// guardrails use it so test-only spawns and reads do not count.
+fn production_half(source: &str) -> &str {
+    source.split("#[cfg(test)]").next().unwrap_or(source)
+}
+
 fn tracing_instrument_attributes(source: &str) -> Vec<(usize, &str)> {
     let marker = concat!("#[", "tracing::instrument");
     let mut attributes = Vec::new();
@@ -567,6 +573,61 @@ fn broker_only_annotation_guard_detects_reannotated_commands() {
         tauri_command_annotated_fn_names(&cfg_attr),
         vec!["run_code_scan".to_string()],
     );
+}
+
+#[test]
+fn git_is_spawned_only_by_the_hardened_runner() {
+    let spawn = regex::Regex::new(r#"Command::new\(\s*"(?:[^"]*/)?git(?:\.exe)?"\s*\)"#)
+        .expect("git spawn pattern");
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    assert!(!files.is_empty(), "Rust source scan found no files");
+
+    let mut findings = Vec::new();
+    let mut runner_spawns = 0;
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        if relative.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        let hits = spawn.find_iter(production_half(&source)).count();
+        if relative == "src/core/git.rs" {
+            runner_spawns = hits;
+        } else if hits > 0 {
+            findings.push(format!("{relative} ({hits})"));
+        }
+    }
+
+    assert_eq!(
+        runner_spawns, 1,
+        "src/core/git.rs must spawn git exactly once, inside hardened_git_command"
+    );
+    assert!(
+        findings.is_empty(),
+        "git must be spawned only through core::git::run_git so every invocation carries the config and environment hardening: {:?}",
+        findings,
+    );
+}
+
+// Negative control: the spawn pattern sees absolute and .exe forms.
+#[test]
+fn git_spawn_guard_detects_every_spelling() {
+    let spawn = regex::Regex::new(r#"Command::new\(\s*"(?:[^"]*/)?git(?:\.exe)?"\s*\)"#)
+        .expect("git spawn pattern");
+    for source in [
+        r#"Command::new("git")"#,
+        r#"std::process::Command::new("/usr/bin/git")"#,
+        r#"tokio::process::Command::new( "git.exe" )"#,
+    ] {
+        assert!(spawn.is_match(source), "{source}");
+    }
+    assert!(!spawn.is_match(r#"Command::new("gitleaks")"#));
 }
 
 #[test]

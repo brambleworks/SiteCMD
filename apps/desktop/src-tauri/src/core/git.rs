@@ -17,6 +17,74 @@ use crate::db::{EventSeverity, EventSource, EventType, SiteEvent};
 const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_GIT_OUTPUT_BYTES: usize = 1024 * 1024;
 
+/// Command-line overrides applied to every git spawn. A registered project
+/// tree may carry a hostile `.git/config`, so every repository key that names
+/// an executable is neutralized before the subcommand, optional index writes
+/// are skipped, and no transport protocol may be negotiated.
+const GIT_HARDENING_ARGS: &[&str] = &[
+    "--no-optional-locks",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=",
+    "-c",
+    "core.sshCommand=",
+    "-c",
+    "diff.external=",
+    "-c",
+    "protocol.allow=never",
+];
+
+/// An empty config file for `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`. Git
+/// for Windows maps `/dev/null` to `NUL` internally, but naming the device
+/// directly keeps the intent obvious on both platforms.
+#[cfg(windows)]
+const GIT_NULL_CONFIG_FILE: &str = "NUL";
+#[cfg(not(windows))]
+const GIT_NULL_CONFIG_FILE: &str = "/dev/null";
+
+/// The only variables a git child may inherit. Everything else, including
+/// every `GIT_*`, `SSH_*`, `LD_PRELOAD`, and shell hook variable, is dropped.
+/// PATH is required to locate git; the rest keep git's own startup working.
+const GIT_INHERITED_ENV: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+];
+
+/// Variables set explicitly on every git child.
+const GIT_FIXED_ENV: &[(&str, &str)] = &[
+    ("GIT_CONFIG_NOSYSTEM", "1"),
+    ("GIT_CONFIG_GLOBAL", GIT_NULL_CONFIG_FILE),
+    ("GIT_CONFIG_SYSTEM", GIT_NULL_CONFIG_FILE),
+    ("GIT_TERMINAL_PROMPT", "0"),
+    ("GIT_OPTIONAL_LOCKS", "0"),
+    ("LC_ALL", "C"),
+];
+
+/// The one place git is spawned. Every caller goes through `run_git`, which
+/// a source-scanning test in `lib_tests.rs` enforces.
+fn hardened_git_command(dir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command.env_clear();
+    for key in GIT_INHERITED_ENV {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    for (key, value) in GIT_FIXED_ENV {
+        command.env(key, value);
+    }
+    command.args(GIT_HARDENING_ARGS).args(args).current_dir(dir);
+    command
+}
+
 /// A git commit from the project's log
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -207,9 +275,7 @@ pub fn get_commits_between(project_path: &str, since: &str, until: &str) -> (Vec
 }
 
 fn run_git(dir: &Path, args: &[&str]) -> Option<String> {
-    let mut child = Command::new("git")
-        .args(args)
-        .current_dir(dir)
+    let mut child = hardened_git_command(dir, args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -555,6 +621,128 @@ mod tests {
         }
 
         TestRepo { path, _dir: dir }
+    }
+
+    /// Git runs `core.fsmonitor` as a hook command during index refresh when
+    /// the value is a path, so a repository's own `.git/config` is an
+    /// arbitrary-command vector. The control proves the installed git honors
+    /// the planted hook; the assertion proves the hardened spawn never does.
+    #[cfg(unix)]
+    #[test]
+    fn hardened_git_ignores_a_planted_fsmonitor_hook() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let repo = make_repo("fsmonitor", 1);
+        let sentinel = repo.join("fsmonitor-ran.sentinel");
+        let hook = repo.join("fsmonitor-hook.sh");
+        fs::write(
+            &hook,
+            format!("#!/bin/sh\ntouch '{}'\nprintf '/'\n", sentinel.display()),
+        )
+        .expect("write hook");
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod hook");
+
+        // The same isolated environment make_repo used, so the user's own git
+        // config never participates; the repository-local config is the vector.
+        let isolated_home = repo.join("isolated_home");
+        let unhardened = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&*repo)
+                .env("HOME", &isolated_home)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .expect("git command");
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        unhardened(&["config", "core.fsmonitor", &hook.to_string_lossy()]);
+
+        // Control: the first status writes the fsmonitor index extension, the
+        // second consults the hook. If this fails the installed git does not
+        // honor hook-style fsmonitor and the test proves nothing.
+        unhardened(&["status", "--porcelain"]);
+        unhardened(&["status", "--porcelain"]);
+        assert!(
+            sentinel.exists(),
+            "control failed: the installed git did not run the planted core.fsmonitor hook"
+        );
+        fs::remove_file(&sentinel).expect("reset sentinel");
+
+        let status = get_git_status(&repo.to_string_lossy(), 5);
+        assert!(
+            status.is_git_repo,
+            "hardened git must still read the repository"
+        );
+        assert!(run_git(&repo, &["status", "--porcelain"]).is_some());
+        assert!(run_git(&repo, &["log", "-1", "--format=%H"]).is_some());
+        assert!(checkout_head_and_clean(&repo.to_string_lossy()).is_some());
+
+        assert!(
+            !sentinel.exists(),
+            "hardened git spawn ran the repository's planted core.fsmonitor hook"
+        );
+    }
+
+    #[test]
+    fn hardened_command_neutralizes_config_and_rebuilds_the_environment() {
+        let repo = make_repo("hardened-env", 1);
+        let command = hardened_git_command(&repo, &["status", "--porcelain"]);
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let expected_prefix = [
+            "--no-optional-locks",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=",
+            "-c",
+            "core.sshCommand=",
+            "-c",
+            "diff.external=",
+            "-c",
+            "protocol.allow=never",
+            "status",
+            "--porcelain",
+        ];
+        assert_eq!(args, expected_prefix);
+
+        let env: std::collections::BTreeMap<String, Option<String>> = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(env.get("GIT_CONFIG_NOSYSTEM"), Some(&Some("1".to_string())));
+        assert_eq!(
+            env.get("GIT_CONFIG_GLOBAL"),
+            Some(&Some(GIT_NULL_CONFIG_FILE.to_string()))
+        );
+        assert_eq!(env.get("GIT_TERMINAL_PROMPT"), Some(&Some("0".to_string())));
+        assert!(
+            env.get("PATH").is_some(),
+            "PATH must be re-added after env_clear or git cannot be found"
+        );
+        let allowed: std::collections::BTreeSet<&str> = GIT_INHERITED_ENV
+            .iter()
+            .copied()
+            .chain(GIT_FIXED_ENV.iter().map(|(key, _)| *key))
+            .collect();
+        for key in env.keys() {
+            assert!(
+                allowed.contains(key.as_str()),
+                "{key} leaked into the git environment"
+            );
+        }
     }
 
     #[test]
