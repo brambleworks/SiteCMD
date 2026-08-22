@@ -20,7 +20,10 @@ export function releaseArtifactSafetyFailures(read, exists, listFiles) {
   const publicHistoryScript = read("tools/scripts/prepare-public-history.mjs");
   const rootPackage = read("package.json");
   const signedReleaseTag =
-    /\["tag",\s*"-s",\s*"--cleanup=verbatim",\s*"-m",\s*`Release \$\{tag\}`,\s*"-m",\s*releaseNotes,\s*tag\]/.test(
+    // The notes template must end with a newline: verbatim cleanup keeps the
+    // message byte-exact, and without the terminator the signature block lands
+    // on the last message line where git cannot find it.
+    /\["tag",\s*"-s",\s*"--cleanup=verbatim",\s*"-m",\s*`Release \$\{tag\}`,\s*"-m",\s*`\$\{releaseNotes\}\\n`,\s*tag\]/.test(
       tagReleaseScript,
     );
   const desktopBuildScript = read("apps/desktop/src-tauri/build.rs");
