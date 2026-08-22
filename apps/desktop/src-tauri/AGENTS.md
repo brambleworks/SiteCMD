@@ -154,7 +154,17 @@ reported, not retried against unseen state.
   WebRTC candidate gathering, and every Linux subresource are not covered.
   Public privacy copy must preserve those distinctions.
 - Release API keys and OAuth tokens use the credential abstraction. Never add a
-  production SQLite credential fallback.
+  production SQLite credential fallback. A plaintext credential still sitting in
+  SQLite is refused and replaced with the keychain placeholder, so the
+  integration reports reconnect instead of running on a secret the keychain
+  never accepted.
+- Debug builds use the OS keychain by default, exactly like release builds.
+  Setting `SITECMD_DEV_PLAINTEXT_SECRETS=1` before launch opts a debug build
+  into the plaintext `dev-secrets.json` store instead. On the first debug run
+  after this default flipped, entries previously saved to that file are
+  invisible until they are re-entered or the variable is set, and an unsigned
+  dev build prompts for keychain access on each secret read. Tests always use
+  the in-memory debug store and never touch the keychain.
 - Webhook HMAC uses `webhooks::compute_webhook_signature` and its OpenSSL
   reference vectors.
 - Code Scan commands canonicalize and bound project paths through
