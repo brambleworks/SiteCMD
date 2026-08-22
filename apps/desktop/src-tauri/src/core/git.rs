@@ -367,6 +367,25 @@ pub fn get_recent_commits(project_path: &str, limit: u32) -> Vec<GitCommit> {
     get_git_status(project_path, limit).commits
 }
 
+/// Async entry points for runtime callers. `run_git` polls its child with a
+/// sleep loop that must never run on a runtime worker, so these move the
+/// sync helpers to the blocking pool and surface a failed blocking task as an
+/// error instead of an empty result.
+pub async fn get_git_status_async(project_path: String, limit: u32) -> Result<GitStatus, String> {
+    tokio::task::spawn_blocking(move || get_git_status(&project_path, limit))
+        .await
+        .map_err(|error| format!("Git status task failed: {error}"))
+}
+
+pub async fn get_commits_since_async(
+    project_path: String,
+    since: String,
+) -> Result<Vec<GitCommit>, String> {
+    tokio::task::spawn_blocking(move || get_commits_since(&project_path, &since))
+        .await
+        .map_err(|error| format!("Git commits task failed: {error}"))
+}
+
 #[cfg(test)]
 #[path = "git_tests.rs"]
 mod tests;

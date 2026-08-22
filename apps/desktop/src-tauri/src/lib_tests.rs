@@ -1048,3 +1048,83 @@ fn uncapped_read_guard_detects_every_spelling() {
     assert!(uncapped.is_match("resp\n        .text()\n        .await"));
     assert!(!uncapped.is_match(".json(&body).send().await"));
 }
+
+/// Line numbers of sync `core::git` helper calls that sit inside an `async fn`
+/// without a `run_blocking`/`spawn_blocking` wrapper between the signature
+/// and the call.
+fn inline_sync_git_calls(source: &str) -> Vec<usize> {
+    let call = regex::Regex::new(
+        r"\bgit::(?:get_git_status|get_commits_since|get_commits_between|get_recent_commits|checkout_head_and_clean)\(",
+    )
+    .expect("git call pattern");
+    let signature = regex::Regex::new(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?(async\s+)?fn\s+\w+")
+        .expect("fn signature pattern");
+    let blocking = regex::Regex::new(r"\b(?:run_blocking|spawn_blocking)\(").expect("wrapper");
+
+    let lines: Vec<&str> = production_half(source).lines().collect();
+    let mut findings = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !call.is_match(line) {
+            continue;
+        }
+        let mut wrapped = false;
+        let mut is_async = false;
+        for previous in lines[..=index].iter().rev() {
+            if blocking.is_match(previous) {
+                wrapped = true;
+            }
+            if let Some(captures) = signature.captures(previous) {
+                is_async = captures.get(1).is_some();
+                break;
+            }
+        }
+        if is_async && !wrapped {
+            findings.push(index + 1);
+        }
+    }
+    findings
+}
+
+#[test]
+fn sync_git_helpers_are_not_called_inline_from_async_commands() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("commands");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    let mut findings = Vec::new();
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        if relative.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        for line in inline_sync_git_calls(&source) {
+            findings.push(format!("{relative}:{line}"));
+        }
+    }
+    assert!(
+        findings.is_empty(),
+        "sync git helpers block on a child process; call git::get_git_status_async or git::get_commits_since_async, or run the helper inside run_blocking: {:?}",
+        findings,
+    );
+}
+
+#[test]
+fn inline_git_call_scan_sees_async_bodies_and_ignores_wrapped_or_sync_ones() {
+    let inline = "pub async fn a() -> Result<(), String> {\n    let s = git::get_git_status(&p, 1);\n    Ok(())\n}\n";
+    assert_eq!(inline_sync_git_calls(inline), vec![2]);
+
+    let wrapped = "pub async fn b() {\n    run_blocking(move || {\n        git::get_recent_commits(&p, 100)\n    }).await\n}\n";
+    assert!(inline_sync_git_calls(wrapped).is_empty());
+
+    let sync = "fn c() {\n    git::get_commits_since(&p, since)\n}\n";
+    assert!(inline_sync_git_calls(sync).is_empty());
+
+    let async_wrapper = "pub async fn d() {\n    git::get_git_status_async(p, 1).await\n}\n";
+    assert!(inline_sync_git_calls(async_wrapper).is_empty());
+}
