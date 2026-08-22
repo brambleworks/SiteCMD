@@ -1050,8 +1050,14 @@ fn uncapped_read_guard_detects_every_spelling() {
 }
 
 /// Line numbers of sync `core::git` helper calls that sit inside an `async fn`
-/// without a `run_blocking`/`spawn_blocking` wrapper between the signature
-/// and the call.
+/// without a `run_blocking`/`spawn_blocking` wrapper lexically enclosing the
+/// call. A wrapper only covers a call while the call site is still nested
+/// inside that wrapper's own argument list or closure body: brace/paren depth
+/// is tracked from each `fn` signature forward, a `run_blocking(` or
+/// `spawn_blocking(` token records the depth it was seen at, and that record
+/// is dropped as soon as depth returns to (or below) that level. A wrapper
+/// that already closed earlier in the same function therefore cannot cover a
+/// later, unrelated call.
 fn inline_sync_git_calls(source: &str) -> Vec<usize> {
     let call = regex::Regex::new(
         r"\bgit::(?:get_git_status|get_commits_since|get_commits_between|get_recent_commits|checkout_head_and_clean)\(",
@@ -1059,27 +1065,38 @@ fn inline_sync_git_calls(source: &str) -> Vec<usize> {
     .expect("git call pattern");
     let signature = regex::Regex::new(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?(async\s+)?fn\s+\w+")
         .expect("fn signature pattern");
-    let blocking = regex::Regex::new(r"\b(?:run_blocking|spawn_blocking)\(").expect("wrapper");
+    let wrapper = regex::Regex::new(r"\b(?:run_blocking|spawn_blocking)\(").expect("wrapper");
 
-    let lines: Vec<&str> = production_half(source).lines().collect();
     let mut findings = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        if !call.is_match(line) {
-            continue;
+    let mut is_async = false;
+    let mut depth: i64 = 0;
+    let mut open_wrappers: Vec<i64> = Vec::new();
+
+    for (index, line) in production_half(source).lines().enumerate() {
+        if let Some(captures) = signature.captures(line) {
+            is_async = captures.get(1).is_some();
         }
-        let mut wrapped = false;
-        let mut is_async = false;
-        for previous in lines[..=index].iter().rev() {
-            if blocking.is_match(previous) {
-                wrapped = true;
+
+        let wrapper_starts: Vec<usize> = wrapper.find_iter(line).map(|m| m.start()).collect();
+        let call_starts: Vec<usize> = call.find_iter(line).map(|m| m.start()).collect();
+
+        for (byte, ch) in line.char_indices() {
+            if wrapper_starts.contains(&byte) {
+                open_wrappers.push(depth);
             }
-            if let Some(captures) = signature.captures(previous) {
-                is_async = captures.get(1).is_some();
-                break;
+            if call_starts.contains(&byte) && is_async && open_wrappers.is_empty() {
+                findings.push(index + 1);
             }
-        }
-        if is_async && !wrapped {
-            findings.push(index + 1);
+            match ch {
+                '{' | '(' => depth += 1,
+                '}' | ')' => {
+                    depth -= 1;
+                    while open_wrappers.last().is_some_and(|&start| depth <= start) {
+                        open_wrappers.pop();
+                    }
+                }
+                _ => {}
+            }
         }
     }
     findings
@@ -1127,4 +1144,15 @@ fn inline_git_call_scan_sees_async_bodies_and_ignores_wrapped_or_sync_ones() {
 
     let async_wrapper = "pub async fn d() {\n    git::get_git_status_async(p, 1).await\n}\n";
     assert!(inline_sync_git_calls(async_wrapper).is_empty());
+}
+
+// A wrapper that has already closed earlier in the function must not shield a
+// later, unrelated call: this is the blind spot the depth tracking closes.
+#[test]
+fn inline_git_call_scan_does_not_let_a_closed_wrapper_cover_a_later_call() {
+    let closed_then_bare = "pub async fn e() -> Result<(), String> {\n    run_blocking(move || db.get_project_path(id)).await?;\n    let s = git::get_git_status(&path, 20);\n    Ok(())\n}\n";
+    assert_eq!(inline_sync_git_calls(closed_then_bare), vec![3]);
+
+    let genuinely_wrapped = "pub async fn f() -> Result<(), String> {\n    run_blocking(move || db.get_project_path(id)).await?;\n    let status = run_blocking(move || {\n        git::get_git_status(&path, 20)\n    })\n    .await?;\n    Ok(())\n}\n";
+    assert!(inline_sync_git_calls(genuinely_wrapped).is_empty());
 }
