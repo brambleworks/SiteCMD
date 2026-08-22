@@ -682,6 +682,15 @@ fn production_half_strips_an_inline_test_module() {
 }
 
 #[test]
+fn analyzer_never_resolves_dns_on_the_navigation_thread() {
+    let production = production_half(include_str!("webview/analyzer.rs"));
+    assert!(
+        !production.contains("_blocking("),
+        "analyzer.rs must use the async validators; synchronous DNS on the webview thread stalls the UI"
+    );
+}
+
+#[test]
 fn elevated_commands_are_not_in_baseline_acl() {
     let default_cmds =
         command_permissions_from_default_toml(include_str!("../permissions/default.toml"));

@@ -48,7 +48,8 @@ pub async fn analyze_url(
     url: &str,
     include_accessibility: bool,
 ) -> WebviewAnalysis {
-    // Revalidate at this boundary so the parsed URL is the one loaded.
+    // Resolve and validate the target on the async runtime; the navigation
+    // callback runs on the webview thread and must never touch DNS.
     let parsed_url = match url::Url::parse(url) {
         Ok(parsed_url) => parsed_url,
         Err(error) => {
@@ -57,13 +58,16 @@ pub async fn analyze_url(
             ));
         }
     };
-    if let Err(error) = crate::network_policy::validate_url_target_blocking(
-        &parsed_url,
+    if let Err(error) = crate::network_policy::validate_url(
+        parsed_url.as_str(),
         crate::network_policy::UrlPolicy::Scan,
-    ) {
+    )
+    .await
+    {
         return WebviewAnalysis::failed(format!("Refused to analyze URL: {}", error));
     }
     let allow_local_dev = crate::network_policy::scan_origin_allows_local_dev(&parsed_url);
+    let (gate, mut deferred) = NavigationGate::new(&parsed_url, allow_local_dev);
     let rules = super::private_network_rules::PrivateNetworkRules { allow_local_dev };
 
     let label = format!("analyzer-{}", chrono::Utc::now().timestamp_millis());
@@ -81,19 +85,22 @@ pub async fn analyze_url(
         // the equivalent isolated mode on supported Windows/Linux runtimes.
         .incognito(true)
         .initialization_script(CWV_OBSERVER_SCRIPT)
-        .on_navigation(move |target| {
-            // Apply public redirect policy to every top-level navigation. Tauri
-            // does not expose external subresource interception here; the
-            // platform rules from install_private_network_rules cover
-            // subresources on macOS and Windows.
-            let allowed = analyzer_navigation_allowed(target.as_str(), allow_local_dev);
-            if !allowed {
-                tracing::warn!(
-                    "Analyzer refused navigation to a disallowed target: {}",
-                    crate::log_sanitizer::log_safe_url_target(target.as_str())
-                );
+        .on_navigation({
+            let gate = gate.clone();
+            move |target| {
+                // Apply public redirect policy to every top-level navigation. Tauri
+                // does not expose external subresource interception here; the
+                // platform rules from install_private_network_rules cover
+                // subresources on macOS and Windows.
+                let allowed = gate.decide(target);
+                if !allowed {
+                    tracing::warn!(
+                        "Analyzer refused navigation to a disallowed target: {}",
+                        crate::log_sanitizer::log_safe_url_target(target.as_str())
+                    );
+                }
+                allowed
             }
-            allowed
         })
         // The analyzer has no user-facing browsing surface. A scanned page must
         // not escape the guarded top-level navigation path through window.open.
@@ -137,7 +144,7 @@ pub async fn analyze_url(
         return WebviewAnalysis::failed(format!("Failed to navigate analyzer: {error}"));
     }
 
-    wait_for_page_load(&webview).await;
+    wait_for_page_load(&webview, &gate, &mut deferred).await;
     let browser_build = collect_browser_build(&webview).await;
 
     // Collect CWV data before running axe (axe manipulates the DOM which could affect CLS)
@@ -203,27 +210,45 @@ const BROWSER_UA_TITLE_PREFIX: &str = "___SHK_BROWSER_UA___";
 const BROWSER_UA_PROBE_SCRIPT: &str =
     "document.title = '___SHK_BROWSER_UA___' + navigator.userAgent;";
 
-/// Wait for page completion, then allow a short late-metric settle within the cap.
-async fn wait_for_page_load(webview: &tauri::WebviewWindow) {
+/// Wait for page completion while admitting deferred redirect hops, then allow
+/// a short late-metric settle within the cap. Each deferred hop is
+/// DNS-validated on this runtime and re-navigated, and the chain stops after
+/// `MAX_REDIRECT_HOPS`.
+async fn wait_for_page_load(
+    webview: &tauri::WebviewWindow,
+    gate: &NavigationGate,
+    deferred: &mut tokio::sync::mpsc::UnboundedReceiver<url::Url>,
+) {
     // Each probe first reads the title (picking up the previous iteration's
     // eval), then issues the next readiness eval; eval results can't be read
     // back directly in Tauri v2.
-    let ready = poll_webview(
-        crate::constants::WEBVIEW_POLL_INTERVAL,
-        crate::constants::WEBVIEW_PAGE_LOAD_WAIT,
-        || {
-            if let Ok(title) = webview.title() {
-                if title.starts_with(READY_TITLE_PREFIX) {
-                    return Some(());
-                }
+    let deadline = tokio::time::Instant::now() + crate::constants::WEBVIEW_PAGE_LOAD_WAIT;
+    let mut hops = 0usize;
+    let ready = loop {
+        if let Ok(title) = webview.title() {
+            if title.starts_with(READY_TITLE_PREFIX) {
+                break true;
             }
-            let _ = webview.eval(READY_PROBE_SCRIPT);
-            None
-        },
-    )
-    .await;
+        }
+        let _ = webview.eval(READY_PROBE_SCRIPT);
+        if tokio::time::Instant::now() + crate::constants::WEBVIEW_POLL_INTERVAL > deadline {
+            break false;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(crate::constants::WEBVIEW_POLL_INTERVAL) => {}
+            hop = deferred.recv() => match hop {
+                Some(hop) => {
+                    follow_deferred_hop(gate, hop, &mut hops, &mut |target| {
+                        let _ = webview.navigate(target);
+                    })
+                    .await;
+                }
+                None => tokio::time::sleep(crate::constants::WEBVIEW_POLL_INTERVAL).await,
+            }
+        }
+    };
 
-    if ready.is_some() {
+    if ready {
         tokio::time::sleep(crate::constants::WEBVIEW_POST_LOAD_SETTLE).await;
     }
 }
@@ -337,18 +362,135 @@ async fn run_axe_analysis(webview: &tauri::WebviewWindow) -> Result<AxeReport, S
     Ok(report)
 }
 
-/// Whether the hidden analyzer webview may perform a top-level navigation.
-/// Only an explicitly local scan origin may navigate to loopback; a public
-/// origin cannot gain that exception through a redirect.
-fn analyzer_navigation_allowed(url: &str, allow_local_dev: bool) -> bool {
-    if url == "about:blank" {
-        return true;
+/// Decides top-level navigations on the webview thread without DNS. IP
+/// literals and local names are judged inline; a hostname is allowed only
+/// once `analyze_url` has resolved and validated it on the async runtime,
+/// so an unknown host is deferred through the channel, refused for now, and
+/// re-navigated after validation.
+pub(crate) struct NavigationGate {
+    allow_local_dev: bool,
+    allowed_hosts: std::sync::Mutex<std::collections::HashSet<String>>,
+    deferred: tokio::sync::mpsc::UnboundedSender<url::Url>,
+}
+
+impl NavigationGate {
+    pub(crate) fn new(
+        origin: &url::Url,
+        allow_local_dev: bool,
+    ) -> (
+        std::sync::Arc<Self>,
+        tokio::sync::mpsc::UnboundedReceiver<url::Url>,
+    ) {
+        let (deferred, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut allowed_hosts = std::collections::HashSet::new();
+        if let Some(host) = normalized_domain(origin) {
+            allowed_hosts.insert(host);
+        }
+        (
+            std::sync::Arc::new(Self {
+                allow_local_dev,
+                allowed_hosts: std::sync::Mutex::new(allowed_hosts),
+                deferred,
+            }),
+            receiver,
+        )
     }
-    crate::network_policy::validate_url_blocking(
-        url,
-        crate::network_policy::UrlPolicy::Redirect { allow_local_dev },
-    )
-    .is_ok()
+
+    pub(crate) fn decide(&self, target: &url::Url) -> bool {
+        if target.as_str() == "about:blank" {
+            return true;
+        }
+        let policy = crate::network_policy::UrlPolicy::Redirect {
+            allow_local_dev: self.allow_local_dev,
+        };
+        if crate::network_policy::validate_redirect_target_nonblocking(target, policy).is_err() {
+            return false;
+        }
+        let Some(host) = normalized_domain(target) else {
+            // An IP literal that passed the inline check above.
+            return target.host().is_some();
+        };
+        if self
+            .allowed_hosts
+            .lock()
+            .map(|hosts| hosts.contains(&host))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        let _ = self.deferred.send(target.clone());
+        false
+    }
+
+    /// Async DNS validation for a deferred hop. On success the host joins the
+    /// allow-set and the caller re-navigates.
+    pub(crate) async fn admit_after_dns(&self, target: &url::Url) -> Result<(), String> {
+        crate::network_policy::validate_url(
+            target.as_str(),
+            crate::network_policy::UrlPolicy::Redirect {
+                allow_local_dev: self.allow_local_dev,
+            },
+        )
+        .await?;
+        if let Some(host) = normalized_domain(target) {
+            self.allow_host(&host);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn allow_host(&self, host: &str) {
+        if let Ok(mut hosts) = self.allowed_hosts.lock() {
+            hosts.insert(host.to_ascii_lowercase());
+        }
+    }
+}
+
+fn normalized_domain(url: &url::Url) -> Option<String> {
+    match url.host()? {
+        url::Host::Domain(domain) => Some(domain.trim_end_matches('.').to_ascii_lowercase()),
+        url::Host::Ipv4(_) | url::Host::Ipv6(_) => None,
+    }
+}
+
+/// What the drain did with one deferred hop.
+#[derive(Debug, PartialEq, Eq)]
+enum HopOutcome {
+    Followed,
+    Refused,
+    HopLimitReached,
+}
+
+/// Validate one deferred hop on the async runtime and re-navigate to it. The
+/// hop counter is shared across the whole page load so a redirect chain
+/// cannot outlive `MAX_REDIRECT_HOPS`.
+async fn follow_deferred_hop(
+    gate: &NavigationGate,
+    hop: url::Url,
+    hops: &mut usize,
+    navigate: &mut impl FnMut(url::Url),
+) -> HopOutcome {
+    *hops += 1;
+    if *hops > crate::constants::MAX_REDIRECT_HOPS {
+        tracing::warn!(
+            "Analyzer stopped following redirects after {} hops",
+            *hops - 1
+        );
+        return HopOutcome::HopLimitReached;
+    }
+    match gate.admit_after_dns(&hop).await {
+        Ok(()) => {
+            navigate(hop);
+            HopOutcome::Followed
+        }
+        Err(error) => {
+            tracing::warn!(
+                "Analyzer refused navigation to {}: {}",
+                crate::log_sanitizer::log_safe_url_target(hop.as_str()),
+                error
+            );
+            HopOutcome::Refused
+        }
+    }
 }
 
 fn browser_build_from_user_agent(engine: &str, user_agent: &str) -> Option<String> {
@@ -378,10 +520,15 @@ fn browser_build_from_user_agent(engine: &str, user_agent: &str) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::{
-        analyzer_navigation_allowed, browser_build_from_user_agent, poll_webview,
-        READY_PROBE_SCRIPT,
+        browser_build_from_user_agent, follow_deferred_hop, poll_webview, HopOutcome,
+        NavigationGate, READY_PROBE_SCRIPT,
     };
     use std::time::Duration;
+    use url::Url;
+
+    fn parse(url: &str) -> Url {
+        Url::parse(url).expect("test url")
+    }
 
     #[tokio::test(start_paused = true)]
     async fn poll_webview_returns_immediately_when_probe_is_ready() {
@@ -421,28 +568,95 @@ mod tests {
     }
 
     #[test]
-    fn refuses_navigation_to_cloud_metadata_and_private_ranges() {
-        // These targets stay forbidden even when the original scan is local.
-        assert!(!analyzer_navigation_allowed(
+    fn gate_refuses_private_literals_inline_without_deferring() {
+        let (gate, mut deferred) = NavigationGate::new(&parse("https://example.com/"), false);
+        for url in [
             "http://169.254.169.254/latest/meta-data/",
-            true
-        ));
-        assert!(!analyzer_navigation_allowed("http://192.168.1.1/", true));
-        assert!(!analyzer_navigation_allowed("http://10.0.0.5/", true));
-        assert!(!analyzer_navigation_allowed("http://172.16.0.1/", true));
+            "http://192.168.1.1/",
+            "http://10.0.0.5/",
+            "http://172.16.0.1/",
+            "http://127.0.0.1:3000/",
+            "http://[::1]:3000/",
+            "http://localhost:3000/",
+            "http://metadata.google.internal/",
+        ] {
+            assert!(!gate.decide(&parse(url)), "{url}");
+        }
+        assert!(
+            deferred.try_recv().is_err(),
+            "literals and local names are decided inline, never deferred to DNS"
+        );
     }
 
     #[test]
-    fn public_scan_cannot_redirect_to_loopback() {
-        assert!(!analyzer_navigation_allowed(
-            "http://127.0.0.1:3000/",
-            false
-        ));
-        assert!(!analyzer_navigation_allowed(
-            "http://localhost:3000/",
-            false
-        ));
-        assert!(!analyzer_navigation_allowed("http://[::1]:3000/", false));
+    fn gate_allows_the_origin_and_defers_unknown_hosts_until_dns_admits_them() {
+        let (gate, mut deferred) = NavigationGate::new(&parse("https://example.com/"), false);
+        assert!(gate.decide(&parse("https://example.com/page")));
+        assert!(gate.decide(&parse("https://EXAMPLE.com./other")));
+        assert!(gate.decide(&parse("about:blank")));
+
+        assert!(!gate.decide(&parse("https://cdn.example.net/")));
+        assert_eq!(
+            deferred.try_recv().expect("deferred hop").as_str(),
+            "https://cdn.example.net/"
+        );
+        gate.allow_host("cdn.example.net");
+        assert!(gate.decide(&parse("https://cdn.example.net/")));
+    }
+
+    #[tokio::test]
+    async fn dns_admission_validates_before_allowing() {
+        let (gate, _deferred) = NavigationGate::new(&parse("https://example.com/"), false);
+        assert!(gate
+            .admit_after_dns(&parse("http://10.0.0.5/"))
+            .await
+            .is_err());
+        assert!(gate
+            .admit_after_dns(&parse("http://localhost/"))
+            .await
+            .is_err());
+        assert!(!gate.decide(&parse("http://localhost/")));
+    }
+
+    #[tokio::test]
+    async fn deferred_hops_are_validated_navigated_and_capped() {
+        let (gate, mut deferred) = NavigationGate::new(&parse("http://localhost:3000/"), true);
+        assert!(!gate.decide(&parse("http://app.localhost:4000/")));
+        let hop = deferred.try_recv().expect("deferred hop");
+
+        let mut navigated: Vec<Url> = Vec::new();
+        let mut hops = 0usize;
+        assert_eq!(
+            follow_deferred_hop(&gate, hop, &mut hops, &mut |target| navigated.push(target)).await,
+            HopOutcome::Followed
+        );
+        assert_eq!(navigated.len(), 1);
+        assert!(gate.decide(&parse("http://app.localhost:4000/")));
+
+        assert_eq!(
+            follow_deferred_hop(
+                &gate,
+                parse("http://192.168.1.1/"),
+                &mut hops,
+                &mut |target| { navigated.push(target) }
+            )
+            .await,
+            HopOutcome::Refused
+        );
+        assert_eq!(navigated.len(), 1, "a refused hop is never navigated");
+
+        hops = crate::constants::MAX_REDIRECT_HOPS;
+        assert_eq!(
+            follow_deferred_hop(
+                &gate,
+                parse("http://other.localhost:5000/"),
+                &mut hops,
+                &mut |target| navigated.push(target)
+            )
+            .await,
+            HopOutcome::HopLimitReached
+        );
+        assert_eq!(navigated.len(), 1, "the hop budget stops the chain");
     }
 
     #[test]
@@ -452,15 +666,11 @@ mod tests {
     }
 
     #[test]
-    fn blank_start_page_is_always_allowed() {
-        assert!(analyzer_navigation_allowed("about:blank", false));
-        assert!(analyzer_navigation_allowed("about:blank", true));
-    }
-
-    #[test]
-    fn explicit_local_scan_can_retain_loopback_navigation() {
-        assert!(analyzer_navigation_allowed("http://127.0.0.1:3000/", true));
-        assert!(analyzer_navigation_allowed("http://localhost:3000/", true));
+    fn explicit_local_scan_keeps_loopback_navigation() {
+        let (gate, _deferred) = NavigationGate::new(&parse("http://localhost:3000/"), true);
+        assert!(gate.decide(&parse("http://127.0.0.1:3000/")));
+        assert!(gate.decide(&parse("http://localhost:3000/")));
+        assert!(!gate.decide(&parse("http://192.168.1.1/")));
     }
 
     #[test]

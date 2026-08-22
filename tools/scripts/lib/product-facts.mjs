@@ -126,7 +126,7 @@ function analyzerProtections(read) {
   const source = read(ANALYZER);
   const prose = source.replace(/^\s*\/\/+/gm, " ").replace(/\s+/g, " ");
   return {
-    validatesScanTarget: source.includes("validate_url_target_blocking"),
+    validatesScanTarget: source.includes("network_policy::validate_url("),
     revalidatesNavigations: source.includes("on_navigation"),
     usesRedirectPolicy: source.includes("UrlPolicy::Redirect"),
     isPrivateWindow: source.includes("incognito(true)"),
