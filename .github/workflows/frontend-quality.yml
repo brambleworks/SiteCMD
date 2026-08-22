@@ -108,14 +108,26 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
-      - name: Install minimum Node.js
+      # Build with the repository's Node (pnpm's devEngines floor applies),
+      # then run the built server's tests on the minimum supported Node with
+      # bare `node`, since pnpm itself refuses to run below the floor.
+      - name: Install repository Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 22.22.1
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test MCP server
-        run: pnpm --filter sitecmd-mcp run test
+      - name: Build MCP server
+        run: pnpm --filter sitecmd-mcp run build
+
+      - name: Install minimum Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.22.1
+
+      - name: Test MCP server on minimum Node.js
+        working-directory: apps/mcp-server
+        run: node --test test/*.test.mjs

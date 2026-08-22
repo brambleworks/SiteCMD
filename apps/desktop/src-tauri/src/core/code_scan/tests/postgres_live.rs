@@ -51,6 +51,14 @@ fn postgres_live_detects_missing_prisma_migration_history() {
 #[ignore = "requires SITECMD_POSTGRES_TEST_URL pointing at a localhost Postgres maintenance database"]
 fn postgres_live_detects_join_table_integrity_gaps() {
     with_live_postgres_test_db("join_integrity_gaps", |temp, _db_url, client| {
+        // The auditor refuses folders with no project signals; the live
+        // database is the only fixture this test actually exercises.
+        write_file(
+            temp.path(),
+            "package.json",
+            r#"{ "name": "join-integrity-fixture", "version": "1.0.0" }"#,
+        );
+
         client
             .batch_execute(
                 r#"

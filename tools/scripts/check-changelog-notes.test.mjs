@@ -77,10 +77,19 @@ describe("assertChangelogReady", () => {
     ).toThrow(/cannot read/);
   });
 
-  it("accepts the repository's own CHANGELOG.md", () => {
-    expect(() =>
-      assertChangelogReady({ changelogPath: path.join(ROOT, "CHANGELOG.md") }),
-    ).not.toThrow();
+  // The live CHANGELOG.md cannot be asserted ready here: immediately after a
+  // release roll its Unreleased section is legitimately empty until the next
+  // change lands. Release-time readiness is enforced where it matters, by
+  // prepareChangelogRelease inside `pnpm release`.
+  it("accepts a changelog whose Unreleased section has real entries", () => {
+    const dir = fs.mkdtempSync(path.join(ROOT, "tools", "scripts", ".changelog-test-"));
+    const file = path.join(dir, "CHANGELOG.md");
+    try {
+      fs.writeFileSync(file, changelog("\n### Added\n\n- A real change.\n"));
+      expect(() => assertChangelogReady({ changelogPath: file })).not.toThrow();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

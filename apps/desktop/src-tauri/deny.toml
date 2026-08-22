@@ -8,7 +8,10 @@ targets = [
     { triple = "x86_64-unknown-linux-gnu" },
     { triple = "x86_64-pc-windows-msvc" },
 ]
-all-features = false
+# Vet the full feature surface: the cargo-deny-action runs with
+# --all-features, so the local check must resolve the same graph or the two
+# disagree about optional dependencies (e.g. headless_chrome via `browser`).
+all-features = true
 no-default-features = false
 
 [advisories]
@@ -41,7 +44,22 @@ confidence-threshold = 0.9
 unused-license-exception = "deny"
 # Exclude workspace-private crates, not third-party dependencies.
 private = { ignore = true }
-exceptions = []
+exceptions = [
+    # auto_generate_cdp declares no license in its crate metadata and ships
+    # only a GPL-3.0 LICENSE.txt, which newer cargo-deny synthesizes into
+    # GPL-3.0-or-later. It is a build-script code generator pulled in by
+    # headless_chrome; it runs at build time and is never linked into or
+    # distributed with SiteCMD binaries. Reviewed 2026-08-22.
+    { allow = ["GPL-3.0-or-later"], name = "auto_generate_cdp" },
+]
+
+# Pin the license expression so every cargo-deny version resolves this crate
+# identically (older versions find no license at all; newer versions synthesize
+# one from LICENSE.txt). The exception above is what actually permits it.
+[[licenses.clarify]]
+name = "auto_generate_cdp"
+expression = "GPL-3.0-or-later"
+license-files = []
 
 [bans]
 multiple-versions = "warn"

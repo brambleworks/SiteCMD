@@ -5133,7 +5133,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "sitecmd"
-version = "1.5.4"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -5200,7 +5200,7 @@ dependencies = [
 
 [[package]]
 name = "sitecmd-cli"
-version = "1.5.4"
+version = "1.0.0"
 dependencies = [
  "env_logger",
  "sitecmd",

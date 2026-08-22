@@ -61,11 +61,13 @@ jobs:
         if: steps.guardrails.outcome == 'success'
         shell: bash
         run: |
-          echo "## SiteCMD Code Scan" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          cat guardrails-summary.txt >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Full review: \`app-guardrails-review\` artifact" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## SiteCMD Code Scan"
+            echo ""
+            cat guardrails-summary.txt
+            echo ""
+            echo "Full review: \`app-guardrails-review\` artifact"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload review artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
