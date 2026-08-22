@@ -75,11 +75,28 @@ try {
 try {
   execFileSync(
     "git",
-    ["tag", "-s", "--cleanup=verbatim", "-m", `Release ${tag}`, "-m", releaseNotes, tag],
+    // The verbatim cleanup preserves the message exactly, so the notes must
+    // end with a newline or the signature block is appended onto the last
+    // message line and git cannot find it at verification time.
+    ["tag", "-s", "--cleanup=verbatim", "-m", `Release ${tag}`, "-m", `${releaseNotes}\n`, tag],
     { cwd: ROOT, stdio: "inherit" },
   );
 } catch {
   die("signed tag creation failed; no commit or push was attempted");
+}
+
+try {
+  execFileSync(
+    "git",
+    ["-c", "gpg.ssh.allowedSignersFile=.github/allowed-signers", "tag", "--verify", tag],
+    { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] },
+  );
+} catch (error) {
+  die(
+    `created tag ${tag} does not verify against .github/allowed-signers ` +
+      `(${error.stderr?.toString().trim() || "unknown error"}); ` +
+      `delete it with \`git tag -d ${tag}\` before retrying`,
+  );
 }
 
 console.log(`release:tag: created signed tag ${tag} on ${head.slice(0, 12)}.`);
