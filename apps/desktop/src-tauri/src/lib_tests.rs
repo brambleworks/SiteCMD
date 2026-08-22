@@ -239,22 +239,223 @@ fn rust_source_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// Source with any inline test module removed. Finds the first
-/// `#[cfg(test)]` attribute that is followed, after optional whitespace and
-/// other attribute lines, by `mod <ident> {` (a module with a body), and
-/// returns everything before it. A `#[cfg(test)] mod tests;` declaration, or
-/// a `#[cfg(test)]` on a `use`, field, or function, does not match, so it
-/// cannot truncate a file's production code. Returns the source unchanged
-/// when no inline test module is present. Source-scanning guardrails use
-/// this so an inline test module's contents do not count as production.
-fn production_half(source: &str) -> &str {
+/// True for a `cfg` predicate that holds only under `cargo test`: the bare
+/// `test`, or an `all(...)` whose top-level list carries a bare `test`.
+/// `any(test, ...)` and `not(test)` are deliberately excluded because both
+/// can hold in a production build, so a module carrying them is production
+/// code the source-scanning guardrails must keep seeing.
+fn cfg_is_test_only(predicate: &str) -> bool {
+    let trimmed = predicate.trim();
+    if trimmed == "test" {
+        return true;
+    }
+    let Some(list) = trimmed
+        .strip_prefix("all(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return false;
+    };
+    let mut depth = 0usize;
+    list.split(|ch| {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        ch == ',' && depth == 0
+    })
+    .any(|item| item.trim() == "test")
+}
+
+/// Byte offset just past the `}` closing a block whose opening `{` the caller
+/// already consumed, or `None` when the block never closes. Braces inside
+/// string, raw-string, and character literals and inside `//` and `/* */`
+/// comments do not count, so a `{` in a test fixture cannot swallow the file.
+fn end_of_block(source: &str, body_start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = body_start;
+    let mut depth = 1usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' => {
+                depth += 1;
+                index += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                index += 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index = match source[index..].find('\n') {
+                    Some(offset) => index + offset + 1,
+                    None => bytes.len(),
+                };
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index = end_of_block_comment(source, index + 2);
+            }
+            b'"' => index = end_of_string_literal(source, index + 1),
+            b'r' | b'b' => match raw_string_hashes(source, index) {
+                Some((quote, hashes)) => index = end_of_raw_string(source, quote + 1, hashes),
+                None => index += 1,
+            },
+            b'\'' => index = end_of_char_literal(source, index),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// Offset just past the terminating `*/`, honouring Rust's nested block
+/// comments. `index` points just past the opening `/*`.
+fn end_of_block_comment(source: &str, mut index: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut depth = 1usize;
+    while index < bytes.len() {
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            depth += 1;
+            index += 2;
+        } else if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+            depth -= 1;
+            index += 2;
+            if depth == 0 {
+                return index;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    bytes.len()
+}
+
+/// Offset just past the closing `"`. `index` points just past the opening
+/// quote; `\"` and `\\` do not terminate the literal.
+fn end_of_string_literal(source: &str, mut index: usize) -> usize {
+    let bytes = source.as_bytes();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return index + 1,
+            _ => index += 1,
+        }
+    }
+    bytes.len()
+}
+
+/// `(offset of the opening quote, hash count)` when `index` starts a raw
+/// string (`r"`, `r#"`, `br"`, `br##"`, ...) rather than an identifier that
+/// merely begins with `r` or `b`.
+fn raw_string_hashes(source: &str, index: usize) -> Option<(usize, usize)> {
+    let bytes = source.as_bytes();
+    let previous = index.checked_sub(1).map(|before| bytes[before]);
+    if previous.is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+        return None;
+    }
+    let mut cursor = index;
+    if bytes[cursor] == b'b' {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'r') {
+        return None;
+    }
+    cursor += 1;
+    let hashes_start = cursor;
+    while bytes.get(cursor) == Some(&b'#') {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'"') {
+        return None;
+    }
+    Some((cursor, cursor - hashes_start))
+}
+
+/// Offset just past a raw string's terminating `"` plus its `#` run.
+/// `index` points just past the opening quote.
+fn end_of_raw_string(source: &str, mut index: usize, hashes: usize) -> usize {
+    let bytes = source.as_bytes();
+    let closing = format!("\"{}", "#".repeat(hashes));
+    match source[index..].find(&closing) {
+        Some(offset) => {
+            index += offset + closing.len();
+            index
+        }
+        None => bytes.len(),
+    }
+}
+
+/// Offset just past a character literal's closing `'`, or just past the
+/// opening `'` when this is a lifetime rather than a literal.
+fn end_of_char_literal(source: &str, index: usize) -> usize {
+    let bytes = source.as_bytes();
+    if bytes.get(index + 1) == Some(&b'\\') {
+        let mut cursor = index + 2;
+        if bytes.get(cursor) == Some(&b'u') {
+            while cursor < bytes.len() && bytes[cursor] != b'}' {
+                cursor += 1;
+            }
+            cursor += 1;
+        } else {
+            cursor += 1;
+        }
+        if bytes.get(cursor) == Some(&b'\'') {
+            return cursor + 1;
+        }
+        return index + 1;
+    }
+    if let Some(character) = source[index + 1..].chars().next() {
+        let after = index + 1 + character.len_utf8();
+        if bytes.get(after) == Some(&b'\'') {
+            return after + 1;
+        }
+    }
+    index + 1
+}
+
+/// Source with every inline test module excised. A `#[cfg(test)]` attribute
+/// (or a compound test-only form such as `#[cfg(all(test, feature =
+/// "desktop"))]`) followed, after optional whitespace and other attribute
+/// lines, by `mod <ident> {` opens an inline test module; its body is matched
+/// brace for brace, replaced by the newlines it spanned, and the scan
+/// continues after its closing brace. Production code on *both* sides of a
+/// test module therefore stays visible to the source-scanning guardrails, and
+/// every surviving line keeps its original line number so a guardrail can
+/// report `file:line` accurately. A `#[cfg(test)] mod tests;` declaration, or
+/// a `#[cfg(test)]` on a `use`, field, or function, does not match.
+fn production_half(source: &str) -> String {
     let inline_test_module = regex::Regex::new(
-        r"#\[cfg\(test\)\](?:\s*#\[[^\]]*\])*\s*mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
+        r"#\[cfg\(([^\]]*)\)\](?:\s*#\[[^\]]*\])*\s*mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
     )
     .expect("inline test module pattern");
-    match inline_test_module.find(source) {
-        Some(found) => &source[..found.start()],
-        None => source,
+
+    let mut kept = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    loop {
+        let Some(captures) = inline_test_module.captures(&source[cursor..]) else {
+            kept.push_str(&source[cursor..]);
+            return kept;
+        };
+        let matched = captures.get(0).expect("whole match");
+        let start = cursor + matched.start();
+        let body = cursor + matched.end();
+        let predicate = captures.get(1).map_or("", |group| group.as_str());
+        if !cfg_is_test_only(predicate) {
+            kept.push_str(&source[cursor..body]);
+            cursor = body;
+            continue;
+        }
+        kept.push_str(&source[cursor..start]);
+        // An unbalanced module body cannot be excised safely; drop the rest
+        // rather than let test code count as production.
+        let Some(end) = end_of_block(source, body) else {
+            return kept;
+        };
+        for _ in 0..source[start..end].matches('\n').count() {
+            kept.push('\n');
+        }
+        cursor = end;
     }
 }
 
@@ -609,7 +810,7 @@ fn git_is_spawned_only_by_the_hardened_runner() {
             continue;
         }
         let source = std::fs::read_to_string(&file).expect("read Rust source file");
-        let hits = spawn.find_iter(production_half(&source)).count();
+        let hits = spawn.find_iter(&production_half(&source)).count();
         if relative == "src/core/git.rs" {
             runner_spawns = hits;
         } else if hits > 0 {
@@ -678,6 +879,163 @@ fn production_half_strips_an_inline_test_module() {
     assert!(
         !half.contains(r#"Command::new("git")"#),
         "an inline test module's contents must be stripped"
+    );
+}
+
+// The regression F1 closes: a truncating `production_half` hid every line
+// after the first inline test module from all four source-scanning
+// guardrails.
+#[test]
+fn production_half_keeps_production_code_after_an_inline_test_module() {
+    let source = concat!(
+        "fn before() {}\n",
+        "\n",
+        "#[cfg(test)]\n",
+        "mod tests {\n",
+        "    fn spawn_git() {\n",
+        "        Command::new(\"git\");\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "fn after() {\n",
+        "    Command::new(\"gitleaks\");\n",
+        "}\n",
+    );
+    let half = production_half(source);
+    assert!(half.contains("fn before"));
+    assert!(
+        half.contains("fn after"),
+        "production code after an inline test module must survive: {half:?}"
+    );
+    assert!(half.contains(r#"Command::new("gitleaks")"#));
+    assert!(!half.contains(r#"Command::new("git")"#));
+    assert_eq!(
+        half.matches('\n').count(),
+        source.matches('\n').count(),
+        "excision must preserve line numbering so guardrails report file:line"
+    );
+    assert_eq!(
+        half.lines().nth(9),
+        Some("fn after() {"),
+        "every surviving line must keep its original line number"
+    );
+}
+
+#[test]
+fn production_half_excises_every_inline_test_module() {
+    let source = concat!(
+        "fn first() {}\n",
+        "#[cfg(test)]\n",
+        "mod early_tests {\n",
+        "    const FIXTURE: &str = \"{ unbalanced\";\n",
+        "    fn a() { Command::new(\"git\"); }\n",
+        "}\n",
+        "fn middle() {}\n",
+        "#[cfg(all(test, feature = \"desktop\"))]\n",
+        "mod late_tests {\n",
+        "    fn b() { Command::new(\"/usr/bin/git\"); }\n",
+        "}\n",
+        "fn last() {}\n",
+    );
+    let half = production_half(source);
+    for kept in ["fn first", "fn middle", "fn last"] {
+        assert!(half.contains(kept), "{kept} must survive: {half:?}");
+    }
+    assert!(!half.contains("fn a()"));
+    assert!(!half.contains("fn b()"));
+    assert!(!half.contains("Command::new"));
+    assert_eq!(half.matches('\n').count(), source.matches('\n').count());
+}
+
+// `any(test, ...)` and `not(test)` also hold in a production build, so a
+// module carrying them is production code the scans must keep seeing.
+#[test]
+fn production_half_keeps_modules_whose_cfg_is_not_test_only() {
+    for predicate in ["any(test, feature = \"desktop\")", "not(test)"] {
+        let source = format!("#[cfg({predicate})]\nmod shipped {{\n    fn spawn() {{ Command::new(\"git\"); }}\n}}\n");
+        assert!(
+            production_half(&source).contains(r#"Command::new("git")"#),
+            "#[cfg({predicate})] mod is production code"
+        );
+    }
+}
+
+/// Independent, line-based estimate of a file's production lines, written
+/// without reusing `production_half`: a plain walk that enters an inline test
+/// module at a test-only `#[cfg(...)]` line whose next line declares a module
+/// with a body, and leaves it when a naive brace count returns to zero. Naive
+/// counting is enough for an estimate compared against a 90 percent floor.
+fn non_test_line_count(source: &str) -> usize {
+    let mut count = 0usize;
+    let mut depth: i64 = 0;
+    let mut inside_test_module = false;
+    let mut saw_test_cfg = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if inside_test_module {
+            depth += trimmed.matches('{').count() as i64;
+            depth -= trimmed.matches('}').count() as i64;
+            inside_test_module = depth > 0;
+            continue;
+        }
+        if saw_test_cfg && trimmed.starts_with("mod ") && trimmed.ends_with('{') {
+            inside_test_module = true;
+            saw_test_cfg = false;
+            depth = 1;
+            continue;
+        }
+        if trimmed.starts_with("#[cfg(")
+            && trimmed.contains("test")
+            && !trimmed.contains("any(")
+            && !trimmed.contains("not(test")
+        {
+            saw_test_cfg = true;
+            continue;
+        }
+        saw_test_cfg = saw_test_cfg && trimmed.starts_with("#[");
+        if !trimmed.is_empty() {
+            count += 1;
+        }
+    }
+    count
+}
+
+// Truncation is loud here: before F1, eight real files (env_files.rs,
+// commands/oauth.rs, db/types.rs, commands/scan/tools.rs, commands/mod.rs,
+// commands/reports.rs and two code_scan corpus files) lost most of their
+// production lines to `production_half`.
+#[test]
+fn production_half_retains_the_production_lines_of_every_source_file() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    assert!(!files.is_empty(), "Rust source scan found no files");
+
+    let mut thin = Vec::new();
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        let half = production_half(&source);
+        assert_eq!(
+            half.matches('\n').count(),
+            source.matches('\n').count(),
+            "{relative}: production_half must preserve line numbering"
+        );
+        let retained = half.lines().filter(|line| !line.trim().is_empty()).count();
+        let expected = non_test_line_count(&source);
+        if retained * 10 < expected * 9 {
+            thin.push(format!("{relative} ({retained} of ~{expected})"));
+        }
+    }
+
+    assert!(
+        thin.is_empty(),
+        "production_half must excise each inline test module and keep scanning, never truncate the file at the first one: {:?}",
+        thin,
     );
 }
 
@@ -1015,7 +1373,7 @@ fn response_bodies_are_read_only_through_the_limited_readers() {
             continue;
         }
         let source = std::fs::read_to_string(&file).expect("read Rust source file");
-        let hits = uncapped.find_iter(production_half(&source)).count();
+        let hits = uncapped.find_iter(&production_half(&source)).count();
         if hits == 0 {
             continue;
         }
@@ -1072,7 +1430,8 @@ fn inline_sync_git_calls(source: &str) -> Vec<usize> {
     let mut depth: i64 = 0;
     let mut open_wrappers: Vec<i64> = Vec::new();
 
-    for (index, line) in production_half(source).lines().enumerate() {
+    let production = production_half(source);
+    for (index, line) in production.lines().enumerate() {
         if let Some(captures) = signature.captures(line) {
             is_async = captures.get(1).is_some();
         }
