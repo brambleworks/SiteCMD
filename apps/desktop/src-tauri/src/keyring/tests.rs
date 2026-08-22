@@ -1,6 +1,6 @@
 use super::integrations::{
-    redact_integration_secrets, store_integration_secrets_with_durable_store,
-    strip_tokens_from_extra,
+    hydrate_integration_secrets_with, redact_integration_secrets,
+    store_integration_secrets_with_durable_store, strip_tokens_from_extra,
 };
 use super::migrate_restored_credentials;
 use super::migration::{
@@ -13,6 +13,11 @@ use super::names::{
 use super::store::{delete_secret, get_secret, set_secret, SECRET_TEST_GUARD};
 use crate::integrations::{IntegrationConfig, IntegrationType};
 use tauri::test::mock_app;
+
+/// Refusal audit sink that drops entries: these tests assert on the config,
+/// and no test may append to the real security log under the app-data
+/// directory.
+fn discarded_audit(_op: &str, _detail: serde_json::Value, _result: &str) {}
 
 #[cfg(debug_assertions)]
 fn clear_debug_secret_store() {
@@ -595,11 +600,12 @@ fn hydrate_refuses_unmigrated_plaintext_credentials() {
         enabled: true,
     };
 
-    super::hydrate_integration_secrets(app.handle(), &db, project_id, &mut config);
+    hydrate_integration_secrets_with(app.handle(), &db, project_id, &mut config, &discarded_audit);
 
     assert_eq!(
-        config.api_key, None,
-        "a plaintext SQLite key must never be used once the durable store is the boundary"
+        config.api_key.as_deref(),
+        Some(KEYRING_PLACEHOLDER),
+        "a plaintext SQLite key must never be used once the durable store is the boundary; the placeholder makes the integration report reconnect"
     );
     assert!(config
         .extra
@@ -632,7 +638,14 @@ fn scheduler_configs_drop_unmigrated_plaintext_before_resolution() {
         extra: None,
         enabled: true,
     };
-    let cleaned = super::without_unmigrated_plaintext_secrets(vec![plaintext, placeholder]);
-    assert_eq!(cleaned[0].api_key, None);
+    let cleaned = super::without_unmigrated_plaintext_secrets_with(
+        vec![plaintext, placeholder],
+        &discarded_audit,
+    );
+    assert_eq!(
+        cleaned[0].api_key.as_deref(),
+        Some(KEYRING_PLACEHOLDER),
+        "the plaintext value is replaced by the placeholder, never carried through"
+    );
     assert_eq!(cleaned[1].api_key.as_deref(), Some(KEYRING_PLACEHOLDER));
 }

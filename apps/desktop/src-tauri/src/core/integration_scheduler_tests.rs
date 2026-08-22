@@ -445,18 +445,20 @@ fn github_context_missing_credential_at_rest_stays_not_configured() {
     assert!(matches!(resolution, GithubContextResolution::NotConfigured));
 }
 
+// The keychain is the only OAuth token source: an inline `extra.tokens` left
+// in SQLite by a failed migration is ignored, never preferred.
 #[test]
-fn github_context_oauth_token_from_extra_never_touches_keyring() {
-    let extra = serde_json::json!({"tokens": {"access_token": "gho_token"}});
+fn github_context_ignores_an_inline_token_and_reads_the_keychain() {
+    let extra = serde_json::json!({"tokens": {"access_token": "gho_plaintext_in_sqlite"}});
     let resolution = github_context_from_configs(
         vec![github_config(None, Some("acme/site"), Some(extra))],
         keyring_untouched,
-        keyring_untouched,
+        || Ok(Some(r#"{"access_token":"gho_from_keychain"}"#.to_string())),
     );
     let GithubContextResolution::Resolved(gh) = resolution else {
         panic!("expected Resolved, got {resolution:?}");
     };
-    assert_eq!(gh.token, "gho_token");
+    assert_eq!(gh.token, "gho_from_keychain");
 }
 
 #[test]
@@ -506,26 +508,43 @@ fn paid_cadence_is_unchanged() {
 // `github_context_from_configs` separates from `resolve_github_context`), so
 // it is testable without a live `AppHandle`.
 
-/// Counts audit-log lines matching both an op and an integration, so the
-/// assertion is immune to unrelated entries other tests append to the same
-/// process-wide file. These tests run as plain `#[test]` (no tokio runtime),
-/// so `audit_log::record`'s `Handle::try_current()` check fails and the write
-/// happens inline before `credentials_from_configs` returns - no race to poll
-/// for.
-fn count_audit_log_entries_for(op: &str, integration: &str) -> usize {
-    let Some(path) = crate::app_identity::default_storage_dir().map(|dir| dir.join("audit.log"))
-    else {
-        return 0;
-    };
-    let Ok(contents) = std::fs::read_to_string(&path) else {
-        return 0;
-    };
-    let needle_op = format!(r#""op":"{op}""#);
-    let needle_integration = format!(r#""integration":"{integration}""#);
-    contents
-        .lines()
-        .filter(|line| line.contains(&needle_op) && line.contains(&needle_integration))
-        .count()
+/// In-memory refusal audit. `credentials_from_configs` takes the sink as an
+/// argument, so these tests read the entries straight back instead of
+/// grepping the developer's real `audit.log`: no test appends to that
+/// security log, and none of them needs the app-data directory to exist.
+#[derive(Default)]
+struct RecordedAudit {
+    entries: std::cell::RefCell<Vec<(String, serde_json::Value, String)>>,
+}
+
+impl RecordedAudit {
+    fn record(&self, op: &str, detail: serde_json::Value, result: &str) {
+        self.entries
+            .borrow_mut()
+            .push((op.to_string(), detail, result.to_string()));
+    }
+
+    fn refusals_for(&self, integration: &str) -> usize {
+        self.entries
+            .borrow()
+            .iter()
+            .filter(|(op, detail, result)| {
+                op == "credential_refused_unmigrated"
+                    && detail["integration"] == integration
+                    && result == "refused"
+            })
+            .count()
+    }
+
+    /// Every recorded detail, serialized, so a test can prove no refused
+    /// secret rode along into the audit trail.
+    fn serialized_details(&self) -> String {
+        self.entries
+            .borrow()
+            .iter()
+            .map(|(_, detail, _)| detail.to_string())
+            .collect()
+    }
 }
 
 #[test]
@@ -540,30 +559,33 @@ fn credentials_from_configs_refuses_unmigrated_plaintext_api_key() {
         enabled: true,
     };
 
-    let before = count_audit_log_entries_for("credential_refused_unmigrated", "plausible");
+    let audit = RecordedAudit::default();
 
-    // get_api_key panics if called: once refused, the api_key no longer
-    // equals the placeholder, so that hydration path must never run. There is
-    // no `extra.tokens` here, so get_tokens still runs as the normal fallback
-    // and simulates the keychain having nothing either (the migration never
-    // completed, which is why the plaintext value was still in SQLite).
+    // Refusal leaves the keychain placeholder, so hydration runs and finds
+    // nothing: the migration never completed, which is why the plaintext
+    // value was still in SQLite.
     let creds = credentials_from_configs(
         vec![config],
         IntegrationType::Plausible,
         None,
         false,
-        keyring_untouched,
         || Ok(None),
+        || Ok(None),
+        &|op, detail, result| audit.record(op, detail, result),
     );
 
     assert_eq!(
         creds.api_key, None,
         "a plaintext SQLite api_key must never reach the adapter poll"
     );
-    let after = count_audit_log_entries_for("credential_refused_unmigrated", "plausible");
+    assert_eq!(
+        audit.refusals_for("plausible"),
+        1,
+        "expected one credential_refused_unmigrated audit entry for plausible"
+    );
     assert!(
-        after > before,
-        "expected a new credential_refused_unmigrated audit entry for plausible"
+        !audit.serialized_details().contains("plausible-live-secret"),
+        "the audit detail must carry only the integration type"
     );
 }
 
@@ -581,8 +603,7 @@ fn credentials_from_configs_refuses_unmigrated_plaintext_oauth_token() {
         enabled: true,
     };
 
-    let before =
-        count_audit_log_entries_for("credential_refused_unmigrated", "googlesearchconsole");
+    let audit = RecordedAudit::default();
 
     // get_api_key panics if called: there is no api_key on this config, so
     // the placeholder-hydration path must never run. get_tokens simulates
@@ -595,15 +616,20 @@ fn credentials_from_configs_refuses_unmigrated_plaintext_oauth_token() {
         false,
         keyring_untouched,
         || Ok(None),
+        &|op, detail, result| audit.record(op, detail, result),
     );
 
     assert_eq!(
         creds.oauth_token, None,
         "a plaintext SQLite OAuth token must never reach the adapter poll"
     );
-    let after = count_audit_log_entries_for("credential_refused_unmigrated", "googlesearchconsole");
+    assert_eq!(
+        audit.refusals_for("googlesearchconsole"),
+        1,
+        "expected one credential_refused_unmigrated audit entry for googlesearchconsole"
+    );
     assert!(
-        after > before,
-        "expected a new credential_refused_unmigrated audit entry for googlesearchconsole"
+        !audit.serialized_details().contains("gsc-live-oauth-secret"),
+        "the audit detail must carry only the integration type"
     );
 }

@@ -31,9 +31,10 @@ pub use connected::{
     store_project_fingerprint_key,
 };
 pub use integrations::{
-    delete_api_key, delete_tokens, get_api_key, get_tokens, hydrate_integration_secrets,
-    redact_integration_secrets, refuse_unmigrated_plaintext_secrets, store_api_key,
-    store_integration_secrets, store_tokens, without_unmigrated_plaintext_secrets,
+    audit_to_log, delete_api_key, delete_tokens, get_api_key, get_tokens,
+    hydrate_integration_secrets, redact_integration_secrets, refuse_unmigrated_plaintext_secrets,
+    store_api_key, store_integration_secrets, store_tokens, without_unmigrated_plaintext_secrets,
+    without_unmigrated_plaintext_secrets_with, RefusalAudit,
 };
 pub use migration::{
     mark_legacy_key_migration_complete, migrate_credentials, migrate_restored_credentials,
