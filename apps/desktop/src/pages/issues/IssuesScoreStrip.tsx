@@ -93,9 +93,6 @@ export function IssuesScoreStrip({ score, checkedAt, issueSummary = null }: Issu
             {score ? buildDetail(score, issueSummary) : "Loading score"} ·{" "}
             {formatCheckedAt(checkedAt, nowMs)}
           </p>
-          {score?.breakdown.capNote ? (
-            <p className="text-meta text-severity-critical">{score.breakdown.capNote}</p>
-          ) : null}
           {score ? <ScoreBreakdownDisclosure breakdown={score.breakdown} /> : null}
         </div>
       </div>

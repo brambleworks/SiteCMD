@@ -8,7 +8,10 @@ const WORDLESS = new Set(["", "[object Object]", "null", "undefined"]);
 
 /** Turn an unknown rejection into one sentence a non-engineer can act on. */
 export function userFacingError(error: unknown, fallback: string): string {
-  const raw = errorMessage(error).replace(TECHNICAL_PREFIX, "").trim();
+  // Tauri can wrap a rejection twice ("Error: invoke error: no such project"),
+  // so strip until nothing transport-shaped is left rather than once.
+  let raw = errorMessage(error).trim();
+  while (TECHNICAL_PREFIX.test(raw)) raw = raw.replace(TECHNICAL_PREFIX, "").trim();
   if (WORDLESS.has(raw)) return fallback;
   const capitalized = raw.charAt(0).toUpperCase() + raw.slice(1);
   const sentence = /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;

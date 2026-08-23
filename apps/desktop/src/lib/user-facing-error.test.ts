@@ -16,6 +16,12 @@ describe("userFacingError", () => {
   it("drops transport prefixes that mean nothing to a person", () => {
     expect(userFacingError("Error: connection refused", FALLBACK)).toBe("Connection refused.");
     expect(userFacingError("invoke error: no such project", FALLBACK)).toBe("No such project.");
+    expect(userFacingError("Error: invoke error: no such project", FALLBACK)).toBe(
+      "No such project.",
+    );
+    expect(
+      userFacingError(new Error("error: tauri error: command error: disk is full"), FALLBACK),
+    ).toBe("Disk is full.");
   });
 
   it("falls back when the rejection carries no words", () => {

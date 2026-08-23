@@ -114,7 +114,9 @@ describe("IssuesScoreStrip", () => {
       />,
     );
 
-    expect(screen.getAllByText(/Score capped/).length).toBeGreaterThan(0);
+    // getByText, not getAllByText: the breakdown carries the note, and a second
+    // copy in the strip read it out twice to a screen reader.
+    expect(screen.getByText(/Score capped/)).toBeInTheDocument();
   });
 
   it("keeps the score slot stable when no issues exist", () => {
