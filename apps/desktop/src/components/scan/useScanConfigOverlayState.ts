@@ -28,7 +28,6 @@ interface UseScanConfigOverlayStateOptions {
   canUseAccessibilityDeepScan: boolean;
   initialAxeEnabled: boolean;
   initialScanType: ScanMode;
-  onCancel: () => void;
   onStart: (config: ScanConfig) => void;
   projectPath?: string | null;
   projectId?: number;
@@ -40,7 +39,6 @@ export function useScanConfigOverlayState({
   canUseAccessibilityDeepScan,
   initialAxeEnabled,
   initialScanType,
-  onCancel,
   onStart,
   projectPath,
   projectId,
@@ -72,14 +70,6 @@ export function useScanConfigOverlayState({
   const scanType: ScanMode =
     requestedScanType !== "code" && !hasSite && canUseCodeScan ? "code" : requestedScanType;
   const axeEnabled = scanType === "code" ? false : initialAxeEnabled && canUseAccessibilityDeepScan;
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onCancel]);
 
   const resolveThenLoad = useCallback(
     async (options?: { force?: boolean }) => {
