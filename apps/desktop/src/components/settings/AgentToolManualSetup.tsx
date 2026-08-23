@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/useToast";
 import { copyToClipboard } from "@/lib/clipboard";
 import { getAgentToolManualConfig } from "@/lib/commands";
 import { userFacingError } from "@/lib/user-facing-error";
@@ -34,6 +35,8 @@ export function AgentToolManualSetup() {
 function ManualSetupBody() {
   const [editor, setEditor] = useState<ManualSetupEditor>("claude-code");
   const [copied, setCopied] = useState(false);
+  const editorId = useId();
+  const { error: toastError } = useToast();
   const tool = manualSetupAgentTool(editor);
   const configQuery = useQuery({
     queryKey: queryKeys.settings.agentToolManualConfig(tool),
@@ -46,6 +49,8 @@ function ManualSetupBody() {
     if (await copyToClipboard(block.body)) {
       setCopied(true);
       setTimeout(() => setCopied(false), COPIED_RESET_MS);
+    } else {
+      toastError("Could not copy the setup block", "Nothing was written. Try again.");
     }
   };
 
@@ -55,11 +60,11 @@ function ManualSetupBody() {
         Add SiteCMD to an editor yourself, including editors SiteCMD does not detect. Paste the
         block below into the file or terminal it names, then restart the editor.
       </p>
-      <label className="form-label" htmlFor="manual-setup-editor">
+      <label className="form-label" htmlFor={editorId}>
         Editor
       </label>
       <select
-        id="manual-setup-editor"
+        id={editorId}
         className="compact-select-field control-well select-well"
         value={editor}
         onChange={(event) => {
@@ -74,7 +79,7 @@ function ManualSetupBody() {
       </select>
       {configQuery.isPending ? <p className="text-meta">Preparing the setup block.</p> : null}
       {configQuery.isError ? (
-        <p className="agent-handoff-error">
+        <p className="agent-handoff-error" role="alert">
           {userFacingError(
             configQuery.error,
             "SiteCMD could not build the setup block. Install Node 22.22.1 or newer and reopen Manual setup.",

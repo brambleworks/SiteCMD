@@ -12,6 +12,7 @@ vi.mock("@/lib/clipboard", () => ({
 }));
 
 import { AgentToolManualSetup } from "./AgentToolManualSetup";
+import { ToastProvider } from "@/hooks/useToast";
 import type { AgentTool, McpManualConfig } from "@/generated/ipc-bindings";
 import { withQueryClient } from "@/test-utils/query-client";
 
@@ -114,8 +115,43 @@ describe("AgentToolManualSetup", () => {
     render(<AgentToolManualSetup />, { wrapper: withQueryClient() });
     fireEvent.click(screen.getByText("Manual setup"));
 
-    expect(
-      await screen.findByText("Could not resolve the SiteCMD database path."),
-    ).toBeInTheDocument();
+    // The error only appears after the person opens the disclosure, so it needs a
+    // live role to be announced at all, like every sibling settings section.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not resolve the SiteCMD database path.");
+    expect(alert).toHaveClass("agent-handoff-error");
+  });
+
+  it("says so when the copy fails instead of leaving the button unchanged", async () => {
+    copyToClipboardMock.mockResolvedValue(false);
+    render(
+      <ToastProvider>
+        <AgentToolManualSetup />
+      </ToastProvider>,
+      { wrapper: withQueryClient() },
+    );
+    fireEvent.click(screen.getByText("Manual setup"));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy Claude Code setup" }));
+
+    expect(await screen.findByText("Could not copy the setup block")).toBeInTheDocument();
+    expect(screen.getByText("Nothing was written. Try again.")).toBeInTheDocument();
+    expect(screen.queryByText("Copied")).not.toBeInTheDocument();
+  });
+
+  it("gives every instance its own editor field id", async () => {
+    render(
+      <>
+        <AgentToolManualSetup />
+        <AgentToolManualSetup />
+      </>,
+      { wrapper: withQueryClient() },
+    );
+    for (const summary of screen.getAllByText("Manual setup")) fireEvent.click(summary);
+
+    // Both labels resolve to the first select when the id is hard-coded, so this
+    // waits for two distinct fields rather than the first one to appear.
+    await waitFor(() => expect(screen.getAllByLabelText("Editor")).toHaveLength(2));
+    const ids = screen.getAllByLabelText("Editor").map((select) => select.id);
+    expect(new Set(ids).size).toBe(2);
   });
 });
