@@ -410,6 +410,30 @@
     }
   },
   {
+    "name": "how_to_rescan",
+    "title": "How to rescan a site",
+    "description": "Explain how to get fresh scan results for a site. This tool does not queue a scan; it gives the exact CLI or desktop steps and what to call afterwards.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "list_fix_attempts",
     "title": "List fix attempts",
     "description": "List SiteCMD fix attempts that are currently open (briefed, verify_requested, or verifying).",
@@ -464,14 +488,14 @@
   },
   {
     "name": "request_scan",
-    "title": "How to rescan a site",
-    "description": "Return guidance for running a scan manually and then checking results via compare_scans. It only explains the manual scan flow.",
+    "title": "Deprecated alias of how_to_rescan",
+    "description": "Deprecated: call how_to_rescan. Kept until the next major SiteCMD release so existing agent configurations keep working. Explain how to get fresh scan results for a site. This tool does not queue a scan; it gives the exact CLI or desktop steps and what to call afterwards.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "url": {
           "type": "string",
-          "description": "The site URL to scan"
+          "description": "The site URL"
         }
       },
       "required": [

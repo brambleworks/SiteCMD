@@ -562,7 +562,7 @@ describe.concurrent(
       );
     });
 
-    it("fails when MCP README says request_scan queues desktop scans", () => {
+    it("fails when MCP README says how_to_rescan queues desktop scans", () => {
       expectGuardrailFailure(
         documentationSafetyFailures,
         (fixtureRoot) => {
@@ -571,16 +571,16 @@ describe.concurrent(
             fixtureRoot,
             "apps/mcp-server/README.md",
             readme.replace(
-              /\| `request_scan`[^\n]+/,
-              "| `request_scan`         | Ask SiteCMD to start or queue a scan through the desktop flow |",
+              /\| `how_to_rescan`[^\n]+/,
+              "| `how_to_rescan`        | Ask SiteCMD to start or queue a scan through the desktop flow |",
             ),
           );
         },
-        "sitecmd-mcp README must describe request_scan as guidance-only",
+        "sitecmd-mcp README must describe how_to_rescan as guidance-only",
       );
     });
 
-    it("fails when MCP request_scan tool copy says it starts desktop scans", () => {
+    it("fails when MCP how_to_rescan tool copy says it starts desktop scans", () => {
       expectGuardrailFailure(
         documentationSafetyFailures,
         (fixtureRoot) => {
@@ -589,12 +589,12 @@ describe.concurrent(
             fixtureRoot,
             "apps/mcp-server/src/server.ts",
             source.replace(
-              "Return guidance for running a scan manually and then checking results via compare_scans. It only explains the manual scan flow.",
+              "Explain how to get fresh scan results for a site. This tool does not queue a scan; it gives the exact CLI or desktop steps and what to call afterwards.",
               "Request a new scan in SiteCMD and start or queue desktop scans.",
             ),
           );
         },
-        "sitecmd-mcp request_scan tool description must stay guidance-only",
+        "sitecmd-mcp how_to_rescan tool description must stay guidance-only",
       );
     });
 

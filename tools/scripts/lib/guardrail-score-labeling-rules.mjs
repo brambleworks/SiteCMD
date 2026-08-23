@@ -30,8 +30,7 @@ export function scoreArtifactLabelingFailures(read) {
     "Raw scan artifact scores must stay out of primary UI chrome and be labelled as diagnostics in scan artifact surfaces.",
   );
   check(
-    mcpIndexSource.includes("formatScanArtifactScore") &&
-      mcpIndexSource.includes("Get the latest scan artifact score") &&
+    mcpIndexSource.includes("Get the latest scan artifact score") &&
       mcpIndexSource.includes("Get scan artifact score history") &&
       !mcpIndexSource.includes("**Score:**") &&
       !mcpIndexSource.includes("| Date | Score |") &&

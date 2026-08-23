@@ -56,9 +56,9 @@ the JavaScript output, and the bundle includes them beside the MCP entry point.
 stored by the desktop. Investigate it first when tools select the wrong project.
 
 Core tools read projects, scores, issues, prompts, history, dismissed state,
-scan comparisons, and fix attempts. `request_scan` remains guidance-only until
-it can actually queue a desktop scan. Fix-loop tools use only the bounded
-fix-attempt writes described above.
+scan comparisons, and fix attempts. `how_to_rescan` (alias `request_scan`)
+remains guidance-only; `run_scan` is the queued path once Task 11 lands.
+Fix-loop tools use only the bounded fix-attempt writes described above.
 
 Correlation tools are registered in `src/correlation_tools.ts`. They read
 Rust-computed groups and events, then walk generated graph and fix-location

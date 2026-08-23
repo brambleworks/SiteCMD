@@ -11,7 +11,7 @@ export function describeScanAge(timestamp: string, nowMs: number): string {
   const age = days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
   const stale =
     days >= STALE_SCAN_AFTER_DAYS
-      ? `. These results are ${days} days old and may be stale; ask the user to rescan (see request_scan) before fixing`
+      ? `. These results are ${days} days old and may be stale; ask the user to rescan (see how_to_rescan) before fixing`
       : "";
   return `Scanned ${date} (${age})${stale}`;
 }

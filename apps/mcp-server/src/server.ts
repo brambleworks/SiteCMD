@@ -29,7 +29,7 @@ import {
 } from "./db.js";
 import { formatCausalityBlock, rankWithCausalReach } from "./causal_graph.js";
 import { registerCorrelationTools } from "./correlation_tools.js";
-import { READ_ONLY, WRITES_LOCAL_DB, runTool, text } from "./tool_result.js";
+import { READ_ONLY, WRITES_LOCAL_DB, runTool, text, type ToolResult } from "./tool_result.js";
 import { describeScanAge } from "./freshness.js";
 import {
   getWorkspaceIssues,
@@ -147,10 +147,6 @@ export function resolveProjectId(args: { project_id?: number; url?: string }): n
     );
   }
   throw new Error("Pass project_id (from get_projects) or url.");
-}
-
-function formatScanArtifactScore(score: number): string {
-  return `${score}/100 scan artifact score`;
 }
 
 const CONFIDENCE_ORDER = ["confirmed", "high", "needs_review"] as const;
@@ -698,36 +694,47 @@ function registerCoreTools(server: McpServer): void {
       }),
   );
 
+  const HOW_TO_RESCAN_DESCRIPTION =
+    "Explain how to get fresh scan results for a site. This tool does not queue a scan; it gives the exact CLI or desktop steps and what to call afterwards."; // allow-machine-smell: negation, not the banned affirmative AI-tell
+
+  function howToRescan(url: string): ToolResult {
+    const latest = getLatestScanWithWorkspaceFallback(url);
+    return text(
+      [
+        `## How to rescan ${url}`,
+        "",
+        "SiteCMD does not queue a scan from this tool. Pick one path:", // allow-machine-smell: negation, describes what SiteCMD does NOT do
+        `1. CLI from the project folder: run \`sitecmd scan\` (it reads .sitecmd/config.json; if that folder is missing, run \`sitecmd init ${url}\` once). Without a config, run \`sitecmd scan --url ${url}\`. The CLI exports .sitecmd/ and syncs the desktop app when it is open.`,
+        "2. Desktop: open SiteCMD, select the project, and click Scan.",
+        "3. Then call `compare_scans` to see what was fixed, what is new, and what still fails.",
+        "",
+        latest
+          ? `**Last scan:** ${describeScanAge(latest.timestamp, Date.now())}; web scan graded ${latest.overall_score}/100 with ${latest.issues_total} findings.`
+          : "No previous scans found for this URL.",
+      ].join("\n"),
+    );
+  }
+
+  server.registerTool(
+    "how_to_rescan",
+    {
+      title: "How to rescan a site",
+      description: HOW_TO_RESCAN_DESCRIPTION,
+      inputSchema: { url: z.string().describe("The site URL") },
+      annotations: READ_ONLY,
+    },
+    async ({ url }) => runTool(() => howToRescan(url)),
+  );
+
   server.registerTool(
     "request_scan",
     {
-      title: "How to rescan a site",
-      description:
-        "Return guidance for running a scan manually and then checking results via compare_scans. It only explains the manual scan flow.",
-      inputSchema: { url: z.string().describe("The site URL to scan") },
+      title: "Deprecated alias of how_to_rescan",
+      description: `Deprecated: call how_to_rescan. Kept until the next major SiteCMD release so existing agent configurations keep working. ${HOW_TO_RESCAN_DESCRIPTION}`,
+      inputSchema: { url: z.string().describe("The site URL") },
       annotations: READ_ONLY,
     },
-    async ({ url }) =>
-      runTool(() => {
-        const latest = getLatestScanWithWorkspaceFallback(url);
-        const lines = [
-          `## Scan Request for ${url}`,
-          "",
-          `To verify your fixes:`,
-          `1. Run \`sitecmd scan\` inside the project or trigger a scan in the SiteCMD desktop app`,
-          `2. If the desktop app is running, the repo should sync automatically after export`,
-          `3. After the scan completes, use the \`compare_scans\` tool to see what changed`,
-          "",
-        ];
-        if (latest) {
-          lines.push(
-            `**Last scan:** ${latest.timestamp} - ${formatScanArtifactScore(latest.overall_score)} - ${latest.issues_total} issues`,
-          );
-        } else {
-          lines.push(`No previous scans found for this URL.`);
-        }
-        return text(lines.join("\n"));
-      }),
+    async ({ url }) => runTool(() => howToRescan(url)),
   );
 
   // Fix attempt tools

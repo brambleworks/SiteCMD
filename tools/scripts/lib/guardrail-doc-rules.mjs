@@ -138,9 +138,9 @@ export function documentationSafetyFailures(read, exists, listFiles) {
   ) {
     failures.push("sitecmd-mcp README must link the recovery runbook.");
   }
-  if (/`request_scan`\s*\|\s*Ask SiteCMD to start or queue a scan/.test(mcpReadmeSource)) {
+  if (/`how_to_rescan`\s*\|\s*Ask SiteCMD to start or queue a scan/.test(mcpReadmeSource)) {
     failures.push(
-      "sitecmd-mcp README must describe request_scan as guidance-only until it can actually queue desktop scans.",
+      "sitecmd-mcp README must describe how_to_rescan as guidance-only until it can actually queue desktop scans.",
     );
   }
   if (
@@ -149,7 +149,7 @@ export function documentationSafetyFailures(read, exists, listFiles) {
     )
   ) {
     failures.push(
-      "sitecmd-mcp request_scan tool description must stay guidance-only until it can actually queue desktop scans.",
+      "sitecmd-mcp how_to_rescan tool description must stay guidance-only until it can actually queue desktop scans.",
     );
   }
 
