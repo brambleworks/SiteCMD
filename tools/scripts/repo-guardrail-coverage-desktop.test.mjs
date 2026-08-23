@@ -1012,7 +1012,7 @@ describe.concurrent(
       expect(guardrails).toContain("Desktop scan logs must use log_safe_url_target");
       expect(guardrails).toContain("Desktop frontend logs must redact and truncate");
       expect(guardrails).toContain(
-        "Desktop issue dossier overlays must render through document.body",
+        "Desktop issue dossier overlays must render through the Dialog primitive",
       );
       expect(guardrails).toContain('window.open(..., "_blank") must include noopener,noreferrer');
       expect(guardrails).toContain(
@@ -1046,19 +1046,17 @@ describe.concurrent(
       expectGuardrailFailure(
         desktopFrontendStateFailures,
         (fixtureRoot) => {
-          const panel = readFixtureFile(
+          const dialogPrimitive = readFixtureFile(
             fixtureRoot,
-            "apps/desktop/src/components/issues/IssueDossierPanel.tsx",
+            "apps/desktop/src/components/ui/dialog.tsx",
           );
           writeFixtureFile(
             fixtureRoot,
-            "apps/desktop/src/components/issues/IssueDossierPanel.tsx",
-            panel
-              .replace('import { createPortal } from "react-dom";\n', "")
-              .replace("return createPortal(panel, document.body);", "return panel;"),
+            "apps/desktop/src/components/ui/dialog.tsx",
+            dialogPrimitive.replace("document.body,", "document.getElementById('root'),"),
           );
         },
-        "Desktop issue dossier overlays must render through document.body",
+        "Desktop issue dossier overlays must render through the Dialog primitive",
       );
     });
 

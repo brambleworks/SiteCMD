@@ -1,22 +1,5 @@
 @layer components {
   /* Dossier overlay (full-width, slide-up) */
-  .dossier-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-    background-color: var(--background);
-    transition: opacity 200ms ease-out;
-    pointer-events: none;
-  }
-  .dossier-backdrop-visible {
-    opacity: 0.72;
-    pointer-events: auto;
-  }
-  .dossier-backdrop-hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-
   .details-panel {
     display: flex;
     flex-direction: column;

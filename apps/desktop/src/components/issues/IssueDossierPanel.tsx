@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { ArrowLeft, ChevronRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { severityToneClass } from "@/lib/severity";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 
 type BadgeTone = "default" | "critical" | "warning" | "success" | "info" | "muted";
 
@@ -84,7 +84,6 @@ export function IssueDossierPanel({
 }: IssueDossierPanelProps) {
   const [visible, setVisible] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const hasRails = Boolean(leftRail || rightRail);
 
@@ -103,9 +102,9 @@ export function IssueDossierPanel({
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setVisible(true));
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") requestClose();
-    };
+    // Dialog owns Escape and the top layer; this listener only replaces the
+    // native backdrop-click dismissal, which the dossier-switch rows below
+    // must be able to opt out of (dismissOnBackdrop is false on the Dialog).
     const onPointerDown = (event: PointerEvent) => {
       const targetNode = event.target instanceof Node ? event.target : null;
       const targetElement =
@@ -113,118 +112,104 @@ export function IssueDossierPanel({
       if (targetElement?.closest(DOSSIER_SWITCH_SELECTOR)) {
         return;
       }
-      if (panelRef.current && targetNode && !panelRef.current.contains(targetNode)) {
+      if (targetElement && !targetElement.closest(".details-panel")) {
+        // A click on the dialog's own backdrop, as opposed to some unrelated
+        // outside element: never let it reach the app shell underneath.
+        if (targetElement instanceof HTMLDialogElement) {
+          event.stopPropagation();
+        }
         requestClose();
       }
     };
-    window.addEventListener("keydown", onKeyDown);
     window.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       window.cancelAnimationFrame(frame);
-      window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("pointerdown", onPointerDown, true);
       if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
     };
   }, [requestClose]);
 
-  const panel = (
-    <>
-      <div
-        className={cn(
-          "dossier-backdrop",
-          visible ? "dossier-backdrop-visible" : "dossier-backdrop-hidden",
-        )}
-        aria-hidden="true"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          requestClose();
-        }}
-      />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={cn("details-panel", visible ? "details-panel-visible" : "details-panel-hidden")}>
-        <div className="details-header">
-          <div className="dossier-header-row">
-            <div className="dossier-header-main">
-              {onBack ? (
-                <Button
-                  unstyled
-                  type="button"
-                  onClick={onBack}
-                  aria-label="Back to previous issue"
-                  className="details-back">
-                  <ArrowLeft className="icon-md" />
-                </Button>
-              ) : null}
-              <div className="dossier-header-text">
-                <p className={cn("details-eyebrow", eyebrowClassName)}>{eyebrow}</p>
-                <h2 className="details-title">{title}</h2>
-                {subtitle ? <p className="details-subtitle">{subtitle}</p> : null}
-                {badges.length > 0 ? (
-                  <div className="dossier-badge-row">
-                    {badges.map((badge) => (
-                      <span
-                        key={badge.label}
-                        className={cn("dossier-badge", BADGE_STYLES[badge.tone ?? "default"])}>
-                        {badge.label}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            {meta && meta.length > 0 ? (
-              <div className="dossier-header-side">
-                <div className="dossier-meta-grid">
-                  {meta.map((item) => (
-                    <div key={item.label}>
-                      <p className="dossier-meta-label">{item.label}</p>
-                      <p className={cn("dossier-meta-value", item.mono && "font-mono")}>
-                        {item.value}
-                      </p>
-                    </div>
+  return (
+    <Dialog
+      label={title}
+      onClose={requestClose}
+      dismissOnBackdrop={false}
+      className={cn("details-panel", visible ? "details-panel-visible" : "details-panel-hidden")}>
+      <div className="details-header">
+        <div className="dossier-header-row">
+          <div className="dossier-header-main">
+            {onBack ? (
+              <Button
+                unstyled
+                type="button"
+                onClick={onBack}
+                aria-label="Back to previous issue"
+                className="details-back">
+                <ArrowLeft className="icon-md" />
+              </Button>
+            ) : null}
+            <div className="dossier-header-text">
+              <p className={cn("details-eyebrow", eyebrowClassName)}>{eyebrow}</p>
+              <h2 className="details-title">{title}</h2>
+              {subtitle ? <p className="details-subtitle">{subtitle}</p> : null}
+              {badges.length > 0 ? (
+                <div className="dossier-badge-row">
+                  {badges.map((badge) => (
+                    <span
+                      key={badge.label}
+                      className={cn("dossier-badge", BADGE_STYLES[badge.tone ?? "default"])}>
+                      {badge.label}
+                    </span>
                   ))}
                 </div>
-                {headerActions ? (
-                  <div className="dossier-header-actions-slot">{headerActions}</div>
-                ) : null}
+              ) : null}
+            </div>
+          </div>
+
+          {meta && meta.length > 0 ? (
+            <div className="dossier-header-side">
+              <div className="dossier-meta-grid">
+                {meta.map((item) => (
+                  <div key={item.label}>
+                    <p className="dossier-meta-label">{item.label}</p>
+                    <p className={cn("dossier-meta-value", item.mono && "font-mono")}>
+                      {item.value}
+                    </p>
+                  </div>
+                ))}
               </div>
-            ) : headerActions ? (
-              <div className="dossier-header-side dossier-header-side-actions-only">
+              {headerActions ? (
                 <div className="dossier-header-actions-slot">{headerActions}</div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
+          ) : headerActions ? (
+            <div className="dossier-header-side dossier-header-side-actions-only">
+              <div className="dossier-header-actions-slot">{headerActions}</div>
+            </div>
+          ) : null}
 
-            <Button
-              unstyled
-              type="button"
-              onClick={requestClose}
-              aria-label="Close details panel"
-              className="details-close">
-              <X />
-            </Button>
-          </div>
+          <Button
+            unstyled
+            type="button"
+            onClick={requestClose}
+            aria-label="Close details panel"
+            className="details-close">
+            <X />
+          </Button>
         </div>
-
-        <div className={cn("details-body", hasRails && "details-body-railed")}>
-          {leftRail ? <aside className="dossier-left-rail">{leftRail}</aside> : null}
-          <div className="dossier-center">
-            <div className="dossier-section-stack">{children}</div>
-          </div>
-          {rightRail ? <aside className="dossier-right-rail">{rightRail}</aside> : null}
-        </div>
-
-        {footer ? <div className="details-footer">{footer}</div> : null}
       </div>
-    </>
-  );
 
-  return createPortal(panel, document.body);
+      <div className={cn("details-body", hasRails && "details-body-railed")}>
+        {leftRail ? <aside className="dossier-left-rail">{leftRail}</aside> : null}
+        <div className="dossier-center">
+          <div className="dossier-section-stack">{children}</div>
+        </div>
+        {rightRail ? <aside className="dossier-right-rail">{rightRail}</aside> : null}
+      </div>
+
+      {footer ? <div className="details-footer">{footer}</div> : null}
+    </Dialog>
+  );
 }
 
 export function DossierSection({

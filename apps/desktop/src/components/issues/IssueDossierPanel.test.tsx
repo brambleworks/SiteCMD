@@ -46,10 +46,11 @@ describe("IssueDossierPanel", () => {
     );
 
     const panel = screen.getByRole("dialog", { name: "Missing canonical tag" });
-    const backdrop = document.querySelector(".dossier-backdrop");
 
+    // The native <dialog> is portaled straight to document.body, so it (and its
+    // native ::backdrop) always escapes a transformed or overflow-hidden ancestor.
+    expect(panel.tagName).toBe("DIALOG");
     expect(panel.parentElement).toBe(document.body);
-    expect(backdrop?.parentElement).toBe(document.body);
     expect(panel.closest("[data-testid='page-shell']")).toBeNull();
   });
 
@@ -66,10 +67,9 @@ describe("IssueDossierPanel", () => {
       </div>,
     );
 
-    const backdrop = document.querySelector(".dossier-backdrop");
-    expect(backdrop).toHaveClass("dossier-backdrop");
+    const dialog = screen.getByRole("dialog", { name: "Missing canonical tag" });
 
-    fireEvent.pointerDown(backdrop!);
+    fireEvent.pointerDown(dialog);
 
     act(() => {
       vi.advanceTimersByTime(180);
