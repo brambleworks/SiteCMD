@@ -1,13 +1,98 @@
 use super::token_state::TokenStore;
 use super::{
     arg_i64, arg_string, privileged_action_argument_summary, privileged_action_sentence,
-    privileged_token_issue_requires_user_intent, PrivilegedCommandTokenState, DATA_ADMIN_COMMANDS,
-    FILESYSTEM_EXPORT_COMMANDS, PROJECT_EXECUTION_COMMANDS, SENSITIVE_CONNECTOR_COMMANDS,
+    privileged_token_issue_requires_user_intent, BrokerScope, PrivilegedCommandRequest,
+    PrivilegedCommandTokenState, DATA_ADMIN_COMMANDS, FILESYSTEM_EXPORT_COMMANDS,
+    PROJECT_EXECUTION_COMMANDS, SCOPES, SENSITIVE_CONNECTOR_COMMANDS,
     SENSITIVE_FILESYSTEM_ACCESS_COMMANDS,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::time::Duration;
+
+#[test]
+fn every_scope_admits_only_allowlisted_commands_with_live_tokens() {
+    let tokens = TokenStore::new(Duration::from_secs(15));
+    assert_eq!(SCOPES.len(), 5);
+    for scope in SCOPES {
+        let unknown = PrivilegedCommandRequest {
+            command: "not_a_command".into(),
+            args: json!({}),
+            token: None,
+            response_event: None,
+        };
+        assert_eq!(
+            scope.admit(&tokens, &unknown).unwrap_err(),
+            format!("Unsupported {} command.", scope.label)
+        );
+
+        let stale = PrivilegedCommandRequest {
+            command: scope.allowlist[0].into(),
+            args: json!({}),
+            token: Some("0000000000000000000000000000000000000000000000000000000000000000".into()),
+            response_event: None,
+        };
+        assert!(scope
+            .admit(&tokens, &stale)
+            .unwrap_err()
+            .contains("invalid or expired"));
+
+        for command in scope.allowlist {
+            let token = tokens
+                .issue(scope.broker_command, command, &json!({}))
+                .unwrap();
+            let live = PrivilegedCommandRequest {
+                command: (*command).into(),
+                args: json!({}),
+                token: Some(token),
+                response_event: None,
+            };
+            assert!(
+                scope.admit(&tokens, &live).is_ok(),
+                "{} {command}",
+                scope.broker_command
+            );
+            assert!(
+                scope.admit(&tokens, &live).is_err(),
+                "tokens are single-use: {} {command}",
+                scope.broker_command
+            );
+        }
+        assert_eq!(
+            BrokerScope::by_broker(scope.broker_command).map(|found| found.label),
+            Some(scope.label)
+        );
+    }
+}
+
+#[test]
+fn every_run_entry_point_admits_through_the_scope_table() {
+    for (file, source) in [
+        ("data_admin.rs", include_str!("data_admin.rs")),
+        (
+            "external_connectors.rs",
+            include_str!("external_connectors.rs"),
+        ),
+        ("filesystem_access.rs", include_str!("filesystem_access.rs")),
+        ("filesystem_export.rs", include_str!("filesystem_export.rs")),
+        ("project_execution.rs", include_str!("project_execution.rs")),
+    ] {
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert_eq!(
+            production.matches(".admit(").count(),
+            1,
+            "{file} must admit exactly once"
+        );
+        assert!(
+            !production.contains("token_state.consume("),
+            "{file} must not consume tokens outside admit"
+        );
+        assert!(
+            !production.contains("Unsupported {SCOPE_LABEL} command."),
+            "{file} must not format its own refusal"
+        );
+    }
+}
 
 #[test]
 fn issued_token_rejects_after_ttl() {

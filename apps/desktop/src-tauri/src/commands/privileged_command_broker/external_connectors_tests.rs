@@ -30,12 +30,6 @@ fn stale_token_is_rejected_before_any_work() {
 }
 
 #[test]
-fn unknown_command_returns_scope_labelled_error() {
-    let unsupported = format!("Unsupported {SCOPE_LABEL} command.");
-    assert_eq!(unsupported, "Unsupported external connector command.");
-}
-
-#[test]
 fn public_allowlist_matches_domain_dispatchers() {
     let mut allowlist = EXTERNAL_CONNECTOR_COMMANDS.to_vec();
     let mut routed = dispatch::routed_commands();

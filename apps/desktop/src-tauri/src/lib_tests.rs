@@ -115,15 +115,12 @@ fn broker_only_command_names() -> BTreeSet<String> {
     ] {
         commands.extend(command_permissions_from_commands_allow(src));
     }
-    for scope in [
-        crate::commands::DATA_ADMIN_COMMANDS,
-        crate::commands::EXTERNAL_CONNECTOR_COMMANDS,
-        crate::commands::FILESYSTEM_ACCESS_COMMANDS,
-        crate::commands::FILESYSTEM_EXPORT_COMMANDS,
-        crate::commands::PROJECT_EXECUTION_COMMANDS,
-    ] {
-        commands.extend(scope.iter().map(|command| command.to_string()));
-    }
+    commands.extend(
+        crate::commands::privileged_command_broker::SCOPES
+            .iter()
+            .flat_map(|scope| scope.allowlist)
+            .map(|command| command.to_string()),
+    );
     commands
 }
 

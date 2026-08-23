@@ -29,7 +29,7 @@ mod issue_links;
 pub(crate) mod issue_source_capabilities;
 pub(crate) mod issues;
 mod oauth;
-mod privileged_command_broker;
+pub(crate) mod privileged_command_broker;
 mod project;
 mod project_dashboard;
 mod project_git;

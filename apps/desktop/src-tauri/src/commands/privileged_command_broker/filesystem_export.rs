@@ -40,17 +40,10 @@ pub async fn run_filesystem_export_command(
     token_state: State<'_, PrivilegedCommandTokenState>,
     request: PrivilegedCommandRequest,
 ) -> Result<Value, String> {
-    let command = request.command;
-    if !FILESYSTEM_EXPORT_COMMANDS.contains(&command.as_str()) {
-        return Err(format!("Unsupported {SCOPE_LABEL} command."));
-    }
-    token_state.consume(
-        request.token.as_deref(),
-        BROKER_COMMAND,
-        &command,
-        &request.args,
-    )?;
-    dispatch(app, db, command, request.args).await
+    super::BrokerScope::by_broker(BROKER_COMMAND)
+        .expect("registered scope")
+        .admit(&token_state, &request)?;
+    dispatch(app, db, request.command, request.args).await
 }
 
 async fn dispatch(
@@ -85,7 +78,9 @@ async fn dispatch(
             .await?;
             json_response(())
         }
-        _ => Err(format!("Unsupported {SCOPE_LABEL} command.")),
+        // `BrokerScope::admit` already checked `command` against
+        // `FILESYSTEM_EXPORT_COMMANDS`, so every string reaching here has a match arm.
+        _ => unreachable!("admit validated {command} against the {SCOPE_LABEL} allowlist"),
     }
 }
 
@@ -120,12 +115,6 @@ mod tests {
             error.contains("invalid or expired"),
             "unexpected error message: {error}"
         );
-    }
-
-    #[test]
-    fn unknown_command_returns_scope_labelled_error() {
-        let unsupported = format!("Unsupported {SCOPE_LABEL} command.");
-        assert_eq!(unsupported, "Unsupported filesystem export command.");
     }
 
     #[test]

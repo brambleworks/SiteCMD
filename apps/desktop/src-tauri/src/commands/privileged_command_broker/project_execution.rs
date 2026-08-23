@@ -39,17 +39,10 @@ pub async fn run_project_execution_command(
     token_state: State<'_, PrivilegedCommandTokenState>,
     request: PrivilegedCommandRequest,
 ) -> Result<Value, String> {
-    let command = request.command;
-    if !PROJECT_EXECUTION_COMMANDS.contains(&command.as_str()) {
-        return Err(format!("Unsupported {SCOPE_LABEL} command."));
-    }
-    token_state.consume(
-        request.token.as_deref(),
-        BROKER_COMMAND,
-        &command,
-        &request.args,
-    )?;
-    dispatch(app, db, command, request.args).await
+    super::BrokerScope::by_broker(BROKER_COMMAND)
+        .expect("registered scope")
+        .admit(&token_state, &request)?;
+    dispatch(app, db, request.command, request.args).await
 }
 
 async fn dispatch(
@@ -70,6 +63,8 @@ async fn dispatch(
             .await?;
             json_response(result)
         }
-        _ => Err(format!("Unsupported {SCOPE_LABEL} command.")),
+        // `BrokerScope::admit` already checked `command` against
+        // `PROJECT_EXECUTION_COMMANDS`, so every string reaching here has a match arm.
+        _ => unreachable!("admit validated {command} against the {SCOPE_LABEL} allowlist"),
     }
 }
