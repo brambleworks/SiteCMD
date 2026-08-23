@@ -611,3 +611,8 @@ export function getScanHistory(url: string, limit = 10): ScanScore[] {
     )
     .all(noSlash, withSlash, limit) as unknown as ScanScore[];
 }
+
+/** Scan ids come from get_scan_history; the workspace cache has no ids (scan_id 0). */
+export function getScanById(url: string, scanId: number): ScanScore | null {
+  return getScanHistory(url, 100).find((scan) => scan.scan_id === scanId) ?? null;
+}

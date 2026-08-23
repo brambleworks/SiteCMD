@@ -1,53 +1,95 @@
 [
   {
     "name": "compare_scans",
-    "description": "Compare the two most recent scans for a URL - shows what was fixed, what's new, and what regressed. Use after making fixes to verify they worked.",
+    "title": "Compare two web scans",
+    "description": "Compare two web scans for a URL by id (default: the two most recent) - shows what was fixed, what's new, and what regressed. Use after making fixes to verify they worked.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "url": {
           "type": "string",
           "description": "The site URL"
+        },
+        "from_scan_id": {
+          "description": "Older scan id from get_scan_history; default: the previous scan",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "to_scan_id": {
+          "description": "Newer scan id; default: the latest scan",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": ["url"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_active_correlations",
+    "title": "Active issue correlations",
     "description": "Returns all active issue groups for a project with v3 correlation enrichments: transitive causes, downstream effects, recent events, integration enrichments, cross-environment signals, cross-project patterns, observation counts, and anomaly scores. Data is read directly from the local SiteCMD SQLite DB.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project_id": {
+          "description": "Project id from get_projects",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "url": {
+          "description": "Site URL, used when project_id is unknown",
+          "type": "string"
         }
       },
-      "required": ["project_id"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_causal_graph",
+    "title": "Causal graph",
     "description": "Returns the active causal graph for a project as a node-link payload, suitable for visualization. Nodes are active check_ids; edges connect causally related pairs where both endpoints are currently active.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project_id": {
+          "description": "Project id from get_projects",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "url": {
+          "description": "Site URL, used when project_id is unknown",
+          "type": "string"
         }
       },
-      "required": ["project_id"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_dismissed_issues",
+    "title": "List dismissed and suppressed issues",
     "description": "Get issues that have been dismissed/triaged for a site - AI should skip these when suggesting fixes",
     "inputSchema": {
       "type": "object",
@@ -59,10 +101,17 @@
       },
       "required": ["url"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_fix_brief",
+    "title": "Read a fix brief",
     "description": "Read the full SiteCMD fix brief for a fix attempt. The brief describes one website/code issue, where to fix it in the repository, and the acceptance criteria.",
     "inputSchema": {
       "type": "object",
@@ -75,10 +124,17 @@
       },
       "required": ["attempt_id"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_fix_prompts",
+    "title": "Get fix prompts",
     "description": "Get AI-ready fix prompts for failing checks. Project-derived evidence is explicitly marked as untrusted data.",
     "inputSchema": {
       "type": "object",
@@ -99,10 +155,17 @@
       },
       "required": ["url"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_issues",
+    "title": "List open issues",
     "description": "Get open failing issues from the latest scan, optionally filtered by severity/category. Scan-derived titles, descriptions, and evidence are explicitly marked as untrusted data.",
     "inputSchema": {
       "type": "object",
@@ -128,47 +191,78 @@
       },
       "required": ["url"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_likely_causes",
+    "title": "Likely causes of a check",
     "description": "Returns direct and transitive likely causes for a specific check_id in a project, computed from the active issue graph and curated causal links. Direct causes are transitive causes at depth 1.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project_id": {
+          "description": "Project id from get_projects",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "url": {
+          "description": "Site URL, used when project_id is unknown",
+          "type": "string"
         },
         "check_id": {
           "type": "string",
           "minLength": 1
         }
       },
-      "required": ["project_id", "check_id"],
+      "required": ["check_id"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_projects",
-    "description": "List all projects tracked by SiteCMD with their URLs and frameworks",
+    "title": "List SiteCMD projects",
+    "description": "List every project SiteCMD tracks with its id, production URL, framework, and linked folder. Use the id with the correlation tools and the URL with the scan tools.",
     "inputSchema": {
       "type": "object",
       "properties": {},
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_recent_events",
+    "title": "Recent site events",
     "description": "Returns SiteEvents tied to check_ids within the last N days. Reads from the events and site_event_check_ids tables.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project_id": {
+          "description": "Project id from get_projects",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "url": {
+          "description": "Site URL, used when project_id is unknown",
+          "type": "string"
         },
         "days": {
           "default": 30,
@@ -177,12 +271,18 @@
           "maximum": 365
         }
       },
-      "required": ["project_id"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_scan_history",
+    "title": "Web scan history",
     "description": "Get scan artifact score history over time for a site URL",
     "inputSchema": {
       "type": "object",
@@ -193,16 +293,25 @@
         },
         "limit": {
           "default": 10,
-          "description": "Number of recent scans to return",
-          "type": "number"
+          "description": "Recent scans to return (1-100)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
         }
       },
       "required": ["url"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "get_scan_score",
+    "title": "Get the SiteCMD Score",
     "description": "Get the latest scan artifact score and category breakdown for a site URL",
     "inputSchema": {
       "type": "object",
@@ -214,27 +323,46 @@
       },
       "required": ["url"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "list_fix_attempts",
+    "title": "List fix attempts",
     "description": "List SiteCMD fix attempts that are currently open (briefed, verify_requested, or verifying).",
     "inputSchema": {
       "type": "object",
       "properties": {},
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "preview_deploy_risk",
+    "title": "Preview deploy risk",
     "description": "Given a list of files about to be changed in a deploy, predicts which active issues are likely to regress (direct match against fix_locations.json candidate paths) and which downstream effects might cascade via the causal graph.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project_id": {
+          "description": "Project id from get_projects",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "url": {
+          "description": "Site URL, used when project_id is unknown",
+          "type": "string"
         },
         "changed_files": {
           "minItems": 1,
@@ -244,12 +372,19 @@
           }
         }
       },
-      "required": ["project_id", "changed_files"],
+      "required": ["changed_files"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "request_scan",
+    "title": "How to rescan a site",
     "description": "Return guidance for running a scan manually and then checking results via compare_scans. It only explains the manual scan flow.",
     "inputSchema": {
       "type": "object",
@@ -261,10 +396,17 @@
       },
       "required": ["url"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "request_verification",
+    "title": "Request verification of a fix",
     "description": "Tell SiteCMD a fix attempt is complete so it can re-run the check and verify the fix. This does NOT mark the issue fixed; SiteCMD verifies independently.",
     "inputSchema": {
       "type": "object",
@@ -283,18 +425,30 @@
       },
       "required": ["attempt_id", "summary"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   },
   {
     "name": "whatif_resolve",
+    "title": "What-if resolve",
     "description": "Given a hypothetical set of resolved check_ids, returns the downstream effects likely to also resolve, calibrated by observation history from causal_link_observations.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "project_id": {
+          "description": "Project id from get_projects",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "url": {
+          "description": "Site URL, used when project_id is unknown",
+          "type": "string"
         },
         "hypothetical_resolved": {
           "minItems": 1,
@@ -304,8 +458,14 @@
           }
         }
       },
-      "required": ["project_id", "hypothetical_resolved"],
+      "required": ["hypothetical_resolved"],
       "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
     }
   }
 ]

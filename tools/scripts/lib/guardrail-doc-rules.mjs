@@ -116,8 +116,16 @@ export function documentationSafetyFailures(read, exists, listFiles) {
     "apps/mcp-server/src/correlation_tools.ts",
   ];
   const mcpToolNames = mcpToolSources.flatMap((file) =>
-    Array.from(read(file).matchAll(/server\.tool\(\s*\n\s*"([^"]+)"/g), (match) => match[1]),
+    Array.from(read(file).matchAll(/registerTool\(\s*\n\s*"([^"]+)"/g), (match) => match[1]),
   );
+  const legacyToolRegistrations = mcpToolSources.filter((file) =>
+    /\bserver\.tool\(/.test(read(file)),
+  );
+  if (legacyToolRegistrations.length > 0) {
+    failures.push(
+      `sitecmd-mcp must register tools with registerTool and annotations, never the deprecated server.tool: ${legacyToolRegistrations.join(", ")}`,
+    );
+  }
   const undocumentedMcpTools = mcpToolNames.filter(
     (toolName) => !mcpReadmeSource.includes(`\`${toolName}\``),
   );

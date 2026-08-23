@@ -1225,6 +1225,7 @@ fn category_str(category: &ScanCategory) -> &'static str {
       expect(guardrails).toContain("Full Scan -> Dashboard guided flow");
       expect(guardrails).toContain("tested Node 22.22.1+ requirement");
       expect(guardrails).toContain("README tool table must list every registered MCP tool");
+      expect(guardrails).toContain("must register tools with registerTool and annotations");
       expect(guardrails).toContain("machine-specific absolute Markdown links");
       expect(guardrails).toContain("legacy aliases");
       expect(guardrails).toContain("guidance-only until it can actually queue desktop scans");
