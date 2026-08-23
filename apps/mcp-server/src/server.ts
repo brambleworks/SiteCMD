@@ -550,7 +550,7 @@ function registerCoreTools(server: McpServer): void {
             : null,
           causal ? causal : null,
           attempt
-            ? `Fix attempt: #${attempt.id} [${attempt.status}]${attempt.failure_detail ? ` - ${attempt.failure_detail}` : ""}`
+            ? `Fix attempt: #${attempt.id} [${attempt.status}]${attempt.failure_detail ? ` - ${quoteUntrustedText(attempt.failure_detail, 500)}` : ""}`
             : "Fix attempt: none yet; the user can start one from this issue in SiteCMD.",
         ];
         const body = sections.filter((section) => section !== null).join("\n\n");
@@ -956,11 +956,13 @@ function registerCoreTools(server: McpServer): void {
         },
         async (setup) => {
           const projectNote = setup.projectName
-            ? ` (resolved to project "${setup.projectName}")`
+            ? `\n\n${UNTRUSTED_DATA_INSTRUCTION}\n\n${untrustedScanData(
+                `Resolved project name: ${quoteUntrustedText(setup.projectName, 200)}`,
+              )}`
             : "";
           if (!readDesktopHeartbeat(setup.now).alive || !wait) {
             return text(
-              `Fix request #${setup.requestId} for ${check_id} is pending${projectNote}. ${desktopStatusLine(setup.now)} Call get_fix_status with request_id=${setup.requestId} to pick up the attempt id.`,
+              `Fix request #${setup.requestId} for ${check_id} is pending. ${desktopStatusLine(setup.now)} Call get_fix_status with request_id=${setup.requestId} to pick up the attempt id.${projectNote}`,
             );
           }
           const settled = await waitForAgentRequest(setup.requestId, START_FIX_WAIT_MS);
@@ -984,7 +986,7 @@ function registerCoreTools(server: McpServer): void {
             `Fix request #${setup.requestId}`,
           );
           return text(
-            `Fix attempt #${attemptId} is briefed${projectNote}. Call get_fix_brief with attempt_id=${attemptId}, make the fix, then call request_verification with the same id and a one-paragraph summary.`,
+            `Fix attempt #${attemptId} is briefed. Call get_fix_brief with attempt_id=${attemptId}, make the fix, then call request_verification with the same id and a one-paragraph summary.${projectNote}`,
           );
         },
       ),
@@ -1031,7 +1033,7 @@ function registerCoreTools(server: McpServer): void {
         const now = Date.now();
         const { label, awaitingDeploy } = deriveFixStatus(attempt);
         const lines = [
-          `Fix attempt #${attempt.id} for ${attempt.check_id} on ${attempt.env_url}`,
+          `Fix attempt #${attempt.id}`,
           `Status: ${label}`,
           attempt.verify_started_at
             ? `Verification started: ${new Date(attempt.verify_started_at).toISOString()}`
@@ -1039,11 +1041,23 @@ function registerCoreTools(server: McpServer): void {
           attempt.brief_fetched_at
             ? `Brief fetched: ${new Date(attempt.brief_fetched_at).toISOString()}`
             : null,
-          attempt.failure_detail ? `Failure detail: ${attempt.failure_detail}` : null,
           awaitingDeploy ? DEPLOY_WAIT_NOTE : null,
           desktopStatusLine(now),
         ];
-        return text(lines.filter((line) => line !== null).join("\n"));
+        const attemptFields = [
+          `Check: ${quoteUntrustedText(attempt.check_id, 300)}`,
+          `Site: ${quoteUntrustedText(attempt.env_url, 500)}`,
+          attempt.failure_detail
+            ? `Failure detail: ${quoteUntrustedText(attempt.failure_detail, 2000)}`
+            : null,
+        ];
+        return text(
+          [
+            lines.filter((line) => line !== null).join("\n"),
+            UNTRUSTED_DATA_INSTRUCTION,
+            untrustedScanData(attemptFields.filter((field) => field !== null).join("\n")),
+          ].join("\n\n"),
+        );
       }),
   );
 
@@ -1117,6 +1131,7 @@ function registerCoreTools(server: McpServer): void {
         if (!request) throw new Error(`No scan request #${request_id}.`);
         const now = Date.now();
         const lines = [`Scan request #${request.id}: ${request.status}.`];
+        let failureNote = "";
         if (request.status === "fulfilled") {
           const { executionId, status } = parseFulfilledExecution(
             request.result_json,
@@ -1125,13 +1140,15 @@ function registerCoreTools(server: McpServer): void {
           lines.push(`execution #${executionId} (${status}).`);
           lines.push("Call compare_scans to see what changed.");
         } else if (request.status === "failed") {
-          lines.push(`Failure detail: ${request.failure_detail ?? "unknown"}.`);
+          failureNote = `\n\n${UNTRUSTED_DATA_INSTRUCTION}\n\n${untrustedScanData(
+            `Failure detail: ${quoteUntrustedText(request.failure_detail ?? "unknown", 2000)}`,
+          )}`;
         } else if (request.status === "expired") {
           lines.push(REQUEST_EXPIRY_EXPLANATION);
         } else {
           lines.push(desktopStatusLine(now));
         }
-        return text(lines.join(" "));
+        return text(`${lines.join(" ")}${failureNote}`);
       }),
   );
 
@@ -1186,9 +1203,18 @@ function registerCoreTools(server: McpServer): void {
           return text("No open fix attempts. The user starts one from an issue in SiteCMD.");
         }
         const body = attempts
-          .map((a) => `• #${a.id} ${a.checkId} [${a.status}] via ${a.agentTool}`)
+          .map(
+            (a) =>
+              `• #${a.id} ${quoteUntrustedText(a.checkId, 300)} [${a.status}] via ${quoteUntrustedText(a.agentTool, 100)}`,
+          )
           .join("\n");
-        return text(body);
+        return text(
+          [
+            `${attempts.length} fix attempt(s):`,
+            UNTRUSTED_DATA_INSTRUCTION,
+            untrustedScanData(body),
+          ].join("\n\n"),
+        );
       }),
   );
 }

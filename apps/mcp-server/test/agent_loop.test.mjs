@@ -230,7 +230,8 @@ test("get_fix_status resolves a request_id to its attempt once the desktop fulfi
     .run(JSON.stringify({ attempt_id: attemptId, status: "briefed" }), Date.now(), requestId);
   const { text, isError } = await call("get_fix_status", { request_id: requestId });
   assert.equal(isError, false, text);
-  assert.match(text, new RegExp(`Fix attempt #${attemptId} for security\\.referrer`));
+  assert.match(text, new RegExp(`Fix attempt #${attemptId}\\b`));
+  assert.match(text, /Check: security\.referrer/);
   assert.match(text, /Status: briefed/);
 });
 

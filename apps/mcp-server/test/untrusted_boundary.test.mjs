@@ -81,6 +81,30 @@ test("every tool that prints scan data fences it", async () => {
     checkId: "security.csp",
     briefMd: `# SiteCMD Fix Brief: ${HOSTILE}\n\n${HOSTILE}`,
   });
+  fixtureDb
+    .prepare(`UPDATE fix_attempts SET failure_detail = ? WHERE id = ?`)
+    .run(HOSTILE, attemptId);
+  addFixAttempt({ projectId, envUrl: URL, checkId: HOSTILE, status: "briefed" });
+
+  // A second project on the same URL makes start_fix report which project it resolved to.
+  const rivalProjectId = 902;
+  ensureProject(fixtureDb, rivalProjectId);
+  fixtureDb
+    .prepare(
+      `INSERT OR IGNORE INTO environments (project_id, url, label, environment) VALUES (?, ?, 'Production', 'production')`,
+    )
+    .run(rivalProjectId, URL);
+
+  const now = Date.now();
+  const scanRequestId = Number(
+    fixtureDb
+      .prepare(
+        `INSERT INTO agent_requests
+           (kind, project_id, env_url, scope, agent_tool, status, failure_detail, created_at, updated_at)
+         VALUES ('run_scan', ?, ?, 'web', 'claude-code', 'failed', ?, ?, ?)`,
+      )
+      .run(projectId, URL, HOSTILE, now, now).lastInsertRowid,
+  );
 
   const calls = [
     ["get_projects", {}],
@@ -95,6 +119,10 @@ test("every tool that prints scan data fences it", async () => {
     ["get_causal_graph", { project_id: projectId }],
     ["preview_deploy_risk", { project_id: projectId, changed_files: ["next.config.ts"] }],
     ["whatif_resolve", { project_id: projectId, hypothetical_resolved: ["security.csp"] }],
+    ["start_fix", { url: URL, check_id: "security.csp", wait: false }],
+    ["get_fix_status", { attempt_id: attemptId }],
+    ["get_scan_status", { request_id: scanRequestId }],
+    ["list_fix_attempts", {}],
   ];
   const session = await connectInMemory();
   try {
