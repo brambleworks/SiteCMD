@@ -23,7 +23,9 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -99,7 +101,9 @@
           "description": "The site URL"
         }
       },
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -122,7 +126,9 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["attempt_id"],
+      "required": [
+        "attempt_id"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -146,14 +152,21 @@
         "severity": {
           "description": "Filter by minimum severity",
           "type": "string",
-          "enum": ["critical", "high", "medium", "low"]
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
         },
         "category": {
           "description": "Filter by category",
           "type": "string"
         }
       },
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -177,19 +190,28 @@
         "status": {
           "description": "Filter by status (only fail/open issues are currently available)",
           "type": "string",
-          "enum": ["fail"]
+          "enum": [
+            "fail"
+          ]
         },
         "severity": {
           "description": "Filter by severity",
           "type": "string",
-          "enum": ["critical", "high", "medium", "low"]
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
         },
         "category": {
           "description": "Filter by category (security, performance, seo, accessibility, compliance, polish, config)",
           "type": "string"
         }
       },
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -221,7 +243,9 @@
           "minLength": 1
         }
       },
-      "required": ["check_id"],
+      "required": [
+        "check_id"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -299,7 +323,9 @@
           "maximum": 100
         }
       },
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -321,7 +347,9 @@
           "description": "The site URL (e.g. https://example.com)"
         }
       },
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -372,7 +400,9 @@
           }
         }
       },
-      "required": ["changed_files"],
+      "required": [
+        "changed_files"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -394,7 +424,9 @@
           "description": "The site URL to scan"
         }
       },
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -423,7 +455,10 @@
           "description": "One paragraph describing what was changed"
         }
       },
-      "required": ["attempt_id", "summary"],
+      "required": [
+        "attempt_id",
+        "summary"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
@@ -458,7 +493,9 @@
           }
         }
       },
-      "required": ["hypothetical_resolved"],
+      "required": [
+        "hypothetical_resolved"
+      ],
       "$schema": "http://json-schema.org/draft-07/schema#"
     },
     "annotations": {
