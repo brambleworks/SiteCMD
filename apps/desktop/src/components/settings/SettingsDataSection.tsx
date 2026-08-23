@@ -492,7 +492,7 @@ export function DataSection({
           <div className="settings-stack">
             <div className="row-between">
               <div>
-                <p className="text-body settings-danger-label text-red-400">
+                <p className="text-body settings-danger-label text-severity-critical">
                   Clear all scan history
                 </p>
                 <p className="subtitle-xs">

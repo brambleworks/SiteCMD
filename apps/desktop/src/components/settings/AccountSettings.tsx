@@ -275,7 +275,7 @@ export function AccountSection() {
                 </Button>
               ) : (
                 <div className="danger-callout-row">
-                  <p className="text-body-muted text-red-400 account-deactivate-warning">
+                  <p className="text-body-muted text-severity-critical account-deactivate-warning">
                     This will unlink your license from this device. You can reactivate it anytime.
                   </p>
                   <Button
@@ -367,7 +367,7 @@ export function AccountSection() {
               <ul className="plan-card-features">
                 {FOUNDER_BETA_FEATURES.map((feature) => (
                   <li key={feature} className="plan-card-feature body-muted">
-                    <Check className="icon-sm plan-card-feature-icon text-emerald-400" />
+                    <Check className="icon-sm plan-card-feature-icon text-score-excellent" />
                     {feature}
                   </li>
                 ))}

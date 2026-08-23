@@ -301,7 +301,7 @@ export function SearchConsolePage({
       ) : (
         <div className="stack-base">
           {gscError ? (
-            <p className="text-body text-amber-300 text-relaxed">
+            <p className="text-body text-severity-medium text-relaxed">
               Your Google sign-in expired. Sign in again to reconnect Search Console.
             </p>
           ) : null}
@@ -321,7 +321,7 @@ export function SearchConsolePage({
       ) : (
         <div className="stack-base">
           {bingError ? (
-            <p className="text-body text-amber-300 text-relaxed">
+            <p className="text-body text-severity-medium text-relaxed">
               Bing Webmaster Tools stopped syncing. Reconnect to restore it.
             </p>
           ) : null}

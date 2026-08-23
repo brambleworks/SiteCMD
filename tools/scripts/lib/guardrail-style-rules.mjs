@@ -101,6 +101,23 @@ export function desktopStyleConsistencyFailures(read, sourceFiles) {
     }
   }
 
+  // DESIGN.md "Signal, Not Accent": color in JSX is a score, severity, category,
+  // or brand token, never a raw palette step.
+  const RAW_PALETTE_CLASS_BUDGET = 0;
+  const RAW_PALETTE_CLASS_RE =
+    /\b(?:text|bg|border|fill|stroke)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/g;
+  const rawPaletteHits = [];
+  for (const file of cvaScanFiles) {
+    if (file.endsWith(".test.tsx") || file.endsWith(".test.ts")) continue;
+    const matches = read(file).match(RAW_PALETTE_CLASS_RE);
+    if (matches) rawPaletteHits.push(`${file} (${matches.join(", ")})`);
+  }
+  if (rawPaletteHits.length > RAW_PALETTE_CLASS_BUDGET) {
+    failures.push(
+      `Desktop raw palette classes regressed: ${rawPaletteHits.length} files (budget ${RAW_PALETTE_CLASS_BUDGET}). Use text-score-*, text-severity-*, text-category-*, or text-brand from styles/colors.css: ${rawPaletteHits.join(", ")}`,
+    );
+  }
+
   const arbitraryPxTextSizeBudget = 0;
   let arbitraryPxTextSizeCount = 0;
   for (const file of targetFiles) {

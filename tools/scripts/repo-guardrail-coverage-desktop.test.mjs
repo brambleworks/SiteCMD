@@ -156,6 +156,20 @@ describe.concurrent(
       );
     });
 
+    it("rejects raw Tailwind palette classes in favor of semantic tokens", () => {
+      expectGuardrailFailure(
+        desktopStyleConsistencyFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenPalette.tsx",
+            'export function BrokenPalette() { return <p className="text-emerald-300">ok</p>; }\n',
+          );
+        },
+        "Desktop raw palette classes regressed",
+      );
+    });
+
     it("rejects arbitrary pixel typography and spacing", () => {
       expectGuardrailFailure(
         desktopStyleConsistencyFailures,

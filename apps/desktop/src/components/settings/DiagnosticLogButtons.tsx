@@ -52,7 +52,7 @@ export function DiagnosticLogButtons() {
       <Button onClick={handleCopy} disabled={loading} variant="outline" size="sm">
         {copied ? (
           <>
-            <Check className="icon-sm text-emerald-400" /> Copied
+            <Check className="icon-sm text-score-excellent" /> Copied
           </>
         ) : (
           <>

@@ -12,7 +12,7 @@ export function RootCauseCallout({ causes, onOpenCause }: Props) {
 
   return (
     <div className="callout-root-cause">
-      <AlertTriangle className="callout-root-cause-icon icon-sm text-amber-500" />
+      <AlertTriangle className="callout-root-cause-icon icon-sm text-severity-medium" />
       <div>
         <div className="callout-root-cause-title">Likely root cause</div>
         <div className="callout-root-cause-body">

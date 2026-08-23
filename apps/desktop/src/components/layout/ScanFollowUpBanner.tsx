@@ -30,7 +30,9 @@ export function WorkflowFollowUpBanner({
         <div
           className={cn(
             "followup-banner-icon ghost-border",
-            isUrgent ? "followup-banner-icon--urgent text-amber-300" : "bg-muted text-primary",
+            isUrgent
+              ? "followup-banner-icon--urgent text-severity-medium"
+              : "bg-muted text-primary",
           )}>
           {isUrgent ? <AlertTriangle className="icon-md" /> : <Sparkles className="icon-md" />}
         </div>

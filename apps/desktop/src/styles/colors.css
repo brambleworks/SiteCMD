@@ -104,38 +104,8 @@
   color: currentColor;
 }
 /* palette shades used by name in JSX (status indicators, terminals) */
-.text-emerald-300 {
-  color: var(--emerald-300);
-}
-.text-emerald-400 {
-  color: var(--emerald-400);
-}
-.text-red-300 {
-  color: var(--red-300);
-}
-.text-red-400 {
-  color: var(--red-400);
-}
-.text-amber-300 {
-  color: var(--amber-300);
-}
-.text-amber-400 {
-  color: var(--amber-400);
-}
-.text-amber-500 {
-  color: var(--amber-500);
-}
-.text-blue-200 {
-  color: var(--blue-200);
-}
-.text-blue-300 {
-  color: var(--blue-300);
-}
 .text-cyan-300 {
   color: var(--cyan-300);
-}
-.text-cyan-400 {
-  color: var(--cyan-400);
 }
 
 /* Background */

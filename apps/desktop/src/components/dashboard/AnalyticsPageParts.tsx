@@ -18,9 +18,9 @@ export function MetricCard({
     tone === "success"
       ? "text-score-excellent"
       : tone === "warning"
-        ? "text-amber-400"
+        ? "text-severity-medium"
         : tone === "critical"
-          ? "text-red-400"
+          ? "text-severity-critical"
           : "text-primary";
 
   return (
