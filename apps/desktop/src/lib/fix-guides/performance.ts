@@ -124,7 +124,7 @@ export const PERFORMANCE_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "performance.broken_images": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "An image on this page fails to load and shows a broken image icon instead of the picture visitors expect.",
+    lead: "An image on this page failed an automated load probe, though the result may be inconclusive rather than confirmed broken.",
     default: [
       "Check each sampled candidate's HTTP outcome against what the browser actually selects at representative viewports; an inconclusive probe is not a confirmed failure. For a selected 4xx/5xx response, restore the intended file, correct routing or the case-sensitive path, or remove the stale reference, and do not make a private image public merely to clear an unauthenticated probe.",
     ],
@@ -164,7 +164,7 @@ export const PERFORMANCE_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "performance.preconnect": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "The browser discovers a connection this page needs later than necessary, when a hint could have started it sooner.",
+    lead: "The browser discovers a connection this page needs later than necessary, when a preconnect hint could have started it sooner.",
     default: [
       "Use a production waterfall to find cross-origin connections needed for an early critical resource but discovered late; a missing preconnect is only an opportunity. Add a hint for the smallest proven set, with `crossorigin` when the eventual fetch uses CORS credentials mode, and remove hints that are unused or do not improve the critical path; there is no universal maximum that fits every page and browser.",
     ],
@@ -196,7 +196,7 @@ export const PERFORMANCE_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "performance.http_requests": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "This page loads a very large number of separate resources, which older browsers and connections can struggle to keep up with.",
+    lead: "This request count comes from an older scan version and is not a defect by itself under HTTP/2 or HTTP/3.",
     default: [
       "This is retained for findings created by older SiteCMD versions; request count alone is not a defect under HTTP/2/3. Re-measure the deployed page, rank resources by critical-path latency, transfer, and main-thread work, remove duplicate or unused resources and repeated third-party tags first, and bundle only when it shortens the critical dependency chain without hurting route-level caching or parallel loading.",
     ],

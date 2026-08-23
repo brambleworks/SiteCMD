@@ -12,7 +12,7 @@ export const CONFIG_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "config.localhost_refs": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "The live site contains a reference to a local development address, which will fail for any real visitor who loads it.",
+    lead: "Your local preview output contains loopback addresses that a production build may replace before it ships.",
     default: [
       "Inspect the exact reference in the served code and identify who resolves it; a loopback address can be correct for an intentional local companion service or a documented development-only path. If the browser should call the deployed origin, switch to a relative or canonical same-origin route, or inject a validated public endpoint with no silent localhost fallback, then exercise the feature from a different device to confirm every destination matches the intended topology.",
     ],

@@ -28,7 +28,7 @@ export const SEO_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "seo.open_graph": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "This page has no social preview information, so a shared link shows no title, image, or description on social platforms.",
+    lead: "This page's Open Graph tags are missing or incomplete, so link previews may fall back to weaker default information.",
     default: [
       "Add page-specific `og:title`, `og:description`, `og:image`, `og:url`, and `og:type` meta tags that match the visible page, with an absolute, publicly fetchable image URL in the dimensions and format supported by the platforms that matter. Fetch the deployed HTML and image as a logged-out client, then verify previews with current platform debuggers and refresh their caches where supported.",
     ],
@@ -60,7 +60,7 @@ export const SEO_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "seo.robots_txt": {
     effort: "quick",
     effortMinutes: 3,
-    lead: "Your robots.txt file blocks crawling across the whole site, which can keep search engines from indexing it at all.",
+    lead: "Your robots.txt file broadly blocks crawling by default, though a more specific crawler group could still override it.",
     default: [
       "Fetch the deployed `/robots.txt` and confirm whether the root-wide `Disallow` policy is intentional; a missing robots.txt is optional and normally means no crawl restrictions, so do not create one solely to clear this finding. If the site should be crawled, remove the wildcard disallow or narrow it to the exact low-value or unsafe-to-crawl paths, and treat robots rules as public crawl guidance, not authentication or guaranteed de-indexing.",
     ],
@@ -268,7 +268,7 @@ export const SEO_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "seo.faq_schema": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "The question-and-answer content on this page carries no matching markup, so it cannot be considered for an FAQ search result.",
+    lead: "This page's question-and-answer content has no matching structured data, though such markup never guarantees a search treatment.",
     default: [
       "Do not add question-oriented markup solely to obtain an assumed search treatment; check the target consumer's current supported-feature documentation first, since feature lists and eligibility change. Keep `FAQPage` or `HowTo` only when it truthfully describes visible content and serves a documented use, and note that `QAPage` is intended for a page centered on one question where users submit answers, not an authored FAQ; markup presence does not establish eligibility, a rich result, or ranking.",
     ],
@@ -300,7 +300,7 @@ export const SEO_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "seo.orphan_pages": {
     effort: "moderate",
     effortMinutes: 20,
-    lead: "Nothing else on your site links to this page, so a visitor browsing normally would have no way to discover it.",
+    lead: "No scanned page's initial HTML links to this page, though rendered navigation and direct visits are not part of this scan.",
     default: [
       "Treat the result as a bounded scanned graph, not proof a page is globally orphaned; SiteCMD only considers initial-HTML links between scanned pages and cannot see rendered navigation, authenticated states, or direct visits. Verify with a complete production crawl, then link useful discoverable pages from navigation, an index page, or related content where people would actually look, and keep deliberate landing or workflow routes unlisted, handling their sitemap and indexability separately.",
     ],

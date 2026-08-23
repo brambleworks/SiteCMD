@@ -4,7 +4,7 @@ export const ACCESSIBILITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "accessibility.axe": {
     effort: "moderate",
     effortMinutes: 20,
-    lead: "An automated Accessibility check found an element on this page that fails a known rule for assistive technology.",
+    lead: "An automated accessibility check found an element on this page that fails a known rule for assistive technology.",
     default: [
       "Inspect the flagged element in the rendered DOM using the evidence selector, then apply the remedy from the rule-specific Deque help URL to every affected node, not only the first. Do not silence axe or add unrelated ARIA to clear the finding. Re-run axe on the same rendered state and confirm keyboard and screen-reader behavior, because automated checks cannot prove complete accessibility.",
     ],
@@ -28,7 +28,7 @@ export const ACCESSIBILITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "accessibility.focus_indicators": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "An element on this page hides the visible outline that shows where keyboard focus is, with nothing put in its place.",
+    lead: "A style on this page removes the default focus outline without a visible replacement the scan could find nearby.",
     default: [
       "Inspect each surfaced outline reset in the rendered component; the static check sees source markers, not whether another rule or the browser default already supplies a visible indicator. Do not suppress the browser outline unless the same state gets an equally clear replacement, for example a `:focus-visible` outline with offset. Test Tab, Shift+Tab, and programmatic focus to confirm focus never becomes visually lost.",
     ],
@@ -52,7 +52,7 @@ export const ACCESSIBILITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "accessibility.skip_nav": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "A keyboard user has no way to skip repeated navigation and jump straight to this page's main content.",
+    lead: "No skip link was found on this page to help a keyboard user jump past repeated navigation to the main content.",
     default: [
       'Inspect the rendered page for an existing skip link, landmark strategy, or other bypass mechanism; if one is already effective for supported users, validate it rather than adding a duplicate control. Otherwise add a skip link near the start of the focus order targeting the real main-content container, such as `<a href="#main-content">`, keep it available to assistive technology and clearly revealed on focus, and test that activation bypasses the repeated block from a fresh load and after route changes.',
     ],
@@ -84,7 +84,7 @@ export const ACCESSIBILITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "accessibility.aria_usage": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "An Accessibility attribute on this page contradicts itself or points to something missing, which can confuse assistive technology.",
+    lead: "An ARIA attribute (the code that names controls for screen readers) on this page contradicts itself or points to nothing.",
     default: [
       'Start from the exact surfaced pattern; this static detector reports narrow recognized conflicts such as a focusable element marked `aria-hidden="true"` or an empty `aria-label`, not a complete ARIA audit. Either expose the operable element or make the hidden content genuinely inert, remove or correct an empty label, validate every referenced ID in the rendered DOM, and confirm role, name, state, and focus agree in the accessibility tree with a screen reader.',
     ],
@@ -132,7 +132,7 @@ export const ACCESSIBILITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "accessibility.redundant_alt": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "An image's alternative text repeats filler words like image of, adding length without any information a listener needs.",
+    lead: "An image's alternative text is only filler, like image of or just photo, instead of describing what the image shows.",
     default: [
       'Review the purpose, nearby text, and accessible name of each image before editing; remove leading words such as "image of" or "photo of" only when the medium itself is irrelevant, and keep medium information when it matters, such as distinguishing a photograph from a rendering. If the alternative is only "image" or "photo", replace it with useful context, or use `alt=""` only after confirming the image is decorative or redundant. Confirm the announcement with a screen reader.',
     ],

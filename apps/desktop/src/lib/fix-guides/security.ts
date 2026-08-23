@@ -149,7 +149,7 @@ export const SECURITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "security.source_maps": {
     effort: "quick",
     effortMinutes: 3,
-    lead: "Your production build ships source maps that let anyone reconstruct your original code, internal paths, and any embedded secrets.",
+    lead: "Your local preview output references source maps, and this scan did not confirm whether they are exposed in production.",
     default: [
       "Decide whether public source maps match the product's transparency and threat model; a map is not automatically a vulnerability, but it can reveal original source, internal paths, embedded endpoints, and accidentally bundled secrets. If browser access is unnecessary, generate hidden maps uploaded to an access-controlled monitoring service and exclude `.map` files plus public `sourceMappingURL` comments; search mapped sources for credentials and rotate anything truly exposed.",
     ],
@@ -229,7 +229,7 @@ export const SECURITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "security.cross_origin": {
     effort: "quick",
     effortMinutes: 10,
-    lead: "Your site's browsing window can still be reached and observed by other tabs and popups it did not intentionally open.",
+    lead: "Other sites that open this page can keep a live reference to its browser window instead of losing access to it.",
     default: [
       "Inventory cross-origin opener relationships, OAuth and payment popups, and postMessage flows first, because COOP changes browsing-context groups and there is no universal header value for every site. Use `same-origin` for strong isolation where compatible, or `same-origin-allow-popups` when the page must retain certain popups it opens, then test every popup, close/return flow, and authentication path in both directions on success and error pages.",
     ],

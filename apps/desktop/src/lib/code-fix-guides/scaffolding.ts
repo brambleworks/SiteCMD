@@ -29,7 +29,7 @@ export const SCAFFOLDING_FIX_GUIDES: Record<string, CodeFixGuideEntry> = {
   "agent-instructions-legacy-format": {
     effort: "moderate",
     effortMinutes: 20,
-    lead: "Agent guidance is stuck in an older single-file format instead of the scoped rules format modern editors expect.",
+    lead: "Agent guidance is stuck in one legacy file instead of the focused per-topic rules files modern editors expect.",
     default: [
       "Split the guidance into focused files in the editor's rules directory, scoping each rule to where it applies (for example, frontend conventions versus backend commands) so the editor only loads what is relevant. Then remove the legacy single file, or leave a short pointer if you still support an older version of the tool.",
     ],

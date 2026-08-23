@@ -28,7 +28,7 @@ export const COMPLIANCE_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "compliance.accessibility_statement": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "This site has no Accessibility statement, so visitors who hit a barrier have no documented way to report it.",
+    lead: "This site has no accessibility statement, so visitors who hit a barrier have no documented way to report it.",
     default: [
       "Confirm whether a public-sector rule, procurement contract, covered-service law, or internal commitment requires an accessibility statement; requirements vary by organization and jurisdiction. If one is required, base it on an actual assessment (scope, standard and version, testing method, date), do not claim WCAG conformance from an automated scan alone, list known limitations honestly, and publish it at a stable location with a working contact path for barrier reports.",
     ],
@@ -60,7 +60,7 @@ export const COMPLIANCE_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "compliance.dnt_respect": {
     effort: "moderate",
     effortMinutes: 10,
-    lead: "This site does not appear to change its behavior when a visitor's browser sends a recognized do-not-track signal.",
+    lead: "This site does not appear to change its behavior for a visitor's Do Not Track or Global Privacy Control signal.",
     default: [
       "Separate the signals: DNT is generally a voluntary browser preference, while GPC can be a legally recognized opt-out for covered businesses in some jurisdictions. Determine which activities each recognized signal must change, process it at server, tag-manager, and SDK boundaries rather than checking one browser property, and describe the actual behavior in the privacy notice without promising more than the implementation does. Test requests with and without Sec-GPC.",
     ],
@@ -77,7 +77,7 @@ export const COMPLIANCE_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "compliance.trackers": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "Third-party tracking scripts run on this site with no visible disclosure of what visitor data they actually collect.",
+    lead: "Known tracker provider scripts run on this site, and the scan cannot tell what visitor data they actually collect.",
     default: [
       "Treat the finding as an inventory lead: confirm in DevTools Network and Storage which provider code actually executes and what it sends, since a provider string alone does not establish that personal data is collected. Remove vendors that are not needed; for the rest, implement the disclosure, consent, opt-out, or regional gating the actual use case and governing rules require, and verify every preference state on the deployed site.",
     ],

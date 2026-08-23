@@ -8,6 +8,11 @@ const POLISH_RUST_FILES = [
   "apps/desktop/src-tauri/src/checks/polish/titles.rs",
 ];
 
+// The bundled fix-guide lead sentences shown before the Rust finding copy;
+// same judgmental-language ban applies since a lead is also user-visible.
+const POLISH_LEAD_FILE = "apps/desktop/src/lib/fix-guides/polish.ts";
+const LEAD_LINE_RE = /^\s*lead:\s*"/;
+
 // Case-insensitive bans applied only to user-visible string lines.
 const BANNED_PATTERNS = [
   { re: /\boverused\b/i, reason: "judgmental - say 'heavy usage' or '<count> detected'" },
@@ -114,5 +119,25 @@ export function polishCopySafetyFailures(read, exists, listFiles) {
       }
     }
   }
+
+  if (!exists(POLISH_LEAD_FILE)) {
+    failures.push(
+      `${POLISH_LEAD_FILE} is missing - polish copy guardrail expects the bundled polish lead sentences to exist.`,
+    );
+  } else {
+    const leadLines = read(POLISH_LEAD_FILE).split("\n");
+    for (let i = 0; i < leadLines.length; i += 1) {
+      const line = leadLines[i];
+      if (!LEAD_LINE_RE.test(line)) continue;
+      for (const { re, reason } of BANNED_PATTERNS) {
+        if (re.test(line)) {
+          failures.push(
+            `${POLISH_LEAD_FILE}:${i + 1} - banned polish copy: ${re}. ${reason}. Line: ${line.trim()}`,
+          );
+        }
+      }
+    }
+  }
+
   return failures;
 }

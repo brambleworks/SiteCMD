@@ -20,7 +20,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "no-css-architecture": {
     effort: "involved",
     effortMinutes: 30,
-    lead: "No linked or embedded styling was found on this page, which would leave it looking plain and unstyled to a visitor.",
+    lead: "This scan found no recognizable styling structure on this page, though a valid setup it cannot detect may still exist.",
     default: [
       "Load the page in a real browser and confirm its linked, imported, runtime-injected, and shadow-DOM styles loaded; the scan did not recognize a stylesheet or CSS-in-JS marker, which does not prove the project lacks styling architecture, so mark the finding reviewed when a valid system exists. If the page is genuinely unstyled, document one approach that fits the existing stack, reusing current components and tokens before adding a framework.",
     ],
@@ -28,7 +28,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "utility-to-custom-ratio": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "This page leans heavily toward one styling approach over another, worth a quick sanity check on your team's convention.",
+    lead: "This page leans heavily toward utility classes over custom CSS, worth a quick sanity check on your team's convention.",
     default: [
       "This legacy ratio is not a defect criterion: utility-only markup, custom CSS, CSS Modules, and component-level styling can all be maintainable. Keep the project's established styling model, extract repeated semantic patterns only when that improves reuse or consistency, and mark the finding reviewed when the architecture is deliberate and documented.",
     ],
@@ -36,7 +36,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "div-soup-ratio": {
     effort: "moderate",
     effortMinutes: 20,
-    lead: "This page is built almost entirely from generic containers instead of elements that describe what each section is.",
+    lead: "This page has a low ratio of semantic elements to generic containers, though plain containers are often the right choice.",
     default: [
       "Inspect the rendered regions behind the surfaced count; the ratio is a proxy, and div elements are correct for neutral layout containers. Use `<main>`, `<nav>`, `<section>`, and other native elements only where their documented semantics match, remove only wrappers with no layout, styling, or scripting role, and mark a high ratio reviewed when the remaining divs are intentionally neutral.",
     ],
@@ -44,7 +44,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "heading-hierarchy": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "The heading levels used on this page do not line up with its real content structure, making the outline confusing.",
+    lead: "This page's heading levels skip or repeat unexpectedly, so the structure needs a quick human review to confirm it is fine.",
     default: [
       "Compare the surfaced heading sequence with the rendered content structure; multiple h1 elements and level jumps are not automatically WCAG or SEO failures. Give the page a clear top-level heading, choose subsection levels from their real parent sections rather than visual size, use CSS for display text that does not label a section, and confirm the outline stays understandable when navigating by heading with a screen reader.",
     ],
@@ -60,7 +60,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "button-vs-clickable-div": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "An element that acts like a button is really a plain div, so it does not work with a keyboard or screen reader by default.",
+    lead: "A non-interactive element on this page has a click handler, so it may not work with a keyboard or screen reader by default.",
     default: [
       "Replace clickable `<div>`/`<span>` elements with `<button>`, which is keyboard-focusable, announced by screen readers, and responds to Enter/Space by default; use `<a href>` for navigation actions. If a custom element is unavoidable, implement its role, focusability, Enter/Space behavior, focus indicator, and accessible name, and test with keyboard and assistive technology; adding `role` alone does not reproduce native behavior.",
     ],
@@ -116,7 +116,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "floating-blobs": {
     effort: "quick",
     effortMinutes: 3,
-    lead: "This page contains several decorative blurred shapes floating in the background, worth checking they are not distracting.",
+    lead: "This page contains several decorative floating shapes in the background, worth checking they are not distracting.",
     default: [
       "Confirm the surfaced absolutely positioned, blurred, or gradient shapes are decorative rather than meaningful illustrations, status indicators, or charts; this is a pattern heuristic. Keep decoration that supports the brand without competing with content, simplify repeated generic shapes that weaken hierarchy, hide decorative elements from the accessibility tree, and check overlap, contrast, and pointer interception.",
     ],
@@ -132,7 +132,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "ai-buzzword-dictionary": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "This page's copy leans on vague buzzwords that sound impressive without actually saying anything concrete.",
+    lead: "This page's copy has a high density of marketing buzzwords, which can sometimes read as vague to visitors.",
     default: [
       "Review each surfaced word in its sentence and product domain; a dictionary match is not proof of vague or AI-written copy, and terms such as robust can have a precise technical meaning. Replace a phrase only when it obscures the actual capability, constraint, or outcome, prefer a verified concrete description over an invented metric or promise, and have a product owner check factual claims.",
     ],
@@ -172,7 +172,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "default-page-title": {
     effort: "quick",
     effortMinutes: 2,
-    lead: "This page still carries the scaffolding tool's default title instead of one that describes your actual product.",
+    lead: "This page's title is missing, empty, a framework default, or leftover placeholder text instead of your product's name.",
     default: [
       "Replace a missing, empty, or default `<title>` (such as 'Vite App', 'React App', or a bare 'Home') with a descriptive one like `<title>Your Product - What It Does</title>`, and set it in the root HTML template or layout component so every page gets a proper title.",
     ],
@@ -180,7 +180,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "missing-og-tags": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "This page has no social preview tags, so a shared link shows no title, description, or image on chat apps.",
+    lead: "This page's social preview tags are missing or incomplete, so a shared link may fall back to a weaker default preview.",
     default: [
       "Decide which social, chat, and link-preview destinations matter, then add accurate page-specific Open Graph title, description, canonical URL, type, and an absolute publicly fetchable image sized to each target platform's current requirements. Verify by fetching the page and image logged out and using current platform debuggers; missing tags do not mean the page is unfinished when link previews are out of scope.",
     ],

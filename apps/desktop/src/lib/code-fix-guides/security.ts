@@ -284,7 +284,7 @@ export const SECURITY_FIX_GUIDES: Record<string, CodeFixGuideEntry> = {
   "hardcoded-localhost-url": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "A loopback address is hardcoded into this code, which will fail to reach anything once the code runs somewhere else.",
+    lead: "A loopback URL is hardcoded into this code, which breaks outside a local setup unless it is a deliberate local-only path.",
     default: [
       "Confirm the intended deployment topology first; loopback can be correct for a co-located sidecar, emulator, or explicitly local-only path, and an intentional design should be documented and marked reviewed. If the destination varies by environment, read it from validated server-only configuration with a localhost default only behind an explicit development-mode branch, and fail startup when required configuration is missing.",
     ],
