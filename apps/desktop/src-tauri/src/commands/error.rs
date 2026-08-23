@@ -101,6 +101,70 @@ mod tests {
         );
     }
 
+    // The Windows analogue of the Unix "no trailing separator" regression:
+    // WINDOWS_PATH_RE's segment class does not exclude space, so it must be
+    // trimmed the same way PATH_RE is, or prose after the path vanishes.
+    #[test]
+    fn sanitize_error_keeps_prose_that_follows_a_windows_path_with_no_trailing_backslash() {
+        assert_eq!(
+            sanitize_error(r"Failed: C:\Users\dev\foo and it failed"),
+            "Failed: [internal path] and it failed"
+        );
+    }
+
+    // The Windows analogue of the Application Support case: a middle
+    // segment contains a space ("Program Files"), but the final segment
+    // ("app.exe") does not, so the whole path redacts with no fragment
+    // leaking before the untouched ": denied" tail.
+    #[test]
+    fn sanitize_error_redacts_a_spaced_windows_path_without_leaking_a_fragment() {
+        assert_eq!(
+            sanitize_error(r"C:\Program Files\SiteCMD\app.exe: denied"),
+            "[internal path]: denied"
+        );
+    }
+
+    #[test]
+    fn sanitize_error_redacts_a_unc_path_and_keeps_trailing_prose() {
+        assert_eq!(
+            sanitize_error(r"Cannot read \\fileserver\projects\site\index.html then retry"),
+            "Cannot read [internal path] then retry"
+        );
+    }
+
+    // A message naming both a Windows and a Unix path redacts both and
+    // keeps the prose connecting and following them, including the prose
+    // WINDOWS_PATH_RE's segment class would otherwise absorb up to the "/"
+    // that starts the Unix path.
+    #[test]
+    fn sanitize_error_redacts_both_a_windows_and_a_unix_path_in_one_message() {
+        assert_eq!(
+            sanitize_error(r"Copied C:\Users\dev\a.txt to /Users/dev/b.txt done"),
+            "Copied [internal path] to [internal path] done"
+        );
+    }
+
+    #[test]
+    fn sanitize_error_is_idempotent_for_windows_paths() {
+        let once = sanitize_error(r"C:\Program Files\SiteCMD\app.exe: denied");
+        let twice = sanitize_error(&once);
+        assert_eq!(
+            once, twice,
+            "sanitizing already-sanitized output must be a no-op"
+        );
+    }
+
+    // Accepted asymmetry, the Windows counterpart of the Unix one below: a
+    // FINAL segment with an embedded space and nothing after it cannot be
+    // told apart from trailing prose, so its second word still leaks.
+    #[test]
+    fn sanitize_error_leaks_the_second_word_of_a_spaced_final_windows_segment() {
+        assert_eq!(
+            sanitize_error(r"Failed to open C:\Users\dev\My Documents"),
+            "Failed to open [internal path] Documents"
+        );
+    }
+
     #[test]
     fn sanitize_error_preserves_urls() {
         assert_eq!(
@@ -159,6 +223,17 @@ mod tests {
         assert_eq!(
             once, twice,
             "sanitizing already-sanitized output must be a no-op"
+        );
+    }
+
+    // Accepted asymmetry, the Unix counterpart of the Windows one above: a
+    // FINAL segment with an embedded space and nothing after it cannot be
+    // told apart from trailing prose, so its second word still leaks.
+    #[test]
+    fn sanitize_error_leaks_the_second_word_of_a_spaced_final_unix_segment() {
+        assert_eq!(
+            sanitize_error("Failed to open /Users/dev/My Documents"),
+            "Failed to open [internal path] Documents"
         );
     }
 

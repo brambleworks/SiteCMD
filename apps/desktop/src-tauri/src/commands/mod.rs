@@ -58,30 +58,36 @@ pub use tokio::sync::Mutex as TokioMutex;
 /// also over-matches into any trailing prose that happens to follow a path
 /// (`"...open /a/b/c then it failed"`). The regex crate has no lookaround,
 /// so a single pattern cannot both allow spaces inside a segment and stop
-/// exactly at the real path; `unix_path_trailing_prose` recovers the prose
-/// half after the match, in a second, non-regex pass.
+/// exactly at the real path; `path_trailing_prose` recovers the prose half
+/// after the match, in a second, non-regex pass.
 pub(crate) static PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     let pattern = r"(?:/[\w.@-]+(?: [\w.@-]+)*){2,}";
     regex::Regex::new(pattern).expect("static Unix path regex") // allow-expect: compile-time literal regex
 });
 
-/// Split a `PATH_RE` match into the real final path segment and whatever
-/// prose follows it. The real path ends at the first space after the last
-/// `/`; a directory name with an embedded space (`"Application Support"`)
-/// survives because it is a middle segment, not the last one on the line
-/// that decides where the match ends here.
-fn unix_path_trailing_prose(candidate: &str) -> &str {
-    let last_slash = candidate.rfind('/').unwrap_or(0);
-    let after_slash = &candidate[last_slash..];
-    let cut = last_slash + after_slash.find(' ').unwrap_or(after_slash.len());
-    &candidate[cut..]
-}
-
-/// Windows drive paths (`C:\a\b`) and UNC paths (`\\server\share\a`).
+/// Windows drive paths (`C:\a\b`) and UNC paths (`\\server\share\a`). The
+/// segment class already allows spaces (`"Program Files"`), which is the
+/// same permissive-match tradeoff `PATH_RE` makes; `path_trailing_prose`
+/// trims the same way.
 static WINDOWS_PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r#"(?:[A-Za-z]:|\\\\[^\\\s]+)(?:\\[^\\/:*?"<>|\r\n]+)+"#)
         .expect("static Windows path regex") // allow-expect: compile-time literal regex
 });
+
+/// Split a permissive path-regex match (`PATH_RE` or `WINDOWS_PATH_RE`) into
+/// its real final segment and whatever prose follows it. The real path ends
+/// at the first space after the last `separator`; a segment with an
+/// embedded space (`"Application Support"`, `"Program Files"`) survives
+/// because it is a middle segment, not the last one on the line that
+/// decides where the match ends here. A space inside the *final* segment is
+/// the one shape this can't tell apart from trailing prose and still leaks:
+/// see the `..._leaks_a_spaced_final_segment` tests.
+fn path_trailing_prose(candidate: &str, separator: char) -> &str {
+    let last_separator = candidate.rfind(separator).unwrap_or(0);
+    let after_separator = &candidate[last_separator..];
+    let cut = last_separator + after_separator.find(' ').unwrap_or(after_separator.len());
+    &candidate[cut..]
+}
 
 /// URLs whose path segments must survive the path stripping.
 static URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -98,9 +104,11 @@ pub(crate) fn sanitize_error(msg: impl std::fmt::Display) -> String {
         urls.push(captures[0].to_string());
         format!("\u{1}URL{}\u{1}", urls.len() - 1)
     });
-    let stripped = WINDOWS_PATH_RE.replace_all(&held, "[internal path]");
+    let stripped = WINDOWS_PATH_RE.replace_all(&held, |captures: &regex::Captures| {
+        format!("[internal path]{}", path_trailing_prose(&captures[0], '\\'))
+    });
     let stripped = PATH_RE.replace_all(&stripped, |captures: &regex::Captures| {
-        format!("[internal path]{}", unix_path_trailing_prose(&captures[0]))
+        format!("[internal path]{}", path_trailing_prose(&captures[0], '/'))
     });
     let mut restored = stripped.into_owned();
     for (index, url) in urls.iter().enumerate() {
