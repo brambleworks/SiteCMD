@@ -11,6 +11,7 @@ import type { ScanRunStep } from "@/lib/scan-run-status";
 import type { ScanCategory, ScheduledScanType } from "@/lib/types";
 import { formatUrlDisplay } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { CheckCircle, Loader2, X, Minimize2, FileCode } from "lucide-react";
 import { CODE_SCAN_STAGES, WEB_SCAN_STAGES } from "@/components/scan/scan-overlay-stages";
 import { SCAN_LABELS } from "@/lib/scan-labels";
@@ -458,134 +459,86 @@ export function ScanOverlay({
     .slice(-TERMINAL_VISIBLE_LIMIT);
 
   return (
-    <div
-      className="overlay-backdrop overlay-backdrop--scan"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Scan in progress">
-      <div className="scan-overlay-content" onClick={(e) => e.stopPropagation()}>
-        <div className="scan-overlay-ring-wrap">
-          <div className="scan-score-hero-shell">
-            <div
-              className={`scan-progress-ping scan-overlay-ping animate-ping ${displayRingClass}`}
+    <Dialog
+      label="Scan in progress"
+      onClose={() => undefined}
+      dismissOnBackdrop={false}
+      closeOnEscape={false}
+      backdropClassName="dialog--blur"
+      className="scan-overlay-content">
+      <div className="scan-overlay-ring-wrap">
+        <div className="scan-score-hero-shell">
+          <div
+            className={`scan-progress-ping scan-overlay-ping animate-ping ${displayRingClass}`}
+          />
+          <svg className="scan-overlay-ring-svg" viewBox="0 0 128 128">
+            <circle
+              cx="64"
+              cy="64"
+              r="58"
+              fill="none"
+              stroke="currentColor"
+              strokeOpacity={0.06}
+              strokeWidth="2.5"
             />
-            <svg className="scan-overlay-ring-svg" viewBox="0 0 128 128">
-              <circle
-                cx="64"
-                cy="64"
-                r="58"
-                fill="none"
-                stroke="currentColor"
-                strokeOpacity={0.06}
-                strokeWidth="2.5"
-              />
-              <circle
-                cx="64"
-                cy="64"
-                r="58"
-                fill="none"
-                stroke={displayRingColor}
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeDasharray={`${circ}`}
-                strokeDashoffset={`${circ * (1 - displayPct / 100)}`}
-                className="scan-overlay-ring-progress"
-              />
-            </svg>
-            <div className="scan-overlay-ring-label">
-              <div className="scan-overlay-pct" data-testid="scan-progress-percent">
-                {displayPct}
-                <span className="scan-overlay-pct-unit text-muted-foreground">%</span>
-              </div>
+            <circle
+              cx="64"
+              cy="64"
+              r="58"
+              fill="none"
+              stroke={displayRingColor}
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeDasharray={`${circ}`}
+              strokeDashoffset={`${circ * (1 - displayPct / 100)}`}
+              className="scan-overlay-ring-progress"
+            />
+          </svg>
+          <div className="scan-overlay-ring-label">
+            <div className="scan-overlay-pct" data-testid="scan-progress-percent">
+              {displayPct}
+              <span className="scan-overlay-pct-unit text-muted-foreground">%</span>
             </div>
-          </div>
-
-          <div className="scan-overlay-caption">
-            {isCodeScan ? (
-              <>
-                <p className="eyebrow--alt scan-overlay-eyebrow text-primary">Code Scan</p>
-                <p className="scan-overlay-heading">Scanning linked project code</p>
-                <p className="muted-text scan-overlay-subcaption">{`Auditing linked code for ${displayUrl}`}</p>
-              </>
-            ) : multiProgress && multiProgress.page_count > 1 ? (
-              <>
-                <p className="eyebrow--alt scan-overlay-eyebrow text-primary">Web Scan</p>
-                <p className="muted-text scan-overlay-page-count">
-                  Page {multiProgress.page_index + 1} of {multiProgress.page_count}
-                </p>
-                <p className="scan-overlay-url">{formatUrlDisplay(multiProgress.current_url)}</p>
-              </>
-            ) : (
-              <>
-                <p className="eyebrow--alt scan-overlay-eyebrow text-primary">Web Scan</p>
-                <p className="scan-overlay-heading">Scanning {displayUrl}</p>
-              </>
-            )}
-            <p className="muted-text scan-overlay-elapsed">{elapsedStr}s</p>
           </div>
         </div>
 
-        {!isCodeScan ? (
-          isMultiPage ? null : (
-            <div className="scan-overlay-stage-grid" data-testid="scan-stages">
-              {WEB_SCAN_STAGES.map(
-                ({ key, label, icon: Icon, textClass, indicatorClass }, index) => {
-                  const isDone = index < displayWebStageIndex;
-                  const isActive = index === displayWebStageIndex;
-                  const catText = textClass ?? "text-primary";
-                  const catIndicator = indicatorClass ?? "bg-primary";
+        <div className="scan-overlay-caption">
+          {isCodeScan ? (
+            <>
+              <p className="eyebrow--alt scan-overlay-eyebrow text-primary">Code Scan</p>
+              <p className="scan-overlay-heading">Scanning linked project code</p>
+              <p className="muted-text scan-overlay-subcaption">{`Auditing linked code for ${displayUrl}`}</p>
+            </>
+          ) : multiProgress && multiProgress.page_count > 1 ? (
+            <>
+              <p className="eyebrow--alt scan-overlay-eyebrow text-primary">Web Scan</p>
+              <p className="muted-text scan-overlay-page-count">
+                Page {multiProgress.page_index + 1} of {multiProgress.page_count}
+              </p>
+              <p className="scan-overlay-url">{formatUrlDisplay(multiProgress.current_url)}</p>
+            </>
+          ) : (
+            <>
+              <p className="eyebrow--alt scan-overlay-eyebrow text-primary">Web Scan</p>
+              <p className="scan-overlay-heading">Scanning {displayUrl}</p>
+            </>
+          )}
+          <p className="muted-text scan-overlay-elapsed">{elapsedStr}s</p>
+        </div>
+      </div>
 
-                  return (
-                    <div
-                      key={key}
-                      data-stage-state={isActive ? "active" : isDone ? "complete" : "pending"}
-                      className={`scan-overlay-stage ${
-                        isActive
-                          ? "bg-accent scan-overlay-stage--active"
-                          : isDone
-                            ? ""
-                            : "scan-overlay-stage--pending"
-                      }`}>
-                      <div className="scan-overlay-stage-icon">
-                        {isDone ? (
-                          <CheckCircle className={`icon-lg ${catText}`} />
-                        ) : isActive ? (
-                          <div className="scan-overlay-stage-icon">
-                            <Icon className={`icon-lg ${catText}`} />
-                            <div
-                              className={`scan-overlay-stage-dot animate-pulse ${catIndicator}`}
-                            />
-                          </div>
-                        ) : (
-                          <Icon className="icon-lg text-muted-foreground" />
-                        )}
-                      </div>
-                      <span
-                        data-stage-label="true"
-                        className={`scan-overlay-stage-label ${
-                          isDone || isActive ? catText : "text-muted-foreground"
-                        }`}>
-                        {label}
-                      </span>
-                    </div>
-                  );
-                },
-              )}
-            </div>
-          )
-        ) : (
-          <div
-            className="scan-overlay-stage-grid scan-overlay-stage-grid--code"
-            data-testid="scan-stages">
-            {CODE_SCAN_STAGES.map(({ label, icon: Icon, textClass, indicatorClass }, index) => {
-              const isDone = index < codePhaseIndex;
-              const isActive = index === codePhaseIndex;
-              const stageText = textClass ?? "text-primary";
-              const stageIndicator = indicatorClass ?? "bg-primary";
+      {!isCodeScan ? (
+        isMultiPage ? null : (
+          <div className="scan-overlay-stage-grid" data-testid="scan-stages">
+            {WEB_SCAN_STAGES.map(({ key, label, icon: Icon, textClass, indicatorClass }, index) => {
+              const isDone = index < displayWebStageIndex;
+              const isActive = index === displayWebStageIndex;
+              const catText = textClass ?? "text-primary";
+              const catIndicator = indicatorClass ?? "bg-primary";
 
               return (
                 <div
-                  key={label}
+                  key={key}
                   data-stage-state={isActive ? "active" : isDone ? "complete" : "pending"}
                   className={`scan-overlay-stage ${
                     isActive
@@ -596,11 +549,11 @@ export function ScanOverlay({
                   }`}>
                   <div className="scan-overlay-stage-icon">
                     {isDone ? (
-                      <CheckCircle className={`icon-lg ${stageText}`} />
+                      <CheckCircle className={`icon-lg ${catText}`} />
                     ) : isActive ? (
                       <div className="scan-overlay-stage-icon">
-                        <Icon className={`icon-lg ${stageText}`} />
-                        <div className={`scan-overlay-stage-dot animate-pulse ${stageIndicator}`} />
+                        <Icon className={`icon-lg ${catText}`} />
+                        <div className={`scan-overlay-stage-dot animate-pulse ${catIndicator}`} />
                       </div>
                     ) : (
                       <Icon className="icon-lg text-muted-foreground" />
@@ -609,7 +562,7 @@ export function ScanOverlay({
                   <span
                     data-stage-label="true"
                     className={`scan-overlay-stage-label ${
-                      isDone || isActive ? stageText : "text-muted-foreground"
+                      isDone || isActive ? catText : "text-muted-foreground"
                     }`}>
                     {label}
                   </span>
@@ -617,159 +570,199 @@ export function ScanOverlay({
               );
             })}
           </div>
-        )}
+        )
+      ) : (
+        <div
+          className="scan-overlay-stage-grid scan-overlay-stage-grid--code"
+          data-testid="scan-stages">
+          {CODE_SCAN_STAGES.map(({ label, icon: Icon, textClass, indicatorClass }, index) => {
+            const isDone = index < codePhaseIndex;
+            const isActive = index === codePhaseIndex;
+            const stageText = textClass ?? "text-primary";
+            const stageIndicator = indicatorClass ?? "bg-primary";
 
-        <div className="scan-overlay-status">
-          {isCodeScan ? (
-            <>
-              <div className="scan-overlay-check-row">
-                <Loader2 className="icon-sm animate-spin text-primary" />
-                <span className="scan-overlay-check-text">
-                  <span className="text-muted-foreground">
-                    {codePhase.key === "summary" ? "Finalizing " : "Checking "}
-                  </span>
-                  <span className="scan-overlay-check-strong">
-                    {codePhase.key === "summary" ? "results" : codePhase.label}
-                  </span>
+            return (
+              <div
+                key={label}
+                data-stage-state={isActive ? "active" : isDone ? "complete" : "pending"}
+                className={`scan-overlay-stage ${
+                  isActive
+                    ? "bg-accent scan-overlay-stage--active"
+                    : isDone
+                      ? ""
+                      : "scan-overlay-stage--pending"
+                }`}>
+                <div className="scan-overlay-stage-icon">
+                  {isDone ? (
+                    <CheckCircle className={`icon-lg ${stageText}`} />
+                  ) : isActive ? (
+                    <div className="scan-overlay-stage-icon">
+                      <Icon className={`icon-lg ${stageText}`} />
+                      <div className={`scan-overlay-stage-dot animate-pulse ${stageIndicator}`} />
+                    </div>
+                  ) : (
+                    <Icon className="icon-lg text-muted-foreground" />
+                  )}
+                </div>
+                <span
+                  data-stage-label="true"
+                  className={`scan-overlay-stage-label ${
+                    isDone || isActive ? stageText : "text-muted-foreground"
+                  }`}>
+                  {label}
                 </span>
               </div>
-              <div className="scan-overlay-check-detail subtitle-xs animate-pulse">
-                <ActiveCodePhaseIcon className="icon-xs" />
-                <span>{codePhase.detail}</span>
-              </div>
-            </>
-          ) : progress ? (
-            // Once progress exists, preserve its phase through terminal events.
-            <>
-              <div className="scan-overlay-check-row">
-                <Loader2 className={`icon-sm animate-spin ${activeCatText}`} />
-                <span className="scan-overlay-check-text">
-                  <span className="text-muted-foreground">
-                    {isAxePhase || webPhase.key === "browser" ? "Running " : "Checking "}
-                  </span>
-                  <span className="scan-overlay-check-strong">
-                    {isAxePhase ? "browser metrics" : webPhase.label}
-                  </span>
-                </span>
-              </div>
-              <p className="subtitle-xs animate-pulse">
-                {isAxePhase ? AXE_TIPS[tipIndex] : webPhase.detail}
-              </p>
-            </>
-          ) : (
+            );
+          })}
+        </div>
+      )}
+
+      <div className="scan-overlay-status">
+        {isCodeScan ? (
+          <>
             <div className="scan-overlay-check-row">
               <Loader2 className="icon-sm animate-spin text-primary" />
               <span className="scan-overlay-check-text">
-                <span className="text-muted-foreground">Preparing </span>
-                <span className="scan-overlay-check-strong">scan</span>
+                <span className="text-muted-foreground">
+                  {codePhase.key === "summary" ? "Finalizing " : "Checking "}
+                </span>
+                <span className="scan-overlay-check-strong">
+                  {codePhase.key === "summary" ? "results" : codePhase.label}
+                </span>
               </span>
             </div>
-          )}
-        </div>
-
-        <ProgressBar
-          percent={displayPct}
-          color={displayRingColor}
-          label="Scan progress"
-          className="scan-overlay-bar-fill"
-          trackClassName="scan-overlay-bar-track"
-        />
-
-        <div className="scan-terminal" data-testid="scan-terminal">
-          <div className="scan-terminal-header">
-            <div className="row-tight scan-overlay-terminal-title-wrap">
-              <p className="scan-terminal-title">
-                {isCodeScan ? "Code Scan Events" : "Live Scan Events"}
-              </p>
+            <div className="scan-overlay-check-detail subtitle-xs animate-pulse">
+              <ActiveCodePhaseIcon className="icon-xs" />
+              <span>{codePhase.detail}</span>
             </div>
-            <span className="scan-terminal-meta">
-              {isCodeScan
-                ? codeProgress?.results_count
-                  ? `${codeProgress.results_count} issues`
-                  : "Local audit running"
-                : progress?.checks_total
-                  ? `${progress.checks_done}/${progress.checks_total}`
-                  : "Waiting"}
+          </>
+        ) : progress ? (
+          // Once progress exists, preserve its phase through terminal events.
+          <>
+            <div className="scan-overlay-check-row">
+              <Loader2 className={`icon-sm animate-spin ${activeCatText}`} />
+              <span className="scan-overlay-check-text">
+                <span className="text-muted-foreground">
+                  {isAxePhase || webPhase.key === "browser" ? "Running " : "Checking "}
+                </span>
+                <span className="scan-overlay-check-strong">
+                  {isAxePhase ? "browser metrics" : webPhase.label}
+                </span>
+              </span>
+            </div>
+            <p className="subtitle-xs animate-pulse">
+              {isAxePhase ? AXE_TIPS[tipIndex] : webPhase.detail}
+            </p>
+          </>
+        ) : (
+          <div className="scan-overlay-check-row">
+            <Loader2 className="icon-sm animate-spin text-primary" />
+            <span className="scan-overlay-check-text">
+              <span className="text-muted-foreground">Preparing </span>
+              <span className="scan-overlay-check-strong">scan</span>
             </span>
           </div>
-          <div ref={logRef} className="scan-terminal-body">
-            {visibleActivityEntries.length === 0 ? (
-              <div className="scan-terminal-empty">
-                <span className="scan-terminal-prompt">sitecmd</span>
-                <span>
-                  {activityEntries.length > 0
-                    ? "syncing scan events"
-                    : "waiting for the first scan event"}
-                </span>
-                <span className="scan-terminal-cursor" />
-              </div>
-            ) : null}
-            {visibleActivityEntries.map((entry) => {
-              const resultLabel =
-                entry.status === "complete"
-                  ? entry.results > 0
-                    ? `${entry.results} issue${entry.results === 1 ? "" : "s"}`
-                    : "No issues"
-                  : entry.checksTotal > 0
-                    ? `${entry.checksDone}/${entry.checksTotal}`
-                    : null;
-              return (
-                <div key={entry.id} className="scan-terminal-row">
-                  <span className="scan-terminal-time">
-                    {formatTerminalTime(entry.timestampMs)}
-                  </span>
-                  <span className="scan-terminal-prompt">sitecmd</span>
-                  <span className={getTerminalStatusClass(entry.status)}>
-                    {getActivityStatusLabel(entry.status)}
-                  </span>
-                  <span className="scan-terminal-command">
-                    <span className="scan-terminal-category">
-                      {getCategoryLabel(entry.category)}
-                    </span>
-                    <span className="scan-terminal-separator">/</span>
-                    <span>{entry.label}</span>
-                  </span>
-                  {resultLabel ? <span className="scan-terminal-result">{resultLabel}</span> : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        )}
+      </div>
 
-        <div className="scan-overlay-footer">
-          <span className="meta-num" data-testid="scan-run-context">
-            {fullScanContextLabel
-              ? fullScanContextLabel
-              : isCodeScan
-                ? `${displayPct}% complete · ${codePhaseLabel}`
-                : isMultiPage && multiProgress
-                  ? `${displayPct}% overall · Page ${multiProgress.page_index + 1} of ${
-                      multiProgress.page_count
-                    }`
-                  : `${progress?.checks_done || 0} of ${progress?.checks_total || "…"} checks`}
-          </span>
-          <div className="scan-overlay-footer-actions">
-            {onMinimize && (
-              <Button
-                unstyled
-                type="button"
-                onClick={onMinimize}
-                className="icon-btn text-meta text-foreground scan-overlay-footer-btn">
-                <Minimize2 className="icon-xs" /> Continue in background
-              </Button>
-            )}
-            {onCancel && (
-              <Button
-                unstyled
-                type="button"
-                onClick={onCancel}
-                className="icon-btn text-meta text-foreground scan-overlay-footer-btn">
-                <X className="icon-xs" /> Cancel scan
-              </Button>
-            )}
+      <ProgressBar
+        percent={displayPct}
+        color={displayRingColor}
+        label="Scan progress"
+        className="scan-overlay-bar-fill"
+        trackClassName="scan-overlay-bar-track"
+      />
+
+      <div className="scan-terminal" data-testid="scan-terminal">
+        <div className="scan-terminal-header">
+          <div className="row-tight scan-overlay-terminal-title-wrap">
+            <p className="scan-terminal-title">
+              {isCodeScan ? "Code Scan Events" : "Live Scan Events"}
+            </p>
           </div>
+          <span className="scan-terminal-meta">
+            {isCodeScan
+              ? codeProgress?.results_count
+                ? `${codeProgress.results_count} issues`
+                : "Local audit running"
+              : progress?.checks_total
+                ? `${progress.checks_done}/${progress.checks_total}`
+                : "Waiting"}
+          </span>
+        </div>
+        <div ref={logRef} className="scan-terminal-body">
+          {visibleActivityEntries.length === 0 ? (
+            <div className="scan-terminal-empty">
+              <span className="scan-terminal-prompt">sitecmd</span>
+              <span>
+                {activityEntries.length > 0
+                  ? "syncing scan events"
+                  : "waiting for the first scan event"}
+              </span>
+              <span className="scan-terminal-cursor" />
+            </div>
+          ) : null}
+          {visibleActivityEntries.map((entry) => {
+            const resultLabel =
+              entry.status === "complete"
+                ? entry.results > 0
+                  ? `${entry.results} issue${entry.results === 1 ? "" : "s"}`
+                  : "No issues"
+                : entry.checksTotal > 0
+                  ? `${entry.checksDone}/${entry.checksTotal}`
+                  : null;
+            return (
+              <div key={entry.id} className="scan-terminal-row">
+                <span className="scan-terminal-time">{formatTerminalTime(entry.timestampMs)}</span>
+                <span className="scan-terminal-prompt">sitecmd</span>
+                <span className={getTerminalStatusClass(entry.status)}>
+                  {getActivityStatusLabel(entry.status)}
+                </span>
+                <span className="scan-terminal-command">
+                  <span className="scan-terminal-category">{getCategoryLabel(entry.category)}</span>
+                  <span className="scan-terminal-separator">/</span>
+                  <span>{entry.label}</span>
+                </span>
+                {resultLabel ? <span className="scan-terminal-result">{resultLabel}</span> : null}
+              </div>
+            );
+          })}
         </div>
       </div>
-    </div>
+
+      <div className="scan-overlay-footer">
+        <span className="meta-num" data-testid="scan-run-context">
+          {fullScanContextLabel
+            ? fullScanContextLabel
+            : isCodeScan
+              ? `${displayPct}% complete · ${codePhaseLabel}`
+              : isMultiPage && multiProgress
+                ? `${displayPct}% overall · Page ${multiProgress.page_index + 1} of ${
+                    multiProgress.page_count
+                  }`
+                : `${progress?.checks_done || 0} of ${progress?.checks_total || "…"} checks`}
+        </span>
+        <div className="scan-overlay-footer-actions">
+          {onMinimize && (
+            <Button
+              unstyled
+              type="button"
+              onClick={onMinimize}
+              className="icon-btn text-meta text-foreground scan-overlay-footer-btn">
+              <Minimize2 className="icon-xs" /> Continue in background
+            </Button>
+          )}
+          {onCancel && (
+            <Button
+              unstyled
+              type="button"
+              onClick={onCancel}
+              className="icon-btn text-meta text-foreground scan-overlay-footer-btn">
+              <X className="icon-xs" /> Cancel scan
+            </Button>
+          )}
+        </div>
+      </div>
+    </Dialog>
   );
 }

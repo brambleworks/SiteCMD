@@ -224,25 +224,26 @@ describe("ScanOverlay", () => {
   });
 
   it("sits above persistent shell surfaces while active", () => {
-    const { container } = render(
-      <ScanOverlay progress={null} scanType="code" url="https://example.com" />,
-    );
+    render(<ScanOverlay progress={null} scanType="code" url="https://example.com" />);
 
-    expect(container.firstElementChild).toHaveClass("overlay-backdrop--scan");
+    // A native <dialog> opened with showModal() renders in the top layer, above
+    // every other surface, without needing a stacking-context class of its own.
+    const dialog = screen.getByRole("dialog", { name: "Scan in progress" });
+    expect(dialog.tagName).toBe("DIALOG");
+    expect(dialog).toHaveClass("dialog--blur");
   });
 
   it("keeps the whole overlay reachable when the window is short", () => {
-    const { container } = render(
-      <ScanOverlay progress={null} scanType="health" url="https://example.com" />,
-    );
+    render(<ScanOverlay progress={null} scanType="health" url="https://example.com" />);
 
-    expect(container.firstElementChild!.firstElementChild).toHaveClass("scan-overlay-content");
+    const dialog = screen.getByRole("dialog", { name: "Scan in progress" });
+    expect(dialog.firstElementChild).toHaveClass("scan-overlay-content");
   });
 
   it("wires the background and cancel controls without making the backdrop actionable", () => {
     const onMinimize = vi.fn();
     const onCancel = vi.fn();
-    const { container } = render(
+    render(
       <ScanOverlay
         progress={null}
         scanType="health"
@@ -252,7 +253,7 @@ describe("ScanOverlay", () => {
       />,
     );
 
-    fireEvent.click(container.firstElementChild!);
+    fireEvent.click(screen.getByRole("dialog", { name: "Scan in progress" }));
     expect(onMinimize).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /continue in background/i }));
