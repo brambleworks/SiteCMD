@@ -60,6 +60,18 @@ export function releasePublicationSafetyFailures(read) {
     "release.yml must sign one release-wide SHA256SUMS with the production updater key, verify its .minisig without secrets and every artifact (including the DMG) against it, cross-check every uploaded checksum against the upload plan, upload both beside the artifacts, and create the GitHub Release (verified tag, changelog notes, checksum assets) only after the updater manifest advanced.",
   );
 
+  // The Release notes send readers to one README section for the checksum
+  // manifest; that section has to carry the steps the notes promise.
+  const readmeAnchor = "README.md#verify-your-download";
+  const verifySection =
+    /\n## Verify your download\n[\s\S]*?(?=\n## |$)/.exec(read("README.md"))?.[0] ?? "";
+  check(
+    !publisherJob.includes(readmeAnchor) ||
+      (verifySection.includes("minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -P ") &&
+        verifySection.includes("shasum -a 256 -c --ignore-missing SHA256SUMS")),
+    `release.yml release notes point readers at ${readmeAnchor} to verify the signed SHA256SUMS, so that README section must carry the minisign verification of SHA256SUMS against SHA256SUMS.minisig and the checksum comparison for the downloaded file.`,
+  );
+
   // Provenance is attested only by the credentialed publisher, after every
   // verification leg and the Release exist, never by a build or signer job.
   const nonPublisherJobs = releaseWorkflow.replace(publisherJob, "");

@@ -239,6 +239,24 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
   });
 
+  it("catches a README that dropped the manifest-signature check the notes promise", () => {
+    const failures = run((file, source) =>
+      file === "README.md"
+        ? source.replace("minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -P ", "minisign -V # ")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("README.md#verify-your-download");
+  });
+
+  it("catches a README that dropped the downloaded-file checksum check", () => {
+    const failures = run((file, source) =>
+      file === "README.md"
+        ? source.replace("shasum -a 256 -c --ignore-missing SHA256SUMS", "shasum -a 256 SHA256SUMS")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("README.md#verify-your-download");
+  });
+
   it("catches provenance attestation moved out of the publisher", () => {
     const failures = run((file, source) =>
       file.includes("release.yml") ? source.replace("      attestations: write\n", "") : source,

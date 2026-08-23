@@ -252,6 +252,11 @@ export function cliSurfaceFailures(read, exists, listFiles) {
       readme.includes("sh sitecmd-install.sh"),
     `${PUBLIC_INSTALLER} must remain a public, reviewable installer bound to the updater trust root, with an inspect-before-run path in ${README}.`,
   );
+  const installerKey = /MINISIGN_PUBLIC_KEY="([^"\n]+)"/.exec(publicInstaller)?.[1];
+  check(
+    installerKey !== undefined && readme.includes(`\n${installerKey}\n`),
+    `${README} must print the updater public key exactly as ${PUBLIC_INSTALLER} sets MINISIGN_PUBLIC_KEY; whoever verifies a download has to trust one key, not two.`,
+  );
   check(
     gateAction.includes('"$GITHUB_ACTION_PATH/../setup-sitecmd/install.sh"') &&
       !gateAction.includes("https://sitecmd.com/install.sh") &&
