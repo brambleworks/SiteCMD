@@ -83,6 +83,22 @@ pub fn log_safe_url_target(raw_url: &str) -> String {
 
 /// Preserve a safe path hint for issue evidence; remove credentials and tokens.
 pub fn evidence_safe_page_url(raw_url: &str) -> String {
+    sanitize_page_url(raw_url, false)
+}
+
+/// Same policy, except long letter-and-digit segments are kept when the URL
+/// is on the scanned site's own origin: those are its asset names, which the
+/// fix needs, while a foreign host may be a CDN carrying signed path tokens.
+pub fn evidence_safe_page_url_for_site(raw_url: &str, site_origin: Option<&str>) -> String {
+    let same_origin = site_origin.is_some_and(|origin| {
+        url::Url::parse(raw_url)
+            .map(|parsed| parsed.origin().ascii_serialization() == origin)
+            .unwrap_or(false)
+    });
+    sanitize_page_url(raw_url, same_origin)
+}
+
+fn sanitize_page_url(raw_url: &str, keep_long_segments: bool) -> String {
     let Ok(parsed) = url::Url::parse(raw_url) else {
         return "[invalid-url]".to_string();
     };
@@ -125,7 +141,8 @@ pub fn evidence_safe_page_url(raw_url: &str) -> String {
             );
             let has_letters = segment.bytes().any(|byte| byte.is_ascii_alphabetic());
             let has_digits = segment.bytes().any(|byte| byte.is_ascii_digit());
-            let token_like = segment.len() >= 32 && has_letters && has_digits;
+            let token_like =
+                !keep_long_segments && segment.len() >= 32 && has_letters && has_digits;
             let retina_asset = segment
                 .rsplit_once('@')
                 .and_then(|(_, suffix)| suffix.split_once('.'))
@@ -276,8 +293,8 @@ fn bounded_evidence(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        bounded_issue_evidence, evidence_safe_page_url, evidence_safe_url_reference,
-        log_safe_url_target, redact_issue_evidence,
+        bounded_issue_evidence, evidence_safe_page_url, evidence_safe_page_url_for_site,
+        evidence_safe_url_reference, log_safe_url_target, redact_issue_evidence,
     };
 
     #[test]
@@ -405,6 +422,29 @@ mod tests {
             assert!(!safe.contains(secret), "secret leaked in: {safe}");
         }
         assert!(safe.contains("https://example.com/reset/[redacted]"));
+    }
+
+    #[test]
+    fn same_origin_asset_names_survive_but_sensitive_routes_and_foreign_tokens_do_not() {
+        let site = Some("https://sitecmd.com");
+        let own_asset = "https://sitecmd.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png";
+        assert_eq!(evidence_safe_page_url_for_site(own_asset, site), own_asset);
+
+        let own_reset = "https://sitecmd.com/account/reset/abcdefghijklmnopqrstuvwxyz0123456789";
+        assert_eq!(
+            evidence_safe_page_url_for_site(own_reset, site),
+            "https://sitecmd.com/account/reset/[redacted]"
+        );
+
+        let foreign = "https://cdn.example.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png";
+        assert_eq!(
+            evidence_safe_page_url_for_site(foreign, site),
+            "https://cdn.example.com/images/screenshots/problem/[redacted]"
+        );
+        assert_eq!(
+            evidence_safe_page_url_for_site(own_asset, None),
+            "https://sitecmd.com/images/screenshots/problem/[redacted]"
+        );
     }
 
     #[test]

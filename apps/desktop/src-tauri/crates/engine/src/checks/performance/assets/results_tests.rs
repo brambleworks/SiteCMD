@@ -42,6 +42,7 @@ fn collection(found: usize, fetchable_found: usize, sampled: usize) -> AssetColl
         data_uri_count: 0,
         data_uri_bytes: 0,
         skipped_unsupported: 0,
+        page_origin: Some("https://example.com".to_string()),
     }
 }
 
@@ -229,7 +230,7 @@ fn broken_images_lists_up_to_five_failing_urls() {
             )
         })
         .collect();
-    let result = broken_images_result(&assets);
+    let result = broken_images_result(&assets, None);
     assert_eq!(result.status, CheckStatus::Fail);
     assert_eq!(result.severity, Severity::Medium);
     let listed = result.description.matches("(404)").count();
@@ -263,7 +264,7 @@ fn broken_images_warns_below_three_and_ignores_scripts() {
             false,
         ),
     ];
-    let result = broken_images_result(&assets);
+    let result = broken_images_result(&assets, None);
     assert_eq!(result.status, CheckStatus::Warn);
     assert!(
         !result.description.contains("dead.js"),
@@ -280,7 +281,7 @@ fn broken_images_passes_when_all_images_respond() {
         Some(10),
         false,
     )];
-    let result = broken_images_result(&assets);
+    let result = broken_images_result(&assets, None);
     assert_eq!(result.status, CheckStatus::Pass);
     assert!(result.manual_fix.is_none());
 }
@@ -294,7 +295,7 @@ fn image_probe_failures_are_inconclusive_not_a_pass() {
         None,
         false,
     )];
-    let result = broken_images_result(&assets);
+    let result = broken_images_result(&assets, None);
     assert_eq!(result.status, CheckStatus::Skipped);
     assert!(result.description.contains("inconclusive"));
     assert!(!result.description.contains("responded successfully"));
@@ -313,7 +314,7 @@ fn non_image_content_type_is_surfaced_without_calling_it_a_confirmed_broken_rend
         false,
     );
     asset.content_type = Some("text/html".into());
-    let result = broken_images_result(&[asset]);
+    let result = broken_images_result(&[asset], None);
     assert_eq!(result.status, CheckStatus::Warn);
     assert_eq!(result.confidence, IssueConfidence::NeedsReview);
     assert!(result.description.contains("non-image Content-Type"));
@@ -331,7 +332,7 @@ fn failed_srcset_candidate_downgrades_broken_image_confidence() {
         None,
         true,
     )];
-    let result = broken_images_result(&assets);
+    let result = broken_images_result(&assets, None);
     assert_eq!(result.status, CheckStatus::Warn);
     assert_eq!(result.confidence, IssueConfidence::NeedsReview);
     assert!(result
@@ -365,7 +366,7 @@ fn heavy_images_only_flags_images_over_threshold() {
             false,
         ),
     ];
-    let result = heavy_images_result(&assets);
+    let result = heavy_images_result(&assets, None);
     assert_eq!(result.status, CheckStatus::Warn);
     let raw = result.raw_data.as_ref().expect("raw data");
     assert_eq!(raw["heavy"].as_array().map(Vec::len), Some(1));
@@ -382,7 +383,7 @@ fn heavy_images_with_srcset_everywhere_downgrade_confidence() {
         Some(800 * 1024),
         true,
     )];
-    let result = heavy_images_result(&assets);
+    let result = heavy_images_result(&assets, None);
     assert_eq!(result.confidence, IssueConfidence::NeedsReview);
     assert!(result.confidence_reason.is_some());
     assert!(result.description.contains("srcset present"));
@@ -406,7 +407,7 @@ fn heavy_plain_img_src_stays_high_confidence() {
             false,
         ),
     ];
-    let result = heavy_images_result(&assets);
+    let result = heavy_images_result(&assets, None);
     assert_eq!(result.confidence, IssueConfidence::High);
     assert!(result.description.contains("no srcset"));
 }
@@ -421,7 +422,7 @@ fn heavy_images_notes_legacy_formats_from_measured_content_type() {
         false,
     );
     asset.content_type = Some("image/jpeg".into());
-    let result = heavy_images_result(&[asset]);
+    let result = heavy_images_result(&[asset], None);
     assert!(result.description.contains("JPEG or PNG"));
     assert!(!result.description.contains("30-50%"));
     let raw = result.raw_data.expect("raw_data");
@@ -437,9 +438,9 @@ fn persisted_asset_evidence_redacts_queries_fragments_and_sensitive_path_tokens(
 
     for result in [
         asset_weight_result(0, &coll, std::slice::from_ref(&asset)),
-        broken_images_result(std::slice::from_ref(&asset)),
-        heavy_images_result(std::slice::from_ref(&asset)),
-        asset_caching_result(std::slice::from_ref(&asset)),
+        broken_images_result(std::slice::from_ref(&asset), None),
+        heavy_images_result(std::slice::from_ref(&asset), None),
+        asset_caching_result(std::slice::from_ref(&asset), None),
     ] {
         let serialized = serde_json::to_string(&result).expect("serialize result");
         assert!(!serialized.contains("short-token"), "{serialized}");
@@ -464,7 +465,7 @@ fn persisted_asset_evidence_retains_an_actionable_ordinary_path() {
         None,
         false,
     );
-    let result = broken_images_result(&[asset]);
+    let result = broken_images_result(&[asset], None);
     let serialized = serde_json::to_string(&result).expect("serialize result");
     assert!(
         serialized.contains("https://cdn.example.com/images/missing-logo.png"),
@@ -479,9 +480,9 @@ fn persisted_asset_evidence_retains_an_actionable_ordinary_path() {
 fn all_results_pass_when_no_assets_sampled() {
     let coll = collection(0, 0, 0);
     let weight = asset_weight_result(2048, &coll, &[]);
-    let broken = broken_images_result(&[]);
-    let heavy = heavy_images_result(&[]);
-    let caching = asset_caching_result(&[]);
+    let broken = broken_images_result(&[], None);
+    let heavy = heavy_images_result(&[], None);
+    let caching = asset_caching_result(&[], None);
     assert_eq!(weight.status, CheckStatus::Pass);
     assert_eq!(broken.status, CheckStatus::Pass);
     assert_eq!(heavy.status, CheckStatus::Pass);
@@ -517,7 +518,7 @@ fn fingerprinted_asset_without_durable_cache_warns() {
         ),
         cached("https://example.com/assets/vendor.4f3a2b1c.css", None),
     ];
-    let result = asset_caching_result(&assets);
+    let result = asset_caching_result(&assets, None);
     assert_eq!(result.status, CheckStatus::Warn);
     assert_eq!(result.severity, Severity::Low);
     assert_eq!(result.confidence, IssueConfidence::NeedsReview);
@@ -545,7 +546,7 @@ fn single_weak_cached_asset_uses_singular_grammar() {
             Some("public, max-age=31536000, immutable"),
         ),
     ];
-    let result = asset_caching_result(&assets);
+    let result = asset_caching_result(&assets, None);
     assert!(
         result
             .description
@@ -573,7 +574,7 @@ fn single_heavy_image_uses_singular_grammar() {
             false,
         ),
     ];
-    let result = heavy_images_result(&assets);
+    let result = heavy_images_result(&assets, None);
     assert!(
         result
             .description
@@ -615,11 +616,42 @@ fn durable_cache_and_unversioned_assets_do_not_warn() {
         cached("https://example.com/js/app.js", Some("no-cache")),
         cached("https://example.com/css/styles.css", None),
     ];
-    let result = asset_caching_result(&assets);
+    let result = asset_caching_result(&assets, None);
     assert_eq!(
         result.status,
         CheckStatus::Pass,
         "description: {}",
+        result.description
+    );
+}
+
+#[test]
+fn heavy_image_evidence_keeps_the_scanned_sites_own_asset_name() {
+    let own = measured(
+        "https://sitecmd.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png",
+        AssetKind::Image,
+        200,
+        Some(507_000),
+        false,
+    );
+    let foreign = measured(
+        "https://cdn.example.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png",
+        AssetKind::Image,
+        200,
+        Some(507_000),
+        false,
+    );
+    let result = heavy_images_result(&[own, foreign], Some("https://sitecmd.com"));
+    assert!(
+        result.description.contains("https://sitecmd.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png (507 KB"),
+        "{}",
+        result.description
+    );
+    assert!(
+        result
+            .description
+            .contains("https://cdn.example.com/images/screenshots/problem/[redacted] (507 KB"),
+        "{}",
         result.description
     );
 }
