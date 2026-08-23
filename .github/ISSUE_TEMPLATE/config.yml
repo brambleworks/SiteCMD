@@ -3,6 +3,9 @@ contact_links:
   - name: Security vulnerability
     url: https://github.com/brambleworks/SiteCMD/security/advisories/new
     about: Report a suspected vulnerability privately.
+  - name: Questions and help
+    url: https://github.com/brambleworks/SiteCMD/discussions/categories/q-a
+    about: Ask how something works or get setup help in Discussions.
   - name: Product and account support
     url: https://sitecmd.com/contact
     about: Get help with installation, billing, or account questions.

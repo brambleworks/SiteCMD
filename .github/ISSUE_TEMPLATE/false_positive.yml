@@ -1,0 +1,60 @@
+name: False positive
+description: A check flagged something that is not a problem, or rated it wrong
+title: "[False positive]: "
+labels:
+  - false-positive
+  - check-accuracy
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A bug report against a check is the most useful issue you can file. Do not include credentials, private source code, private URLs, scan findings you are not allowed to share, or customer data. If the finding touches a weakness in your own site, sanitize it before pasting.
+  - type: input
+    id: check_id
+    attributes:
+      label: Check id
+      description: The canonical id shown in the issue detail, report, or JSON output, such as `code_scan.tls-verification-disabled`.
+      placeholder: category.check-name
+    validations:
+      required: true
+  - type: dropdown
+    id: scan_type
+    attributes:
+      label: Scan type
+      options:
+        - Web Scan
+        - Code Scan
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: SiteCMD version
+      description: The version shown in SiteCMD, by `sitecmd --version`, or by the MCP server.
+      placeholder: x.y.z
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized URL or code snippet
+      description: The smallest public URL or code fragment that reproduces the finding. Replace hostnames, paths, and values you cannot share with placeholders such as `example.com`.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the check reported, and what it should have reported
+      description: Quote the finding's title and severity, then say what you expected (no finding, a different severity, or a different explanation).
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, private code, private URLs, and customer data.
+          required: true
+        - label: This is not a security vulnerability in SiteCMD itself.
+          required: true

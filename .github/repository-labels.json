@@ -7,6 +7,11 @@
       "description": "Something isn't working"
     },
     {
+      "name": "check-accuracy",
+      "color": "fbca04",
+      "description": "Detector precision, recall, or severity calibration"
+    },
+    {
       "name": "dependencies",
       "color": "ededed",
       "description": ""
@@ -15,6 +20,11 @@
       "name": "enhancement",
       "color": "a2eeef",
       "description": "New feature or request"
+    },
+    {
+      "name": "false-positive",
+      "color": "e99695",
+      "description": "A check flagged something that is not a problem"
     },
     {
       "name": "github-actions",
