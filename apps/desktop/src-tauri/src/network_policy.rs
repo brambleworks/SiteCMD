@@ -30,6 +30,59 @@ impl UrlPolicy {
     }
 }
 
+/// How local a scan target is, computed once per scan and threaded through
+/// the pipeline instead of re-derived from the URL at every consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalOrigin {
+    /// `localhost`, `127.0.0.0/8`, `[::1]`: certificate checks are skipped
+    /// and the loopback redirect exception applies.
+    Loopback,
+    /// A `.localhost` subdomain: loopback by RFC 6761 but resolved by the OS,
+    /// so the redirect exception applies while certificate checks stay on.
+    LocalhostDomain,
+    /// `*.local` or `0.0.0.0`: a local environment label, no policy exception.
+    LocalNetworkName,
+    Public,
+}
+
+impl LocalOrigin {
+    pub fn classify(url: &url::Url) -> Self {
+        match url.host() {
+            Some(url::Host::Ipv4(ip)) if ip.is_loopback() => Self::Loopback,
+            Some(url::Host::Ipv6(ip)) if ip.is_loopback() => Self::Loopback,
+            Some(url::Host::Ipv4(ip)) if ip.is_unspecified() => Self::LocalNetworkName,
+            Some(url::Host::Domain(domain)) => {
+                let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+                if domain == "localhost" {
+                    Self::Loopback
+                } else if domain.ends_with(".localhost") {
+                    Self::LocalhostDomain
+                } else if domain.ends_with(".local") {
+                    Self::LocalNetworkName
+                } else {
+                    Self::Public
+                }
+            }
+            _ => Self::Public,
+        }
+    }
+
+    /// Replaces `core::localhost::is_strict_localhost`.
+    pub fn is_strict_loopback(self) -> bool {
+        matches!(self, Self::Loopback)
+    }
+
+    /// Replaces `network_policy::scan_origin_allows_local_dev`.
+    pub fn allows_local_dev(self) -> bool {
+        matches!(self, Self::Loopback | Self::LocalhostDomain)
+    }
+
+    /// Replaces `core::localhost::is_localhost`.
+    pub fn is_local_environment(self) -> bool {
+        !matches!(self, Self::Public)
+    }
+}
+
 pub fn validate_url_blocking(url: &str, policy: UrlPolicy) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL '{}': {}", url, e))?;
     validate_url_target_blocking(&parsed, policy)
@@ -343,9 +396,47 @@ fn is_site_local_ipv6(ip: Ipv6Addr) -> bool {
 mod tests {
     use super::{
         scan_origin_allows_local_dev, validate_ip_target, validate_redirect_target_nonblocking,
-        validate_resolved_domain_ip_target, validate_url_blocking, UrlPolicy,
+        validate_resolved_domain_ip_target, validate_url_blocking, LocalOrigin, UrlPolicy,
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn local_origin_matches_the_predicates_it_replaces() {
+        use crate::core::localhost::{is_localhost, is_strict_localhost};
+        for url in [
+            "http://localhost:3000",
+            "http://127.0.0.1:8080",
+            "http://0.0.0.0:5173",
+            "http://myapp.local",
+            "http://myapp.localhost:3000",
+            "http://[::1]:5173",
+            "https://localhost.run",
+            "https://example.com",
+            "https://127.0.0.1.example.com",
+        ] {
+            let parsed = url::Url::parse(url).expect(url);
+            let origin = LocalOrigin::classify(&parsed);
+            assert_eq!(
+                origin.is_local_environment(),
+                is_localhost(&parsed),
+                "{url}"
+            );
+            assert_eq!(
+                origin.is_strict_loopback(),
+                is_strict_localhost(&parsed),
+                "{url}"
+            );
+            assert_eq!(
+                origin.allows_local_dev(),
+                scan_origin_allows_local_dev(&parsed),
+                "{url}"
+            );
+        }
+        // The one deliberate widening: every 127/8 literal is loopback.
+        let wide = url::Url::parse("http://127.0.0.2:5173").unwrap();
+        assert!(LocalOrigin::classify(&wide).is_strict_loopback());
+        assert!(!is_strict_localhost(&wide));
+    }
 
     #[test]
     fn scan_validation_allows_explicit_local_dev_loopback() {

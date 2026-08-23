@@ -1656,3 +1656,35 @@ fn blocking_database_call_sites_only_decrease() {
         "sync Database::execute call sites changed; set SYNC_DB_EXECUTE_BUDGET to {sync_execute} only if it went down"
     );
 }
+
+/// Calls to the four legacy local-origin predicates outside their definitions.
+/// Lower as callers move to `LocalOrigin::classify`; delete the predicates at 0.
+const LEGACY_LOCAL_PREDICATE_BUDGET: usize = 24;
+
+#[test]
+fn legacy_local_origin_predicates_only_decrease() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let pattern = regex::Regex::new(
+        r"\b(?:is_strict_localhost|is_localhost|scan_origin_allows_local_dev|is_local_dev_domain)\(",
+    )
+    .expect("predicate pattern");
+    let definitions = regex::Regex::new(
+        r"fn (?:is_strict_localhost|is_localhost|scan_origin_allows_local_dev|is_local_dev_domain)\(",
+    )
+    .expect("definition pattern");
+    let mut files = Vec::new();
+    rust_source_files(&root, &mut files);
+    let total: usize = files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+        .map(|file| {
+            let source = std::fs::read_to_string(file).expect("read");
+            let production = production_half(&source);
+            pattern.find_iter(&production).count() - definitions.find_iter(&production).count()
+        })
+        .sum();
+    assert_eq!(
+        total, LEGACY_LOCAL_PREDICATE_BUDGET,
+        "legacy local-origin predicate calls changed; set LEGACY_LOCAL_PREDICATE_BUDGET to {total} only if it went down"
+    );
+}

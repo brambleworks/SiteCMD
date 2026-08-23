@@ -66,7 +66,8 @@ pub async fn analyze_url(
     {
         return WebviewAnalysis::failed(format!("Refused to analyze URL: {}", error));
     }
-    let allow_local_dev = crate::network_policy::scan_origin_allows_local_dev(&parsed_url);
+    let allow_local_dev =
+        crate::network_policy::LocalOrigin::classify(&parsed_url).allows_local_dev();
     let (gate, mut deferred) = NavigationGate::new(&parsed_url, allow_local_dev);
     let rules = super::private_network_rules::PrivateNetworkRules { allow_local_dev };
 

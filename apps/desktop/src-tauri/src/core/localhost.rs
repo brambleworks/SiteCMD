@@ -13,6 +13,7 @@ fn environment_from_host(host: &str) -> &'static str {
         || lower == "127.0.0.1"
         || lower == "0.0.0.0"
         || lower == "::1"
+        || lower == "[::1]"
         || lower.ends_with(".local")
         || lower.ends_with(".localhost")
     {
@@ -106,6 +107,7 @@ mod tests {
             ("http://0.0.0.0:5173", true),
             ("http://myapp.local", true),
             ("http://myapp.localhost:3000", true),
+            ("http://[::1]:5173", true),
             ("https://localhost.run", false),
             ("https://example.com", false),
             ("https://www.google.com", false),
