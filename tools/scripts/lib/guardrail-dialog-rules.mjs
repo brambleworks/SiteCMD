@@ -1,6 +1,6 @@
 const DIALOG_PRIMITIVE = "apps/desktop/src/components/ui/dialog.tsx";
 // Hand-rolled modals still waiting to move onto the Dialog primitive. Lower only.
-const HAND_ROLLED_DIALOG_BUDGET = 5;
+const HAND_ROLLED_DIALOG_BUDGET = 4;
 const ROLE_DIALOG_RE = /role="dialog"/g;
 
 export function handRolledDialogFailures(read, sourceFiles) {
