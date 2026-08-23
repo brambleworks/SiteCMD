@@ -17,6 +17,7 @@ import {
   getDismissedCheckIds,
   getRepoSuppressedIssues,
   getProjectByUrl,
+  getProjectEnvironmentUrls,
   getFixBrief,
   requestVerification,
   listFixAttempts,
@@ -265,6 +266,18 @@ function resolveProjectIdForCheck(
     sharingUrl.find((p) => p.id === projectId) ??
     null;
   return { projectId: owner?.id ?? projectId, projectName: owner?.name ?? null };
+}
+
+/** A scan must stay on a URL the project owns; otherwise its artifact, issues, and score land on the wrong history. */
+function requireProjectEnvironmentUrl(projectId: number, url: string): string {
+  const ownedUrls = getProjectEnvironmentUrls(projectId);
+  const normalized = normalizeEnvUrl(url);
+  const owned = ownedUrls.find((candidate) => normalizeEnvUrl(candidate) === normalized);
+  if (owned) return owned;
+  const known = ownedUrls.length > 0 ? ownedUrls.join(", ") : "none recorded";
+  throw new Error(
+    `${url} is not an environment of project #${projectId} (its URLs: ${known}). Pass one of those, or omit project_id to scan the project that owns the URL.`,
+  );
 }
 
 const CONFIDENCE_ORDER = ["confirmed", "high", "needs_review"] as const;
@@ -1078,7 +1091,9 @@ function registerCoreTools(server: McpServer): void {
       runToolAsync(
         () => {
           const projectId = resolveProjectId({ project_id, url });
-          const envUrl = url ?? getProjects().find((p) => p.id === projectId)?.url;
+          const envUrl = url
+            ? requireProjectEnvironmentUrl(projectId, url)
+            : getProjects().find((p) => p.id === projectId)?.url;
           if (!envUrl) throw new Error(`Project #${projectId} has no production URL; pass url.`);
           const requestId = createAgentRequest({
             kind: "run_scan",

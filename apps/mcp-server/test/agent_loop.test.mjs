@@ -284,3 +284,29 @@ test("list_fix_attempts includes settled attempts only when include_settled is t
   assert.match(withSettled.text, new RegExp(`#${activeId}\\b`));
   assert.match(withSettled.text, new RegExp(`#${settledId}\\b`));
 });
+
+test("run_scan refuses a URL the project does not own", async () => {
+  seedProject(1009);
+  beat(1_000);
+  const foreignUrl = "https://attacker.example/?q=1";
+  const rejected = await call("run_scan", {
+    project_id: 1009,
+    url: foreignUrl,
+    wait: false,
+  });
+  assert.equal(rejected.isError, true, rejected.text);
+  assert.match(rejected.text, /not an environment of project #1009/);
+  assert.match(rejected.text, /loop\.test/);
+  const queued = fixtureDb
+    .prepare("SELECT COUNT(*) AS total FROM agent_requests WHERE env_url LIKE '%attacker%'")
+    .get();
+  assert.equal(queued.total, 0);
+
+  const owned = await call("run_scan", { project_id: 1009, url: URL, wait: false });
+  assert.equal(owned.isError, false, owned.text);
+  assert.match(owned.text, /request #\d+/);
+
+  const byUrlOnly = await call("run_scan", { url: URL, wait: false });
+  assert.equal(byUrlOnly.isError, false, byUrlOnly.text);
+  assert.match(byUrlOnly.text, /request #\d+/);
+});

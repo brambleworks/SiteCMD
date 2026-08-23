@@ -612,6 +612,15 @@ export function getProjectByUrl(url: string): Project | null {
   return row ?? null;
 }
 
+/** Every environment URL a project owns, so a caller cannot aim a project's scan at another host. */
+export function getProjectEnvironmentUrls(projectId: number): string[] {
+  const db = getDb();
+  const rows = db
+    .prepare(`SELECT url FROM environments WHERE project_id = ? ORDER BY url`)
+    .all(projectId) as { url: string }[];
+  return rows.map((row) => row.url);
+}
+
 export function getScanHistory(url: string, limit = 10): ScanScore[] {
   const db = getDb();
   const [noSlash, withSlash] = envUrlVariants(url);
