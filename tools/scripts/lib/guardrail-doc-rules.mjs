@@ -1,5 +1,8 @@
 export function documentationSafetyFailures(read, exists, listFiles) {
   const failures = [];
+  const pushIf = (condition, message) => {
+    if (condition) failures.push(message);
+  };
 
   const guidanceFiles = [
     "CLAUDE.md",
@@ -14,42 +17,38 @@ export function documentationSafetyFailures(read, exists, listFiles) {
   const localAbsoluteMarkdownLinks = docFiles.filter((file) =>
     /\]\(\/Users\/[^)]+\)/.test(read(file)),
   );
-  if (localAbsoluteMarkdownLinks.length > 0) {
-    failures.push(
-      `Documentation must not use machine-specific absolute Markdown links: ${localAbsoluteMarkdownLinks.join(", ")}`,
-    );
-  }
+  pushIf(
+    localAbsoluteMarkdownLinks.length > 0,
+    `Documentation must not use machine-specific absolute Markdown links: ${localAbsoluteMarkdownLinks.join(", ")}`,
+  );
 
   const staleAdminKeyGuidanceFiles = guidanceFiles.filter((file) =>
     /\?key=<ADMIN_KEY>|auth via `\?key=<ADMIN_KEY>`/.test(read(file)),
   );
-  if (staleAdminKeyGuidanceFiles.length > 0) {
-    failures.push(
-      `Repo guidance must not document query-string admin keys: ${staleAdminKeyGuidanceFiles.join(", ")}`,
-    );
-  }
+  pushIf(
+    staleAdminKeyGuidanceFiles.length > 0,
+    `Repo guidance must not document query-string admin keys: ${staleAdminKeyGuidanceFiles.join(", ")}`,
+  );
 
   const staleTypecheckGuidanceFiles = guidanceFiles.filter((file) =>
     /No [`"']?(lint|typecheck)[`"']? or [`"']?(lint|typecheck)[`"']? scripts exist|No [`"']?typecheck[`"']? scripts exist/.test(
       read(file),
     ),
   );
-  if (staleTypecheckGuidanceFiles.length > 0) {
-    failures.push(
-      `Repo guidance must not claim missing typecheck scripts after quality gates exist: ${staleTypecheckGuidanceFiles.join(", ")}`,
-    );
-  }
+  pushIf(
+    staleTypecheckGuidanceFiles.length > 0,
+    `Repo guidance must not claim missing typecheck scripts after quality gates exist: ${staleTypecheckGuidanceFiles.join(", ")}`,
+  );
 
   const staleArchitectureGuidanceFiles = guidanceFiles.filter((file) =>
     /core\/guardrails\.rs|AppGuardrailsReport|gate lives in the frontend display layer|New commands must[^.\n]+capabilities\/default\.json|Add to [`"']?capabilities\/default\.json|credentials fall back to SQLite/.test(
       read(file),
     ),
   );
-  if (staleArchitectureGuidanceFiles.length > 0) {
-    failures.push(
-      `Repo guidance must not describe stale Code Scan or Tauri capability architecture: ${staleArchitectureGuidanceFiles.join(", ")}`,
-    );
-  }
+  pushIf(
+    staleArchitectureGuidanceFiles.length > 0,
+    `Repo guidance must not describe stale Code Scan or Tauri capability architecture: ${staleArchitectureGuidanceFiles.join(", ")}`,
+  );
 
   const firstRunFlowDocs = [
     "docs/product/get-value-in-5-minutes.md",
@@ -61,11 +60,10 @@ export function documentationSafetyFailures(read, exists, listFiles) {
       read(file),
     ),
   );
-  if (staleFirstRunFlowDocs.length > 0) {
-    failures.push(
-      `First-run docs must describe the Full Scan -> Dashboard guided flow, not the old Web Scan -> Issues flow: ${staleFirstRunFlowDocs.join(", ")}`,
-    );
-  }
+  pushIf(
+    staleFirstRunFlowDocs.length > 0,
+    `First-run docs must describe the Full Scan -> Dashboard guided flow, not the old Web Scan -> Issues flow: ${staleFirstRunFlowDocs.join(", ")}`,
+  );
 
   const mcpReadmeSource = read("apps/mcp-server/README.md");
   const mcpClaudeSource = read("apps/mcp-server/CLAUDE.md");
@@ -119,41 +117,36 @@ export function documentationSafetyFailures(read, exists, listFiles) {
     Array.from(read(file).matchAll(/registerTool\(\s*\n\s*"([^"]+)"/g), (match) => match[1]),
   );
   const legacyToolFiles = mcpToolSources.filter((file) => /\bserver\.tool\(/.test(read(file)));
-  if (legacyToolFiles.length > 0) {
-    failures.push(
-      `sitecmd-mcp must register tools with registerTool and annotations, never the deprecated server.tool: ${legacyToolFiles.join(", ")}`,
-    );
-  }
+  pushIf(
+    legacyToolFiles.length > 0,
+    `sitecmd-mcp must register tools with registerTool and annotations, never the deprecated server.tool: ${legacyToolFiles.join(", ")}`,
+  );
   const undocumentedMcpTools = mcpToolNames.filter(
     (toolName) => !mcpReadmeSource.includes(`\`${toolName}\``),
   );
-  if (undocumentedMcpTools.length > 0) {
-    failures.push(
-      `sitecmd-mcp README tool table must list every registered MCP tool: ${undocumentedMcpTools.join(", ")}`,
-    );
-  }
-  if (
+  pushIf(
+    undocumentedMcpTools.length > 0,
+    `sitecmd-mcp README tool table must list every registered MCP tool: ${undocumentedMcpTools.join(", ")}`,
+  );
+  pushIf(
     exists("apps/mcp-server/recovery-runbook.md") &&
-    !mcpReadmeSource.includes("recovery-runbook.md")
-  ) {
-    failures.push("sitecmd-mcp README must link the recovery runbook.");
-  }
-  if (/`how_to_rescan`\s*\|\s*Ask SiteCMD to start or queue a scan/.test(mcpReadmeSource)) {
-    failures.push(
-      "sitecmd-mcp README must describe how_to_rescan as guidance-only until it can actually queue desktop scans.",
-    );
-  }
-  if (!/`run_scan`[^\n]*app[^\n]*running/.test(mcpReadmeSource))
-    failures.push("sitecmd-mcp README run_scan row must say the desktop app has to be running.");
-  if (
+      !mcpReadmeSource.includes("recovery-runbook.md"),
+    "sitecmd-mcp README must link the recovery runbook.",
+  );
+  pushIf(
+    /`how_to_rescan`\s*\|\s*Ask SiteCMD to start or queue a scan/.test(mcpReadmeSource),
+    "sitecmd-mcp README must describe how_to_rescan as guidance-only until it can actually queue desktop scans.",
+  );
+  pushIf(
+    !/`run_scan`[^\n]*app[^\n]*running/.test(mcpReadmeSource),
+    "sitecmd-mcp README run_scan row must say the desktop app has to be running.",
+  );
+  pushIf(
     /Request a new scan in SiteCMD|start or queue desktop scans/.test(
       read("apps/mcp-server/src/server.ts"),
-    )
-  ) {
-    failures.push(
-      "sitecmd-mcp how_to_rescan tool description must stay guidance-only until it can actually queue desktop scans.",
-    );
-  }
+    ),
+    "sitecmd-mcp how_to_rescan tool description must stay guidance-only until it can actually queue desktop scans.",
+  );
 
   const publicMcpDocFiles = ["apps/mcp-server/README.md"].filter(exists);
   const staleMcpToolDocFiles = publicMcpDocFiles.filter((file) =>
@@ -161,11 +154,10 @@ export function documentationSafetyFailures(read, exists, listFiles) {
       read(file),
     ),
   );
-  if (staleMcpToolDocFiles.length > 0) {
-    failures.push(
-      `MCP docs must use current SiteCMD tool names instead of legacy aliases: ${staleMcpToolDocFiles.join(", ")}`,
-    );
-  }
+  pushIf(
+    staleMcpToolDocFiles.length > 0,
+    `MCP docs must use current SiteCMD tool names instead of legacy aliases: ${staleMcpToolDocFiles.join(", ")}`,
+  );
 
   return failures;
 }
