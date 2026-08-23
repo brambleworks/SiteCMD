@@ -5,7 +5,7 @@ import { SUPPORTED_SCHEMA_VERSIONS } from "./version.js";
 
 let checked = false;
 
-export function readSchemaVersion(): number | null {
+function readSchemaVersion(): number | null {
   const row = getDb().prepare(`SELECT MAX(version) AS version FROM _schema_version`).get() as
     { version: number | null } | undefined;
   return row?.version ?? null;

@@ -269,7 +269,7 @@ function excludeDismissedCheckIds<T extends { check_id: string }>(
   return rows.filter((row) => !dismissed.has(row.check_id));
 }
 
-export function getProjectPathById(projectId: number): string | null {
+function getProjectPathById(projectId: number): string | null {
   const row = getDb().prepare(`SELECT path FROM projects WHERE id = ?`).get(projectId) as
     { path: string } | undefined;
   return row?.path ? row.path : null;

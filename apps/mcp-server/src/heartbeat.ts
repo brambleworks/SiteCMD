@@ -11,7 +11,7 @@ export const DESKTOP_HEARTBEAT_STALE_MS = 30_000;
 /** One short retry covers a heartbeat caught mid-write; torn twice in a row counts as unreadable, not stale. */
 const HEARTBEAT_READ_RETRY_DELAY_MS = 50;
 
-export function heartbeatPath(): string {
+function heartbeatPath(): string {
   return join(dirname(resolveDbPath(platform(), process.env, homedir())), "desktop-heartbeat.json");
 }
 

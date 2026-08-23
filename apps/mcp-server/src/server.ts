@@ -153,7 +153,7 @@ function getProjectByUrlWithWorkspaceFallback(url: string) {
 }
 
 /** Shared by server.ts and correlation_tools.ts (passed in) to resolve a project id from either input. */
-export function resolveProjectId(args: { project_id?: number; url?: string }): number {
+function resolveProjectId(args: { project_id?: number; url?: string }): number {
   if (args.project_id) return args.project_id;
   if (args.url) {
     const project = getProjectByUrlWithWorkspaceFallback(args.url);

@@ -1,6 +1,6 @@
 /** Scan age copy shared by every tool that shows results, so staleness is never silent. */
 
-export const STALE_SCAN_AFTER_DAYS = 7;
+const STALE_SCAN_AFTER_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function describeScanAge(timestamp: string, nowMs: number): string {

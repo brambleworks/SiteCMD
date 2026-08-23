@@ -7,13 +7,13 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
-export interface SuppressionMatch {
+interface SuppressionMatch {
   path?: string;
   rule?: string;
   fingerprint?: string;
 }
 
-export interface Suppression {
+interface Suppression {
   match: SuppressionMatch;
   reason: string;
   expires?: string;
@@ -118,7 +118,7 @@ function validated(index: number, raw: unknown): Suppression {
   return { match, reason, expires };
 }
 
-export function loadRepoSuppressions(projectPath: string): Suppression[] {
+function loadRepoSuppressions(projectPath: string): Suppression[] {
   const configPath = join(projectPath, ".sitecmd", "config.json");
   if (!existsSync(configPath)) return [];
   if (statSync(configPath).size > MAX_CONFIG_BYTES) {

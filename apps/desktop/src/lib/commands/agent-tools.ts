@@ -5,6 +5,7 @@ export function detectAgentTools(): Promise<AgentToolStatus[]> {
   return command<AgentToolStatus[]>("detect_agent_tools");
 }
 
+/** @public IPC wrapper for get_agent_tool_manual_config, consumed by the feature/first-run-accessibility branch. */
 export function getAgentToolManualConfig(args: { tool: AgentTool }): Promise<McpManualConfig> {
   return command<McpManualConfig>("get_agent_tool_manual_config", args);
 }

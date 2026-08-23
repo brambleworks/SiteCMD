@@ -2,7 +2,7 @@
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]);
 
-export function isLocalEnvironmentUrl(url: string): boolean {
+function isLocalEnvironmentUrl(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
     return LOCAL_HOSTS.has(host) || host.endsWith(".local") || host.endsWith(".localhost");
