@@ -904,6 +904,9 @@ jobs:
     permissions:
       # Creating the GitHub Release needs write; the job still checks out nothing.
       contents: write
+      # Sigstore provenance for the verified artifacts.
+      id-token: write
+      attestations: write
     # Publishing credentials are isolated from build and signer jobs.
     environment:
       name: release-publish
@@ -1088,3 +1091,14 @@ jobs:
             --title "SiteCMD $VERSION" \
             --notes-file publication/release-notes.md \
             payload/SHA256SUMS payload/SHA256SUMS.minisig
+
+      - name: Attest build provenance for the published artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            payload/*/*.tar.gz
+            payload/*/*.AppImage
+            payload/*/*-setup.exe
+            payload/*/*.zip
+            payload/*/*.dmg
+            payload/SHA256SUMS

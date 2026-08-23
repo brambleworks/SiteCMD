@@ -203,14 +203,34 @@ export function releasePipelineSafetyFailures(read) {
       verifierCommands.includes(
         '"$verifier" updater-public-key.pub payload/SHA256SUMS checksum-signature.sig',
       ) &&
+      verifierCommands.includes('verify_listed "$dir/$cli_archive"') &&
       publisherJob.includes("add_upload payload/SHA256SUMS SHA256SUMS") &&
       publisherJob.includes("add_upload payload/SHA256SUMS.minisig SHA256SUMS.minisig") &&
+      publisherJob.includes("while read -r hash name; do") &&
       publisherJob.includes("contents: write") &&
       publisherJob.includes("gh release create") &&
       publisherJob.includes("--verify-tag") &&
       publisherJob.includes("payload/SHA256SUMS payload/SHA256SUMS.minisig") &&
-      orderedBefore(publisherJob, "Advance the production updater manifest", "gh release create"),
-    "release.yml must sign one release-wide SHA256SUMS with the production updater key, verify its .minisig without secrets, upload both beside the artifacts, and create the GitHub Release (verified tag, changelog notes, checksum assets) only after the updater manifest advanced.",
+      orderedBefore(
+        publisherJob,
+        "Advance the production updater manifest",
+        'gh release create "$TAG_NAME"',
+      ),
+    "release.yml must sign one release-wide SHA256SUMS with the production updater key, verify its .minisig without secrets and every artifact against it, upload both beside the artifacts, and create the GitHub Release (verified tag, changelog notes, checksum assets) only after the updater manifest advanced.",
+  );
+
+  // Provenance is attested only by the credentialed publisher, after every
+  // verification leg and the Release exist, never by a build or signer job.
+  const nonPublisherJobs = releaseWorkflow.replace(publisherJob, "");
+  check(
+    /uses: actions\/attest-build-provenance@[0-9a-f]{40}/.test(publisherJob) &&
+      publisherJob.includes("id-token: write") &&
+      publisherJob.includes("attestations: write") &&
+      publisherJob.includes("payload/SHA256SUMS\n") &&
+      !nonPublisherJobs.includes("attestations: write") &&
+      !nonPublisherJobs.includes("actions/attest-build-provenance@") &&
+      orderedBefore(publisherJob, "gh release create", "actions/attest-build-provenance@"),
+    "release.yml publish-release must run a SHA-pinned actions/attest-build-provenance over the verified payload (including SHA256SUMS) after the GitHub Release step, with id-token and attestations write scoped to that job alone.",
   );
 
   check(

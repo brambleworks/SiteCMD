@@ -191,6 +191,31 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
   });
 
+  it("catches a verifier that stopped binding the CLI archive to the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace('verify_listed "$dir/$cli_archive"\n', "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a publisher that drops the upload-plan cross-check", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace("          while read -r hash name; do\n", "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches provenance attestation moved out of the publisher", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml") ? source.replace("      attestations: write\n", "") : source,
+    );
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
   it("catches a removed updater-key probe job", () => {
     const failures = run((file, source) =>
       file.includes("release.yml")

@@ -56,6 +56,14 @@ See [Get value in five minutes](docs/product/get-value-in-5-minutes.md) for the
 shortest desktop walkthrough, or [the MCP server README](apps/mcp-server/README.md)
 to put the same findings inside an AI coding tool.
 
+## Verify your download
+
+Releases published after 2026-08-22 also carry a build provenance attestation
+recorded by the release workflow; with the GitHub CLI installed,
+`gh attestation verify SiteCMD_1.0.1_universal.dmg --repo brambleworks/SiteCMD`
+confirms the file came from this repository's release workflow. Replace the
+filename with the one you downloaded.
+
 ## Where your data lives
 
 Everything in this repository runs on your machine. Source code and raw file

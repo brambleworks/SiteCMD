@@ -204,6 +204,11 @@ and advances the production updater manifest through the release administration
 endpoint. It does not check out or execute product source.
 It also creates the GitHub Release for the tag, carrying the changelog notes
 and the signed `SHA256SUMS` and `SHA256SUMS.minisig`; the binaries stay on R2.
+Finally it records a build provenance attestation for every published
+artifact and the checksum manifest with `actions/attest-build-provenance`;
+`gh attestation verify <file> --repo brambleworks/SiteCMD` reads it. The
+attestation names the workflow run that published the bytes. It is not a
+reproducible-build proof.
 
 Publication stops if a platform is missing, an existing immutable object has
 different bytes, or any expected hash or signature differs.
