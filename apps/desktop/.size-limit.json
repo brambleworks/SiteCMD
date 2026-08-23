@@ -1,6 +1,6 @@
 [
   {
-    "name": "Initial page (everything index.html loads before first paint)",
+    "name": "Initial page (everything loaded before first UI paint, including the App bootstrap chunk and the stylesheet)",
     "path": [
       "dist/assets/index-*.js",
       "dist/assets/rolldown-runtime-*.js",
@@ -11,9 +11,11 @@
       "dist/assets/format-*.js",
       "dist/assets/severity-*.js",
       "dist/assets/store-*.js",
+      "dist/assets/App-*.js",
+      "dist/assets/index-*.css",
       "!dist/assets/vendor-react-pdf-*.js"
     ],
-    "limit": "115 kB",
+    "limit": "206 kB",
     "gzip": true
   },
   {
@@ -32,6 +34,18 @@
     "name": "PDF renderer chunk (lazy)",
     "path": "dist/assets/vendor-react-pdf-core-*.js",
     "limit": "500 kB",
+    "gzip": true
+  },
+  {
+    "name": "Issue action bar lazy chunk (markdown renderer excluded)",
+    "path": "dist/assets/IssueActionBar-*.js",
+    "limit": "7 kB",
+    "gzip": true
+  },
+  {
+    "name": "Markdown renderer lazy chunk (react-markdown and rehype, no grammars)",
+    "path": "dist/assets/markdown-renderer-*.js",
+    "limit": "94 kB",
     "gzip": true
   }
 ]
