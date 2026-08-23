@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use super::run_blocking;
+use super::{run_blocking, CommandError, CommandResult};
 use crate::checks::{CheckResult, CheckStatus};
 use crate::db::{Database, IssueLink};
 use crate::integrations::{github_issues, issue_tracker::IssueContext, jira, IntegrationConfig};
@@ -14,23 +14,25 @@ fn load_verified_ticket_source(
     scan_id: i64,
     check_id: &str,
     estimated_impact: u32,
-) -> Result<(CheckResult, IssueContext), String> {
+) -> CommandResult<(CheckResult, IssueContext)> {
     if check_id.trim().is_empty()
         || check_id.chars().count() > 200
         || check_id.chars().any(char::is_control)
     {
-        return Err("Finding identifier is invalid.".to_string());
+        return Err(CommandError::new("Finding identifier is invalid."));
     }
     if !db
         .scan_run_belongs_to_project(project_id, scan_id)
-        .map_err(|error| format!("Failed to verify scan ownership: {error}"))?
+        .map_err(|error| CommandError::new(format!("Failed to verify scan ownership: {error}")))?
     {
-        return Err("The selected scan does not belong to this project.".to_string());
+        return Err(CommandError::new(
+            "The selected scan does not belong to this project.",
+        ));
     }
 
     let scan = db
         .get_scan_detail(scan_id)
-        .map_err(|error| format!("Failed to load the selected scan: {error}"))?
+        .map_err(|error| CommandError::new(format!("Failed to load the selected scan: {error}")))?
         .ok_or("The selected Web Scan no longer exists.")?;
     let issue = scan
         .issues
@@ -38,11 +40,13 @@ fn load_verified_ticket_source(
         .find(|issue| issue.check_id == check_id)
         .ok_or("The selected finding is not present in that scan.")?;
     if !matches!(issue.status, CheckStatus::Fail | CheckStatus::Warn) {
-        return Err("Only an active finding can be sent to an issue tracker.".to_string());
+        return Err(CommandError::new(
+            "Only an active finding can be sent to an issue tracker.",
+        ));
     }
     let project_name = db
         .get_projects()
-        .map_err(|error| format!("Failed to load the project: {error}"))?
+        .map_err(|error| CommandError::new(format!("Failed to load the project: {error}")))?
         .into_iter()
         .find(|project| project.id == project_id)
         .map(|project| project.name)
@@ -80,7 +84,7 @@ fn get_resolved_config(
     db: &Database,
     project_id: i64,
     provider: &str,
-) -> Result<IntegrationConfig, String> {
+) -> CommandResult<IntegrationConfig> {
     get_resolved_config_with_audit(app, db, project_id, provider, &crate::keyring::audit_to_log)
 }
 
@@ -100,12 +104,12 @@ fn get_resolved_config_with_audit<R: tauri::Runtime>(
     project_id: i64,
     provider: &str,
     audit: crate::keyring::RefusalAudit<'_>,
-) -> Result<IntegrationConfig, String> {
+) -> CommandResult<IntegrationConfig> {
     resolve_issue_link_provider(provider)?;
 
     let configs = db
         .get_integrations(project_id)
-        .map_err(|e| format!("Failed to get integrations: {}", e))?;
+        .map_err(|e| CommandError::new(format!("Failed to get integrations: {}", e)))?;
     let mut configs = crate::keyring::without_unmigrated_plaintext_secrets_with(configs, audit);
 
     let pos = configs
@@ -117,14 +121,19 @@ fn get_resolved_config_with_audit<R: tauri::Runtime>(
                 .to_string();
             type_str == provider
         })
-        .ok_or_else(|| format!("No {} integration configured for this project", provider))?;
+        .ok_or_else(|| {
+            CommandError::new(format!(
+                "No {} integration configured for this project",
+                provider
+            ))
+        })?;
 
     let config = &mut configs[pos];
     if !config.enabled {
-        return Err(format!(
+        return Err(CommandError::new(format!(
             "{} integration is disabled for this project",
             provider
-        ));
+        )));
     }
     let type_str = provider.to_string();
 
@@ -169,7 +178,7 @@ pub async fn create_issue_link(
     scan_id: i64,
     provider: String,
     estimated_impact: u32,
-) -> Result<IssueLink, String> {
+) -> Result<IssueLink, CommandError> {
     // Serialize the idempotency read and write so concurrent retries cannot file twice.
     // The unique attempt index backstops writers that bypass this lock.
     static ISSUE_LINK_CREATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -184,7 +193,9 @@ pub async fn create_issue_link(
             db.get_issue_link_for_attempt(project_id, &check_id, scan_id, &provider)
         })
         .await?
-        .map_err(|e| format!("Failed to check for an existing issue link: {}", e))?
+        .map_err(|e| {
+            CommandError::new(format!("Failed to check for an existing issue link: {}", e))
+        })?
     };
     if let Some(link) = reusable_existing_link(existing, scan_id, &provider) {
         tracing::info!(
@@ -201,7 +212,7 @@ pub async fn create_issue_link(
             let (issue, context) =
                 load_verified_ticket_source(&db, project_id, scan_id, &check_id, estimated_impact)?;
             let config = get_resolved_config(&app, &db, project_id, &provider)?;
-            Ok::<_, String>((config, issue, context))
+            Ok::<_, CommandError>((config, issue, context))
         })
         .await??
     };
@@ -267,7 +278,12 @@ pub async fn create_issue_link(
             .await?
         }
 
-        other => return Err(format!("Unsupported issue tracker provider: '{}'", other)),
+        other => {
+            return Err(CommandError::new(format!(
+                "Unsupported issue tracker provider: '{}'",
+                other
+            )))
+        }
     };
 
     let db = (*db).clone();
@@ -280,13 +296,13 @@ pub async fn create_issue_link(
             &ticket.external_id,
             &ticket.external_url,
         )
-        .map_err(|e| format!("Failed to store issue link: {}", e))?;
+        .map_err(|e| CommandError::new(format!("Failed to store issue link: {}", e)))?;
 
         // Read back by the full attempt identity so concurrent providers or
         // scans cannot return another ticket.
         db.get_issue_link_for_attempt(project_id, &check_id, scan_id, &provider)
-            .map_err(|e| format!("Failed to retrieve issue link: {}", e))?
-            .ok_or_else(|| "Issue link was created but could not be retrieved".to_string())
+            .map_err(|e| CommandError::new(format!("Failed to retrieve issue link: {}", e)))?
+            .ok_or_else(|| CommandError::new("Issue link was created but could not be retrieved"))
     })
     .await?
 }
@@ -297,11 +313,11 @@ pub async fn create_issue_link(
 pub async fn get_issue_links(
     db: State<'_, Arc<Database>>,
     project_id: i64,
-) -> Result<Vec<IssueLink>, String> {
+) -> Result<Vec<IssueLink>, CommandError> {
     let db = (*db).clone();
     run_blocking(move || db.get_issue_links(project_id))
         .await?
-        .map_err(|e| format!("Failed to get issue links: {}", e))
+        .map_err(|e| CommandError::new(format!("Failed to get issue links: {}", e)))
 }
 
 /// Get the most recent issue link for a specific check on a project.
@@ -311,11 +327,11 @@ pub async fn get_issue_link_for_check(
     db: State<'_, Arc<Database>>,
     project_id: i64,
     check_id: String,
-) -> Result<Option<IssueLink>, String> {
+) -> Result<Option<IssueLink>, CommandError> {
     let db = (*db).clone();
     run_blocking(move || db.get_issue_link_for_check(project_id, &check_id))
         .await?
-        .map_err(|e| format!("Failed to get issue link: {}", e))
+        .map_err(|e| CommandError::new(format!("Failed to get issue link: {}", e)))
 }
 
 #[cfg(test)]
@@ -565,11 +581,13 @@ mod tests {
         assert!(
             load_verified_ticket_source(&db, other_project, scan_id, "security.csp", 4)
                 .unwrap_err()
+                .raw()
                 .contains("does not belong")
         );
         assert!(
             load_verified_ticket_source(&db, project_id, scan_id, "security.csp", 4)
                 .unwrap_err()
+                .raw()
                 .contains("active finding")
         );
     }

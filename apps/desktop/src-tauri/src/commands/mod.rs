@@ -20,6 +20,7 @@ mod data;
 mod desktop;
 mod desktop_project_commands;
 mod desktop_watch;
+mod error;
 mod events;
 mod fix_attempt_guidance;
 mod fix_attempts;
@@ -49,21 +50,44 @@ mod webhooks;
 
 use std::sync::LazyLock;
 
+pub use error::{CommandError, CommandResult};
 pub use tokio::sync::Mutex as TokioMutex;
 
-/// Compiled once, reused on every error path.
-pub(crate) static PATH_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?:/[\w.@\- ]+){2,}").unwrap());
+/// Unix paths: two or more slash-separated segments. The class excludes
+/// whitespace so a path segment cannot absorb trailing prose (`"...failed"`
+/// must survive redacting the path before it).
+pub(crate) static PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?:/[\w.@-]+){2,}").expect("static Unix path regex") // allow-expect: compile-time literal regex
+});
 
-/// Sanitize error messages before returning to the frontend.
-/// Strips filesystem paths to avoid leaking internal directory structure.
-#[tracing::instrument(skip(msg))]
+/// Windows drive paths (`C:\a\b`) and UNC paths (`\\server\share\a`).
+static WINDOWS_PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?:[A-Za-z]:|\\\\[^\\\s]+)(?:\\[^\\/:*?"<>|\r\n]+)+"#)
+        .expect("static Windows path regex") // allow-expect: compile-time literal regex
+});
+
+/// URLs whose path segments must survive the path stripping.
+static URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    let pattern = r#"(?:https?|wss?)://[^\s'"<>]+"#;
+    regex::Regex::new(pattern).expect("static URL regex") // allow-expect: compile-time literal regex
+});
+
+/// Sanitize error messages before returning to the frontend. Strips Windows
+/// and Unix filesystem paths, keeps URLs intact, then redacts secret formats.
 pub(crate) fn sanitize_error(msg: impl std::fmt::Display) -> String {
-    let stripped = PATH_RE
-        .replace_all(&msg.to_string(), "[internal path]")
-        .into_owned();
-    // Backstop: scrub any secret/token format before the error reaches the UI.
-    crate::log_sanitizer::redact_secrets(&stripped)
+    let raw = msg.to_string();
+    let mut urls = Vec::new();
+    let held = URL_RE.replace_all(&raw, |captures: &regex::Captures| {
+        urls.push(captures[0].to_string());
+        format!("\u{1}URL{}\u{1}", urls.len() - 1)
+    });
+    let stripped = WINDOWS_PATH_RE.replace_all(&held, "[internal path]");
+    let stripped = PATH_RE.replace_all(&stripped, "[internal path]");
+    let mut restored = stripped.into_owned();
+    for (index, url) in urls.iter().enumerate() {
+        restored = restored.replace(&format!("\u{1}URL{index}\u{1}"), url);
+    }
+    crate::log_sanitizer::redact_secrets(&restored)
 }
 
 /// Validate a scan URL. Local development loopback URLs are allowed, but

@@ -1568,3 +1568,51 @@ fn inline_git_call_scan_does_not_let_a_closed_wrapper_cover_a_later_call() {
     let genuinely_wrapped = "pub async fn f() -> Result<(), String> {\n    run_blocking(move || db.get_project_path(id)).await?;\n    let status = run_blocking(move || {\n        git::get_git_status(&path, 20)\n    })\n    .await?;\n    Ok(())\n}\n";
     assert!(inline_sync_git_calls(genuinely_wrapped).is_empty());
 }
+
+/// Number of Tauri commands whose signature still returns `Result<_, String>`.
+/// Lower it with every migration commit; it must never rise. Measure with the
+/// assertion message below.
+const STRING_RESULT_COMMAND_BUDGET: usize = 100;
+
+fn string_result_command_count(source: &str) -> usize {
+    let signature = regex::Regex::new(
+        r#"#\[(?:cfg_attr\(feature = "desktop", )?tauri::command\)?\][^{]*?fn\s+\w+[^{]*?->\s*Result<[^{]*?,\s*String>"#,
+    )
+    .expect("command signature pattern");
+    signature.find_iter(&production_half(source)).count()
+}
+
+#[test]
+fn string_returning_commands_only_decrease() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    let total: usize = files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+        .map(|file| string_result_command_count(&std::fs::read_to_string(file).expect("read")))
+        .sum();
+    assert_eq!(
+        total, STRING_RESULT_COMMAND_BUDGET,
+        "commands returning Result<_, String> changed; set STRING_RESULT_COMMAND_BUDGET to {total} only if it went down, and migrate the command to CommandError otherwise"
+    );
+}
+
+#[test]
+fn string_result_command_scan_sees_both_attribute_forms() {
+    let bare = format!(
+        "#[{}]\npub async fn a(x: i64) -> Result<(), String> {{}}\n",
+        concat!("tauri", "::command")
+    );
+    assert_eq!(string_result_command_count(&bare), 1);
+    let cfg_attr = format!(
+        "#[cfg_attr(feature = \"desktop\", {})]\npub async fn b() -> Result<Vec<u8>, String> {{}}\n",
+        concat!("tauri", "::command")
+    );
+    assert_eq!(string_result_command_count(&cfg_attr), 1);
+    let migrated = format!(
+        "#[{}]\npub async fn c() -> Result<(), CommandError> {{}}\n",
+        concat!("tauri", "::command")
+    );
+    assert_eq!(string_result_command_count(&migrated), 0);
+}
