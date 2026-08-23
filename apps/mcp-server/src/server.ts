@@ -393,6 +393,7 @@ function registerCoreTools(server: McpServer): void {
         const attempt =
           project.id !== 0 ? getLatestFixAttemptForIssue(project.id, url, check_id) : null;
         const evidence = primary.detail_json ? prettyEvidence(primary.detail_json) : null;
+        const causal = formatCausalityBlock(check_id, activeCheckIds);
         const sections = [
           issueHeading(primary, "##"),
           issueMeta(primary) + (primary.confidence_reason ? ` (${primary.confidence_reason})` : ""),
@@ -404,7 +405,7 @@ function registerCoreTools(server: McpServer): void {
           evidence ? `### Evidence\n${evidence}` : null,
           primary.manual_fix ? `### How to fix\n${primary.manual_fix}` : null,
           primary.fix_prompt ? `### Fix prompt\n${primary.fix_prompt}` : null,
-          formatCausalityBlock(check_id, activeCheckIds),
+          causal ? causal : null,
           attempt
             ? `Fix attempt: #${attempt.id} [${attempt.status}]${attempt.failure_detail ? ` - ${attempt.failure_detail}` : ""}`
             : "Fix attempt: none yet; the user can start one from this issue in SiteCMD.",
@@ -489,7 +490,9 @@ function registerCoreTools(server: McpServer): void {
           : ranked.slice(0, limit);
         if (shown.length === 0) {
           return text(
-            `No fix prompt for ${check_id} on ${url}; call get_issues to see open checks.`,
+            check_id
+              ? `No fix prompt for ${check_id} on ${url}; call get_issues to see open checks.`
+              : `No fix prompts available for ${url}; call get_issues to see open checks.`,
           );
         }
         const body = shown
@@ -504,7 +507,11 @@ function registerCoreTools(server: McpServer): void {
             return blocks.join("\n");
           })
           .join("\n\n");
-        const header = `${shown.length} of ${ranked.length} fix prompt(s) for ${url}${ranked.length > shown.length ? "; pass check_id or raise limit (max 20) for more" : ""}:`;
+        const moreHint =
+          !check_id && ranked.length > shown.length
+            ? "; pass check_id or raise limit (max 20) for more"
+            : "";
+        const header = `${shown.length} of ${ranked.length} fix prompt(s) for ${url}${moreHint}:`;
         return text(
           [
             header,

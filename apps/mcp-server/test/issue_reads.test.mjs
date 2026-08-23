@@ -184,6 +184,9 @@ test("get_issue returns one finding with guidance, occurrences, and the active a
   assert.match(output, /src\/routes\/signup\.ts:30/);
   assert.match(output, /### Fix prompt\n[\s\S]*Add a limiter\./);
   assert.match(output, new RegExp(`Fix attempt: #${attemptId} \\[briefed\\]`));
+  // No causal_link_observations were seeded for this check, so the empty
+  // causal block must be dropped entirely rather than leaving a blank section.
+  assert.doesNotMatch(output, /\n\n\n/);
 });
 
 test("get_fix_prompts limits output and can target one check", async () => {
@@ -205,6 +208,15 @@ test("get_fix_prompts limits output and can target one check", async () => {
   assert.match(targeted, /^1 of 8 fix prompt\(s\)/);
   assert.match(targeted, /Fix prompt 3/);
   assert.doesNotMatch(targeted, /Fix prompt 4/);
+  // The "raise limit" hint only makes sense when the caller isn't already
+  // targeting one check_id.
+  assert.doesNotMatch(targeted, /pass check_id/);
+});
+
+test("get_fix_prompts with zero prompts and no check_id never prints undefined", async () => {
+  seedProject(808);
+  const output = await call("get_fix_prompts", { url: URL });
+  assert.doesNotMatch(output, /undefined/);
 });
 
 test("get_scan_score prints one SiteCMD Score and mentions the web scan grade in one clause", async () => {
