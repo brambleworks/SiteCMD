@@ -7,7 +7,10 @@
   --brand: oklch(0.546 0.245 262.88);
   --brand-foreground: oklch(0.985 0 0);
   --brand-button: oklch(0.546 0.245 262.88);
-  --brand-button-hover: oklch(0.623 0.214 259.13);
+  /* L dropped from 0.623: white button text on that value read 3.58:1 against a
+     focused/hovered/pressed default button, short of the 4.5:1 AA floor (axe
+     color-contrast on the focus-restored Run Scan button, e2e/scan-flow.spec.ts). */
+  --brand-button-hover: oklch(0.54 0.214 259.13);
   --brand-button-foreground: oklch(0.985 0 0);
   --brand-muted: oklch(0.546 0.245 262.88 / 0.12);
   --brand-subtle: oklch(0.546 0.245 262.88 / 0.06);
@@ -105,10 +108,18 @@
 /* Dark theme */
 .dark {
   color-scheme: dark;
-  --brand: oklch(0.623 0.214 259.13);
+  /* L raised from 0.623: at 0.623 this text-on-surface pairing read 4.16-4.46:1 against
+     card, nav, and stage-active backgrounds, short of the 4.5:1 AA floor for small text
+     (axe color-contrast, e2e issues-flow/scan-flow/smoke specs). 0.67 clears all three
+     with margin; --brand-button-hover, --ring, --chart-1, and --sidebar-primary keep the
+     original value since they were not implicated. */
+  --brand: oklch(0.67 0.214 259.13);
   --brand-foreground: oklch(0.13 0.028 261.69);
   --brand-button: oklch(0.546 0.245 262.88);
-  --brand-button-hover: oklch(0.623 0.214 259.13);
+  /* L dropped from 0.623: white button text on that value read 3.58:1 against a
+     focused/hovered/pressed default button, short of the 4.5:1 AA floor (axe
+     color-contrast on the focus-restored Run Scan button, e2e/scan-flow.spec.ts). */
+  --brand-button-hover: oklch(0.54 0.214 259.13);
   --brand-button-foreground: oklch(0.985 0 0);
   --brand-muted: oklch(0.623 0.214 259.13 / 0.16);
   --brand-subtle: oklch(0.623 0.214 259.13 / 0.07);
@@ -124,7 +135,7 @@
   --card-foreground: #e5e1e4;
   --popover: rgba(20, 20, 22, 0.85); /* obsidian glass */
   --popover-foreground: #e5e1e4;
-  --primary: oklch(0.623 0.214 259.13);
+  --primary: oklch(0.67 0.214 259.13);
   --primary-foreground: oklch(0.13 0.028 261.69);
   --secondary: #1c1b1d; /* surface-container-low */
   --secondary-foreground: #e5e1e4;

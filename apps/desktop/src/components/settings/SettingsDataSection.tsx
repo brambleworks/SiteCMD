@@ -281,6 +281,7 @@ export function DataSection({
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleRename()}
+                aria-label="Display name"
                 className="field-control field-control--card field-control--compact settings-name-input"
               />
               <Button
@@ -386,6 +387,7 @@ export function DataSection({
                   value={newEnvironmentUrl}
                   onChange={(e) => handleNewEnvironmentUrlChange(e.target.value)}
                   placeholder="https://staging.example.com"
+                  aria-label="Environment URL"
                   className="field-control field-control--muted settings-add-env-input"
                 />
                 <select
@@ -394,6 +396,7 @@ export function DataSection({
                     setNewEnvironmentType(e.target.value as ProjectEnvironment);
                     setEnvironmentTypeTouched(true);
                   }}
+                  aria-label="Environment type"
                   className="field-control field-control--muted field-control--select settings-add-env-select">
                   <option value="production">Production</option>
                   <option value="staging">Staging</option>

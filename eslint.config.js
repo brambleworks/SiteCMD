@@ -227,4 +227,29 @@ export default defineConfig([
       "@typescript-eslint/no-explicit-any": "off",
     },
   },
+  {
+    // Dialog and menu tests drive real keyboard and pointer sequences.
+    files: [
+      "apps/desktop/src/components/layout/PageGuide.test.tsx",
+      "apps/desktop/src/components/layout/CommandPalette.test.tsx",
+      "apps/desktop/src/components/layout/TopBar.test.tsx",
+      "apps/desktop/src/components/privacy/TelemetryConsentPrompt.test.tsx",
+      "apps/desktop/src/components/ui/dialog.test.tsx",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@testing-library/react",
+              importNames: ["fireEvent"],
+              message:
+                "Use @testing-library/user-event here so Escape, Tab, and click sequences exercise real focus management.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);

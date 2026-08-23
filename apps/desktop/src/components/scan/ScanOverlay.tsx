@@ -670,6 +670,7 @@ export function ScanOverlay({
         <ProgressBar
           percent={displayPct}
           color={displayRingColor}
+          label="Scan progress"
           className="scan-overlay-bar-fill"
           trackClassName="scan-overlay-bar-track"
         />

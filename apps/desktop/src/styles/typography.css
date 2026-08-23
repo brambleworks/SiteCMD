@@ -172,8 +172,11 @@
     font-weight: 700;
     color: var(--muted-foreground);
   }
-  /* Section label with small tracking + bottom margin (for section headings above grids) */
+  /* Section label with small tracking + bottom margin (for section headings above grids).
+     display: block keeps this a full-width heading when applied to a <label> that must be
+     programmatically associated with a field (e.g. the Report Title input). */
   .section-label-block {
+    display: block;
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.15em;

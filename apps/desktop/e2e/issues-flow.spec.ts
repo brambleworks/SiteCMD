@@ -6,6 +6,7 @@ import {
   seededProjectResponses,
 } from "./fixtures/seeded-project";
 import { collectConsoleErrors } from "./fixtures/console-errors";
+import { expectNoAccessibilityViolations } from "./fixtures/accessibility";
 
 // Typed seeded-project flow from dashboard score to its failing issue.
 
@@ -26,6 +27,7 @@ test.describe("seeded project flow", () => {
     const scoreTile = page.getByRole("button").filter({ hasText: "SiteCMD Score" }).first();
     await expect(scoreTile).toBeVisible();
     await expect(scoreTile).toContainText(String(SEEDED_SCORE));
+    await expectNoAccessibilityViolations(page, "dashboard");
 
     expect(errors, `unexpected console errors:\n${errors.join("\n")}`).toHaveLength(0);
   });
@@ -39,6 +41,7 @@ test.describe("seeded project flow", () => {
     const issueRow = page.getByRole("button").filter({ hasText: SEEDED_ISSUE_TITLE }).first();
     await expect(issueRow).toBeVisible();
     await expect(issueRow).toContainText("High");
+    await expectNoAccessibilityViolations(page, "issues list");
 
     expect(errors, `unexpected console errors:\n${errors.join("\n")}`).toHaveLength(0);
   });

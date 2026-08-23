@@ -12,6 +12,7 @@ import {
   seededProjectResponses,
 } from "./fixtures/seeded-project";
 import { collectConsoleErrors } from "./fixtures/console-errors";
+import { expectNoAccessibilityViolations } from "./fixtures/accessibility";
 import type { ScanResult } from "../src/generated/ipc-bindings";
 
 // Drives a deferred web scan through progress events to its completion summary.
@@ -41,6 +42,7 @@ test.describe("web scan flow", () => {
     // The live overlay opens while run_scan_execution is pending.
     const overlay = page.getByRole("dialog", { name: "Scan in progress" });
     await expect(overlay).toBeVisible();
+    await expectNoAccessibilityViolations(page, "scan overlay");
 
     // useScan attaches the progress listener after the overlay renders;
     // emitting before it exists would drop the event.
@@ -72,6 +74,10 @@ test.describe("web scan flow", () => {
 
     const reviewIssues = page.getByRole("button", { name: "Review Issues" });
     await expect(reviewIssues).toBeVisible();
+    // The completion toast runs a 200ms slide-in fade; scanning axe mid-transition
+    // reads its still-transparent text as a false color-contrast violation.
+    await expect(page.locator(".toast-item")).toHaveCSS("opacity", "1");
+    await expectNoAccessibilityViolations(page, "scan summary");
     await reviewIssues.click();
     await expect(page.getByRole("heading", { level: 1, name: "Issues" })).toBeVisible();
 

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetTelemetryForTests,
@@ -42,6 +43,7 @@ describe("TelemetryConsentPrompt", () => {
   });
 
   it("keeps usage analytics and crash reports off until the user opts in", async () => {
+    const user = userEvent.setup();
     render(
       <>
         <TelemetryConsentPrompt />
@@ -58,7 +60,7 @@ describe("TelemetryConsentPrompt", () => {
       "false",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Save Choices" }));
+    await user.click(screen.getByRole("button", { name: "Save Choices" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Help improve SiteCMD")).not.toBeInTheDocument();
@@ -71,6 +73,7 @@ describe("TelemetryConsentPrompt", () => {
   });
 
   it("'Keep Off' explicitly saves both signals as disabled", async () => {
+    const user = userEvent.setup();
     render(
       <>
         <TelemetryConsentPrompt />
@@ -78,7 +81,7 @@ describe("TelemetryConsentPrompt", () => {
       </>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Keep Off" }));
+    await user.click(screen.getByRole("button", { name: "Keep Off" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Help improve SiteCMD")).not.toBeInTheDocument();
@@ -93,10 +96,11 @@ describe("TelemetryConsentPrompt", () => {
       .spyOn(telemetry, "setTelemetryConsent")
       .mockRejectedValueOnce(new Error("storage quota exceeded"));
 
+    const user = userEvent.setup();
     try {
       render(<TelemetryConsentPrompt />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Keep Off" }));
+      await user.click(screen.getByRole("button", { name: "Keep Off" }));
 
       const errorMessage = await screen.findByRole("alert");
       expect(errorMessage).toHaveTextContent(/Couldn't save your telemetry choice/i);
@@ -112,10 +116,11 @@ describe("TelemetryConsentPrompt", () => {
   it("shows one clean sentence, not a duplicated clause, on a wordless rejection", async () => {
     const spy = vi.spyOn(telemetry, "setTelemetryConsent").mockRejectedValueOnce(undefined);
 
+    const user = userEvent.setup();
     try {
       render(<TelemetryConsentPrompt />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Keep Off" }));
+      await user.click(screen.getByRole("button", { name: "Keep Off" }));
 
       const errorMessage = await screen.findByRole("alert");
       expect(errorMessage).toHaveTextContent(/Try again/i);

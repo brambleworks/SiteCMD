@@ -1,4 +1,4 @@
-import type { ChangeEvent, RefObject } from "react";
+import { useId, type ChangeEvent, type RefObject } from "react";
 import { ChevronDown, FileText, LayoutGrid, Loader2, RotateCcw, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -26,11 +26,15 @@ export function ReportsSetupPanel({
   onPeriodDaysChange,
   onReportTitleChange,
 }: ReportsSetupPanelProps) {
+  const reportTitleId = useId();
   return (
     <div className="rep-2col-grid">
       <div className="card card--muted card--spacious">
-        <p className="section-label-block">Report Title</p>
+        <label className="section-label-block" htmlFor={reportTitleId}>
+          Report Title
+        </label>
         <input
+          id={reportTitleId}
           type="text"
           value={reportTitle}
           onChange={(event) => onReportTitleChange(event.target.value)}
@@ -293,6 +297,10 @@ export function ReportsBrandingPanel({
   onToggle,
 }: ReportsBrandingPanelProps) {
   const logoPreviewSrc = getBrandingPreviewSrc(branding);
+  const companyNameId = useId();
+  const primaryColorId = useId();
+  const footerTextId = useId();
+  const clientNameId = useId();
 
   return (
     <div className="panel panel--flush panel--muted">
@@ -316,8 +324,11 @@ export function ReportsBrandingPanel({
         <div className="subtle-divider-top rep-panel-body">
           <div className="rep-panel-grid">
             <div>
-              <label className="section-label-mid rep-field-label">Company Name</label>
+              <label className="section-label-mid rep-field-label" htmlFor={companyNameId}>
+                Company Name
+              </label>
               <input
+                id={companyNameId}
                 type="text"
                 value={branding.company_name}
                 onChange={(event) => onBrandingChange({ company_name: event.target.value })}
@@ -325,9 +336,12 @@ export function ReportsBrandingPanel({
               />
             </div>
             <div>
-              <label className="section-label-mid rep-field-label">Primary Color</label>
+              <label className="section-label-mid rep-field-label" htmlFor={primaryColorId}>
+                Primary Color
+              </label>
               <div className="row">
                 <input
+                  id={primaryColorId}
                   type="color"
                   value={branding.primary_color}
                   onChange={(event) => onBrandingChange({ primary_color: event.target.value })}
@@ -337,6 +351,7 @@ export function ReportsBrandingPanel({
                   type="text"
                   value={branding.primary_color}
                   onChange={(event) => onBrandingChange({ primary_color: event.target.value })}
+                  aria-label="Primary color hex value"
                   className="field-control field-control--card rep-color-text"
                 />
               </div>
@@ -378,8 +393,11 @@ export function ReportsBrandingPanel({
             </p>
           </div>
           <div>
-            <label className="section-label-mid rep-field-label">Footer Text</label>
+            <label className="section-label-mid rep-field-label" htmlFor={footerTextId}>
+              Footer Text
+            </label>
             <input
+              id={footerTextId}
               type="text"
               value={branding.footer_text}
               onChange={(event) => onBrandingChange({ footer_text: event.target.value })}
@@ -387,8 +405,11 @@ export function ReportsBrandingPanel({
             />
           </div>
           <div>
-            <label className="section-label-mid rep-field-label">Client Name</label>
+            <label className="section-label-mid rep-field-label" htmlFor={clientNameId}>
+              Client Name
+            </label>
             <input
+              id={clientNameId}
               type="text"
               value={branding.client_name || ""}
               onChange={(event) => onBrandingChange({ client_name: event.target.value || null })}

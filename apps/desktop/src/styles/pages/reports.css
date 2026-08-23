@@ -282,7 +282,9 @@
     transition: var(--transition-colors);
   }
   .rep-period-btn--active {
-    background-color: color-mix(in oklab, var(--brand) 20%, transparent);
+    /* 20% read 4.03:1 against --primary text, short of the 4.5:1 AA floor
+       (axe color-contrast, e2e/smoke.spec.ts seeded navigation, Reports page). */
+    background-color: color-mix(in oklab, var(--brand) 8%, transparent);
     color: var(--primary);
   }
   .rep-period-btn--inactive:hover {

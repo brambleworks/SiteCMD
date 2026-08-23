@@ -169,7 +169,12 @@ export function CategoryScoreCard({
         </p>
         <span className="category-score-value">{score}%</span>
       </div>
-      <ProgressBar percent={score} color={cssVar} trackClassName="progress-bar--thin" />
+      <ProgressBar
+        percent={score}
+        color={cssVar}
+        label={`${label} score`}
+        trackClassName="progress-bar--thin"
+      />
     </Button>
   );
 }

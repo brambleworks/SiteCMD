@@ -437,6 +437,7 @@ function DeviceShareRow({ device, totalClicks }: { device: SearchDevice; totalCl
       <ProgressBar
         value={(device.clicks / totalClicks) * 100}
         tone="primary"
+        label={`${device.device} click share`}
         trackClassName="sc-device-track"
       />
     </div>

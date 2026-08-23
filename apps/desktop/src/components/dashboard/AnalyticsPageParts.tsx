@@ -65,7 +65,7 @@ export function BreakdownCard({
                   {formatNum(item.value)} <span className="text-meta">({pct}%)</span>
                 </span>
               </div>
-              <ProgressBar value={(item.value / max) * 100} tone="primary" />
+              <ProgressBar value={(item.value / max) * 100} tone="primary" label={item.label} />
             </div>
           );
         })}
