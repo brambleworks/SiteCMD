@@ -33,7 +33,33 @@ function projectWithConfig(projectId, suppressions) {
   return root;
 }
 
+// Real code_scan rows carry detail_json serialized from Rust's CodeIssue,
+// which is #[serde(rename_all = "camelCase")]. This is the shape production
+// data actually has, so it is the default every test below exercises.
 function codeFinding(projectId, checkId, relativePath, excerpt) {
+  addWorkItem({
+    projectId,
+    source: "code_scan",
+    signalId: `code_scan:${checkId}:${relativePath}`,
+    checkId,
+    severity: "high",
+    title: `Finding in ${relativePath}`,
+    relativePath,
+    line: 10,
+    detailJson: JSON.stringify({
+      id: `${checkId.replace("code_scan.", "")}:${relativePath}`,
+      checkId,
+      relativePath,
+      sourceExcerpt: excerpt,
+      evidence: null,
+    }),
+  });
+}
+
+// Only the fallback test below seeds this legacy snake_case shape; it proves
+// identityOf's snake_case branch still resolves an identity, in case some
+// older row was ever persisted with those keys.
+function legacyCodeFinding(projectId, checkId, relativePath, excerpt) {
   addWorkItem({
     projectId,
     source: "code_scan",
@@ -79,6 +105,10 @@ test("path patterns follow the gitignore semantics the CLI uses", () => {
   assert.ok(!pathMatchesSuppression("src/keys.js", "src/keys.jsx"));
 });
 
+// codeFinding seeds the real camelCase detail_json shape, so this is the
+// product-path assertion: a suppressed camelCase row is hidden from
+// getIssuesForProject (backs get_issues) and listed by getRepoSuppressedIssues
+// (backs get_dismissed_issues), with the configured reason attached.
 test("rule plus path suppression hides the finding and reports it as suppressed", () => {
   const projectId = 701;
   projectWithConfig(projectId, [
@@ -143,9 +173,9 @@ test("expired suppressions keep the finding visible", () => {
       relative_path: "src/config.ts",
       detail_json: JSON.stringify({
         id: "x",
-        check_id: "code_scan.hardcoded-secret",
-        relative_path: "src/config.ts",
-        source_excerpt: "const secret = 'fixture';",
+        checkId: "code_scan.hardcoded-secret",
+        relativePath: "src/config.ts",
+        sourceExcerpt: "const secret = 'fixture';",
       }),
     },
   ];
@@ -186,4 +216,31 @@ test("an invalid suppression fails the read with the CLI message", () => {
     () => getIssuesForProject(projectId, "https://example.com"),
     /Code Scan suppression 1 requires a non-empty reason/,
   );
+});
+
+test("a legacy snake_case detail_json still resolves an identity for suppression", () => {
+  const projectId = 704;
+  projectWithConfig(projectId, [
+    {
+      match: { rule: "code_scan.hardcoded-secret" },
+      reason: "Legacy snake_case rows must still suppress.",
+    },
+  ]);
+  legacyCodeFinding(
+    projectId,
+    "code_scan.hardcoded-secret",
+    "src/legacy.ts",
+    "const secret = 'fixture';",
+  );
+
+  const issues = getIssuesForProject(projectId, "https://example.com");
+  assert.deepEqual(
+    issues.map((issue) => issue.relative_path),
+    [],
+  );
+
+  const suppressed = getRepoSuppressedIssues(projectId, "https://example.com");
+  assert.equal(suppressed.length, 1);
+  assert.equal(suppressed[0].issue.relative_path, "src/legacy.ts");
+  assert.equal(suppressed[0].reason, "Legacy snake_case rows must still suppress.");
 });
