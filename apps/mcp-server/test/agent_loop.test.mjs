@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
-import { writeFileSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 
 import { readDesktopHeartbeat } from "../dist/heartbeat.js";
 import { deriveFixStatus } from "../dist/fix_status.js";
@@ -44,6 +44,20 @@ test("a fresh heartbeat means the app is running; missing or stale means it is n
   assert.equal(readDesktopHeartbeat(Date.now()).alive, true);
   beat(31_000);
   assert.equal(readDesktopHeartbeat(Date.now()).alive, false);
+});
+
+test("a torn heartbeat file reads as unknown, never as not running", () => {
+  writeFileSync(heartbeatPath, '{"pid": 1, "version": "1.0.0", "updated_at_m');
+  const status = readDesktopHeartbeat(Date.now());
+  assert.equal(status.alive, false);
+  assert.equal(status.unknown, true);
+});
+
+test("a missing heartbeat file reads as not running, not unknown", () => {
+  if (existsSync(heartbeatPath)) unlinkSync(heartbeatPath);
+  const status = readDesktopHeartbeat(Date.now());
+  assert.equal(status.alive, false);
+  assert.equal(status.unknown, false);
 });
 
 test("deriveFixStatus reports awaiting_deploy only for remote web attempts still verifying", () => {
@@ -189,4 +203,83 @@ test("run_scan returns a request handle without waiting and get_scan_status read
   assert.match(status.text, /fulfilled/);
   assert.match(status.text, /execution #77/);
   assert.match(status.text, /compare_scans/);
+});
+
+test("get_fix_status resolves a request_id to its attempt once the desktop fulfils it", async () => {
+  seedProject(1006);
+  addWorkItem({
+    projectId: 1006,
+    envUrl: URL,
+    checkId: "security.referrer",
+    severity: "low",
+    title: "Missing Referrer-Policy",
+  });
+  beat(60_000);
+  const queued = await call("start_fix", { url: URL, check_id: "security.referrer", wait: false });
+  const requestId = Number(/request #(\d+)/.exec(queued.text)[1]);
+  const attemptId = addFixAttempt({
+    projectId: 1006,
+    envUrl: URL,
+    checkId: "security.referrer",
+    briefMd: "# SiteCMD Fix Brief: Missing Referrer-Policy",
+  });
+  fixtureDb
+    .prepare(
+      "UPDATE agent_requests SET status = 'fulfilled', result_json = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(JSON.stringify({ attempt_id: attemptId, status: "briefed" }), Date.now(), requestId);
+  const { text, isError } = await call("get_fix_status", { request_id: requestId });
+  assert.equal(isError, false, text);
+  assert.match(text, new RegExp(`Fix attempt #${attemptId} for security\\.referrer`));
+  assert.match(text, /Status: briefed/);
+});
+
+test("run_scan waits for the desktop to fulfil it when wait is true", async () => {
+  seedProject(1007);
+  beat(1_000);
+  const fulfil = setInterval(() => {
+    const row = fixtureDb
+      .prepare("SELECT id FROM agent_requests WHERE status = 'requested' AND kind = 'run_scan'")
+      .get();
+    if (!row) return;
+    fixtureDb
+      .prepare(
+        "UPDATE agent_requests SET status = 'fulfilled', result_json = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(
+        JSON.stringify({ execution_id: 88, reused: false, status: "complete" }),
+        Date.now(),
+        row.id,
+      );
+  }, 50);
+  try {
+    const { text, isError } = await call("run_scan", { url: URL, scope: "web", wait: true });
+    assert.equal(isError, false, text);
+    assert.match(text, /execution #88/);
+    assert.match(text, /compare_scans/);
+  } finally {
+    clearInterval(fulfil);
+  }
+});
+
+test("list_fix_attempts includes settled attempts only when include_settled is true", async () => {
+  seedProject(1008);
+  const activeId = addFixAttempt({
+    projectId: 1008,
+    envUrl: URL,
+    checkId: "security.open.check",
+    status: "briefed",
+  });
+  const settledId = addFixAttempt({
+    projectId: 1008,
+    envUrl: URL,
+    checkId: "security.settled.check",
+    status: "verified",
+  });
+  const defaultList = await call("list_fix_attempts", {});
+  assert.match(defaultList.text, new RegExp(`#${activeId}\\b`));
+  assert.doesNotMatch(defaultList.text, new RegExp(`#${settledId}\\b`));
+  const withSettled = await call("list_fix_attempts", { include_settled: true });
+  assert.match(withSettled.text, new RegExp(`#${activeId}\\b`));
+  assert.match(withSettled.text, new RegExp(`#${settledId}\\b`));
 });

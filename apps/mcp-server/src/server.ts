@@ -28,6 +28,7 @@ import {
   getAgentRequest,
   waitForAgentRequest,
   withBusyRetry,
+  normalizeEnvUrl,
   type Issue,
   type IssueOccurrence,
   type FixPromptRow,
@@ -171,19 +172,35 @@ function agentToolFromClient(server: McpServer): string {
   return SUPPORTED_AGENT_TOOLS.find((tool) => clientName.includes(tool)) ?? "claude-code";
 }
 
+/** How long start_fix and run_scan poll agent_requests before returning a pending status; tool prose derives from these. */
+const START_FIX_WAIT_MS = 15_000;
+const RUN_SCAN_WAIT_MS = 90_000;
+const startFixWaitSecs = Math.round(START_FIX_WAIT_MS / 1000);
+const runScanWaitSecs = Math.round(RUN_SCAN_WAIT_MS / 1000);
+
+/** Requests nobody claims within a day are expired by the desktop; mirrors AGENT_REQUEST_EXPIRY_MS. */
+const REQUEST_EXPIRY_EXPLANATION = "Requests expire after 24 hours unfulfilled; start a new one.";
+
 /**
- * Async counterpart to runTool for start_fix and run_scan, whose body awaits
- * a real timer between polls of agent_requests. runTool's body is
- * synchronous by contract, so it cannot host that wait itself.
+ * Async counterpart to runTool for start_fix and run_scan: `setup` does the
+ * quick synchronous DB work (busy-retried exactly like runTool retries its
+ * whole body) and `run` receives its result to await a real timer between
+ * polls of agent_requests. Each individual poll read is separately
+ * busy-retried inside waitForAgentRequest, since re-running all of `setup`
+ * on a busy error found mid-poll would create a duplicate request.
  */
-async function runToolAsync(body: () => Promise<ToolResult>): Promise<ToolResult> {
+async function runToolAsync<T>(
+  setup: () => T,
+  run: (setup: T) => Promise<ToolResult>,
+): Promise<ToolResult> {
   try {
     try {
       assertSupportedSchemaVersion();
     } catch (error) {
       if (!isSiteCmdDatabaseNotFoundError(error)) throw error;
     }
-    return await body();
+    const setupResult = withBusyRetry(setup);
+    return await run(setupResult);
   } catch (error) {
     return {
       content: [
@@ -194,23 +211,60 @@ async function runToolAsync(body: () => Promise<ToolResult>): Promise<ToolResult
   }
 }
 
+/** Parse an agent_requests result_json blob, requiring one numeric field so a malformed result reports clearly. */
+function parseFulfilledResult(
+  resultJson: string | null,
+  requiredField: string,
+  context: string,
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resultJson ?? "{}");
+  } catch {
+    throw new Error(`${context} is fulfilled but its result could not be parsed.`);
+  }
+  const record = (parsed && typeof parsed === "object" ? parsed : {}) as Record<string, unknown>;
+  if (typeof record[requiredField] !== "number") {
+    throw new Error(`${context} is fulfilled but has no "${requiredField}" in its result.`);
+  }
+  return record;
+}
+
+function parseFulfilledAttemptId(resultJson: string | null, context: string): number {
+  return parseFulfilledResult(resultJson, "attempt_id", context).attempt_id as number;
+}
+
+function parseFulfilledExecution(
+  resultJson: string | null,
+  context: string,
+): { executionId: number; status: string } {
+  const record = parseFulfilledResult(resultJson, "execution_id", context);
+  const status = typeof record.status === "string" ? record.status : "unknown";
+  return { executionId: record.execution_id as number, status };
+}
+
 /**
  * url alone can resolve to more than one project: environments are unique
  * per (project_id, url), not globally, so two projects may share a
- * production URL. Prefer whichever one actually owns the open check.
+ * production URL. Prefer whichever one actually owns the open check, and
+ * report its name so the caller can see which project was chosen.
  */
 function resolveProjectIdForCheck(
   args: { project_id?: number; url?: string },
   checkId: string,
-): number {
-  if (args.project_id) return args.project_id;
+): { projectId: number; projectName: string | null } {
+  if (args.project_id) return { projectId: args.project_id, projectName: null };
   const projectId = resolveProjectId(args);
-  if (!args.url) return projectId;
-  const sharingUrl = getProjects().filter((p) => p.url === args.url);
-  const owner = sharingUrl.find(
-    (p) => getIssueOccurrences(p.id, args.url as string, checkId).length > 0,
-  );
-  return owner ? owner.id : projectId;
+  // resolveProjectId already required a url when project_id was absent, so args.url is set here.
+  const url = args.url as string;
+  const normalizedUrl = normalizeEnvUrl(url);
+  const sharingUrl = getProjects().filter((p) => p.url && normalizeEnvUrl(p.url) === normalizedUrl);
+  if (sharingUrl.length <= 1) return { projectId, projectName: null };
+  const owner =
+    sharingUrl.find((p) => getIssueOccurrences(p.id, url, checkId).length > 0) ??
+    sharingUrl.find((p) => p.id === projectId) ??
+    null;
+  return { projectId: owner?.id ?? projectId, projectName: owner?.name ?? null };
 }
 
 const CONFIDENCE_ORDER = ["confirmed", "high", "needs_review"] as const;
@@ -864,8 +918,7 @@ function registerCoreTools(server: McpServer): void {
     "start_fix",
     {
       title: "Start a fix attempt",
-      description:
-        "Ask SiteCMD to open a fix attempt for one check. The desktop app writes the brief with its own guidance and file mapping; this tool waits up to 15 seconds for it, then returns the attempt id to pass to get_fix_brief. Requires the SiteCMD app to be running.",
+      description: `Ask SiteCMD to open a fix attempt for one check. The desktop app writes the brief with its own guidance and file mapping; this tool waits up to ${startFixWaitSecs} seconds for it, then returns the attempt id to pass to get_fix_brief. Requires the SiteCMD app to be running.`,
       inputSchema: {
         project_id: z.number().int().positive().optional(),
         url: z.string().optional().describe("Site URL when project_id is unknown"),
@@ -879,9 +932,12 @@ function registerCoreTools(server: McpServer): void {
       annotations: WRITES_LOCAL_DB,
     },
     async ({ project_id, url, check_id, agent_tool, wait }) =>
-      runToolAsync(async () => {
-        const setup = withBusyRetry(() => {
-          const projectId = resolveProjectIdForCheck({ project_id, url }, check_id);
+      runToolAsync(
+        () => {
+          const { projectId, projectName } = resolveProjectIdForCheck(
+            { project_id, url },
+            check_id,
+          );
           const envUrl = url ?? getProjects().find((p) => p.id === projectId)?.url;
           if (!envUrl) throw new Error(`Project #${projectId} has no production URL; pass url.`);
           if (getIssueOccurrences(projectId, envUrl, check_id).length === 0) {
@@ -896,29 +952,42 @@ function registerCoreTools(server: McpServer): void {
             checkId: check_id,
             agentTool: agent_tool ?? agentToolFromClient(server),
           });
-          return { requestId, now: Date.now() };
-        });
-        if (!readDesktopHeartbeat(setup.now).alive || !wait) {
+          return { requestId, now: Date.now(), projectName };
+        },
+        async (setup) => {
+          const projectNote = setup.projectName
+            ? ` (resolved to project "${setup.projectName}")`
+            : "";
+          if (!readDesktopHeartbeat(setup.now).alive || !wait) {
+            return text(
+              `Fix request #${setup.requestId} for ${check_id} is pending${projectNote}. ${desktopStatusLine(setup.now)} Call get_fix_status with request_id=${setup.requestId} to pick up the attempt id.`,
+            );
+          }
+          const settled = await waitForAgentRequest(setup.requestId, START_FIX_WAIT_MS);
+          if (!settled || settled.status === "requested" || settled.status === "running") {
+            return text(
+              `Fix request #${setup.requestId} is still pending after ${startFixWaitSecs} seconds. Call get_fix_status with request_id=${setup.requestId}.`,
+            );
+          }
+          if (settled.status === "expired") {
+            throw new Error(
+              `Fix request #${setup.requestId} expired before SiteCMD could start it. ${REQUEST_EXPIRY_EXPLANATION}`,
+            );
+          }
+          if (settled.status !== "fulfilled") {
+            throw new Error(
+              `SiteCMD could not start the fix: ${settled.failure_detail ?? settled.status}`,
+            );
+          }
+          const attemptId = parseFulfilledAttemptId(
+            settled.result_json,
+            `Fix request #${setup.requestId}`,
+          );
           return text(
-            `Fix request #${setup.requestId} for ${check_id} is pending. ${desktopStatusLine(setup.now)} Call get_fix_status with request_id=${setup.requestId} to pick up the attempt id.`,
+            `Fix attempt #${attemptId} is briefed${projectNote}. Call get_fix_brief with attempt_id=${attemptId}, make the fix, then call request_verification with the same id and a one-paragraph summary.`,
           );
-        }
-        const settled = await waitForAgentRequest(setup.requestId, 15_000);
-        if (!settled || settled.status === "requested" || settled.status === "running") {
-          return text(
-            `Fix request #${setup.requestId} is still pending after 15 seconds. Call get_fix_status with request_id=${setup.requestId}.`,
-          );
-        }
-        if (settled.status !== "fulfilled") {
-          throw new Error(
-            `SiteCMD could not start the fix: ${settled.failure_detail ?? settled.status}`,
-          );
-        }
-        const { attempt_id } = JSON.parse(settled.result_json ?? "{}") as { attempt_id: number };
-        return text(
-          `Fix attempt #${attempt_id} is briefed. Call get_fix_brief with attempt_id=${attempt_id}, make the fix, then call request_verification with the same id and a one-paragraph summary.`,
-        );
-      }),
+        },
+      ),
   );
 
   server.registerTool(
@@ -941,14 +1010,17 @@ function registerCoreTools(server: McpServer): void {
           const request = getAgentRequest(request_id);
           if (!request) throw new Error(`No fix request #${request_id}.`);
           if (request.status === "fulfilled") {
-            const result = JSON.parse(request.result_json ?? "{}") as { attempt_id?: number };
-            resolvedAttemptId = result.attempt_id ?? null;
-          }
-          if (resolvedAttemptId === null) {
+            resolvedAttemptId = parseFulfilledAttemptId(
+              request.result_json,
+              `Fix request #${request_id}`,
+            );
+          } else {
             const now = Date.now();
             const detail = request.failure_detail
               ? ` Failure detail: ${request.failure_detail}.`
-              : "";
+              : request.status === "expired"
+                ? ` ${REQUEST_EXPIRY_EXPLANATION}`
+                : "";
             return text(
               `Fix request #${request_id} is '${request.status}'.${detail} ${desktopStatusLine(now)}`,
             );
@@ -979,8 +1051,7 @@ function registerCoreTools(server: McpServer): void {
     "run_scan",
     {
       title: "Run a SiteCMD scan",
-      description:
-        "Ask SiteCMD to scan a project now. The desktop app performs the scan; this tool returns a request id right away by default (pass wait=true to poll up to 90 seconds). Requires the SiteCMD app to be running.",
+      description: `Ask SiteCMD to scan a project now. The desktop app performs the scan; this tool returns a request id right away by default (pass wait=true to poll up to ${runScanWaitSecs} seconds). Requires the SiteCMD app to be running.`,
       inputSchema: {
         project_id: z.number().int().positive().optional(),
         url: z.string().optional().describe("Site URL when project_id is unknown"),
@@ -990,8 +1061,8 @@ function registerCoreTools(server: McpServer): void {
       annotations: WRITES_LOCAL_DB,
     },
     async ({ project_id, url, scope, wait }) =>
-      runToolAsync(async () => {
-        const setup = withBusyRetry(() => {
+      runToolAsync(
+        () => {
           const projectId = resolveProjectId({ project_id, url });
           const envUrl = url ?? getProjects().find((p) => p.id === projectId)?.url;
           if (!envUrl) throw new Error(`Project #${projectId} has no production URL; pass url.`);
@@ -1003,31 +1074,33 @@ function registerCoreTools(server: McpServer): void {
             agentTool: agentToolFromClient(server),
           });
           return { requestId, now: Date.now() };
-        });
-        if (!readDesktopHeartbeat(setup.now).alive || !wait) {
+        },
+        async (setup) => {
+          if (!readDesktopHeartbeat(setup.now).alive || !wait) {
+            return text(
+              `Scan request #${setup.requestId} (${scope}) is pending. ${desktopStatusLine(setup.now)} Call get_scan_status with request_id=${setup.requestId} for the outcome.`,
+            );
+          }
+          const settled = await waitForAgentRequest(setup.requestId, RUN_SCAN_WAIT_MS);
+          if (!settled || settled.status === "requested" || settled.status === "running") {
+            return text(
+              `Scan request #${setup.requestId} is still running after ${runScanWaitSecs} seconds. Call get_scan_status with request_id=${setup.requestId}.`,
+            );
+          }
+          if (settled.status !== "fulfilled") {
+            throw new Error(
+              `SiteCMD could not run the scan: ${settled.failure_detail ?? settled.status}`,
+            );
+          }
+          const { executionId, status } = parseFulfilledExecution(
+            settled.result_json,
+            `Scan request #${setup.requestId}`,
+          );
           return text(
-            `Scan request #${setup.requestId} (${scope}) is pending. ${desktopStatusLine(setup.now)} Call get_scan_status with request_id=${setup.requestId} for the outcome.`,
+            `Scan request #${setup.requestId} complete: execution #${executionId} (${status}). Call compare_scans to see what changed.`,
           );
-        }
-        const settled = await waitForAgentRequest(setup.requestId, 90_000);
-        if (!settled || settled.status === "requested" || settled.status === "running") {
-          return text(
-            `Scan request #${setup.requestId} is still running after 90 seconds. Call get_scan_status with request_id=${setup.requestId}.`,
-          );
-        }
-        if (settled.status !== "fulfilled") {
-          throw new Error(
-            `SiteCMD could not run the scan: ${settled.failure_detail ?? settled.status}`,
-          );
-        }
-        const { execution_id, status } = JSON.parse(settled.result_json ?? "{}") as {
-          execution_id: number;
-          status: string;
-        };
-        return text(
-          `Scan request #${setup.requestId} complete: execution #${execution_id} (${status}). Call compare_scans to see what changed.`,
-        );
-      }),
+        },
+      ),
   );
 
   server.registerTool(
@@ -1045,14 +1118,16 @@ function registerCoreTools(server: McpServer): void {
         const now = Date.now();
         const lines = [`Scan request #${request.id}: ${request.status}.`];
         if (request.status === "fulfilled") {
-          const result = JSON.parse(request.result_json ?? "{}") as {
-            execution_id?: number;
-            status?: string;
-          };
-          lines.push(`execution #${result.execution_id} (${result.status}).`);
+          const { executionId, status } = parseFulfilledExecution(
+            request.result_json,
+            `Scan request #${request.id}`,
+          );
+          lines.push(`execution #${executionId} (${status}).`);
           lines.push("Call compare_scans to see what changed.");
         } else if (request.status === "failed") {
           lines.push(`Failure detail: ${request.failure_detail ?? "unknown"}.`);
+        } else if (request.status === "expired") {
+          lines.push(REQUEST_EXPIRY_EXPLANATION);
         } else {
           lines.push(desktopStatusLine(now));
         }

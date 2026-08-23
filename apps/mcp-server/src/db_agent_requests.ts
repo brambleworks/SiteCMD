@@ -1,4 +1,4 @@
-import { getDb, getDbWrite } from "./db_connection.js";
+import { getDb, getDbWrite, withBusyRetry } from "./db_connection.js";
 
 // The only MCP module allowed to insert rows: one queue table the desktop watcher fulfils.
 
@@ -37,7 +37,7 @@ function lowercaseOrigin(url: string): string {
 }
 
 /** Mirrors the desktop's normalize_env_url so the watcher's environment lookup matches. */
-function normalizeEnvUrl(url: string): string {
+export function normalizeEnvUrl(url: string): string {
   return lowercaseOrigin(url.replace(/\/+$/, ""));
 }
 
@@ -88,9 +88,9 @@ export async function waitForAgentRequest(
 ): Promise<AgentRequestRow | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const row = getAgentRequest(id);
+    const row = withBusyRetry(() => getAgentRequest(id));
     if (row && row.status !== "requested" && row.status !== "running") return row;
     await sleep(POLL_MS);
   }
-  return getAgentRequest(id);
+  return withBusyRetry(() => getAgentRequest(id));
 }
