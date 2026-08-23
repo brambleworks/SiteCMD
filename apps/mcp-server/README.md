@@ -6,10 +6,11 @@ MCP server for [SiteCMD](https://sitecmd.com) - lets AI coding tools read scan r
 
 This MCP server gives your AI coding tool (Cursor, Claude Code, Windsurf, etc.) direct access to your SiteCMD scan results. Your AI can:
 
-- See your latest scan artifact score and category breakdown
-- List all failing issues with severity and descriptions
-- Get ready-to-use fix prompts for each issue
-- Track scan artifact score history over time
+- See the SiteCMD Score and open-issue counts
+- List open issues with ids, locations, and confidence
+- Read one issue with evidence and its fix prompt
+- Get ready-to-use fix prompts
+- Track web scan history
 
 ## Setup
 
@@ -65,19 +66,22 @@ package metadata, and SiteCMD release are bumped together.
 
 ## Tools
 
-| Tool                   | Description                                                            |
-| ---------------------- | ---------------------------------------------------------------------- |
-| `get_projects`         | List projects with ids, URLs, frameworks, and linked folders           |
-| `get_scan_score`       | Get latest scan artifact score and category breakdown                  |
-| `get_issues`           | Get failing issues, filterable by severity/category                    |
-| `get_fix_prompts`      | Get AI-ready fix prompts for each issue                                |
-| `get_scan_history`     | Get scan artifact score history over time                              |
-| `get_dismissed_issues` | List issues dismissed in SiteCMD or suppressed by .sitecmd/config.json |
-| `compare_scans`        | Compare two web scans by id (default: the two most recent)             |
-| `request_scan`         | Return guidance for running a scan manually and comparing results      |
-| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria          |
-| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify       |
-| `list_fix_attempts`    | List currently open fix attempts                                       |
+| Tool                   | Description                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `get_projects`         | List projects with ids, URLs, frameworks, and linked folders                                              |
+| `get_scan_score`       | SiteCMD Score, open issue counts, and the latest web scan breakdown                                       |
+| `get_issues`           | Open issues with id, check id, confidence, and location; filter by min_severity, category, min_confidence |
+| `get_issue`            | One check with evidence, occurrences, fix prompt, causes, and attempt                                     |
+| `get_fix_prompts`      | Fix prompts (default 5, max 20), or one by check_id                                                       |
+| `get_scan_history`     | Get scan artifact score history over time                                                                 |
+| `get_dismissed_issues` | List issues dismissed in SiteCMD or suppressed by .sitecmd/config.json                                    |
+| `compare_scans`        | Compare two web scans by id (default: the two most recent)                                                |
+| `request_scan`         | Return guidance for running a scan manually and comparing results                                         |
+| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria                                             |
+| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify                                          |
+| `list_fix_attempts`    | List currently open fix attempts                                                                          |
+
+`get_issues` no longer accepts `severity` (exact match) or `status`; use `min_severity`.
 
 ### Correlation tools
 

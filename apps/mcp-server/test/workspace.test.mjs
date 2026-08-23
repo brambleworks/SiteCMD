@@ -404,7 +404,7 @@ test("getIssuesForProject treats severity as a minimum threshold", () => {
     title: "High list issue",
   });
 
-  const issues = getIssuesForProject(projectId, "https://example.com", { severity: "high" });
+  const issues = getIssuesForProject(projectId, "https://example.com", { min_severity: "high" });
 
   assert.deepEqual(
     issues.map((issue) => issue.check_id),
@@ -498,7 +498,9 @@ test("getFixPromptsForProject treats severity as a minimum threshold", () => {
     fixPrompt: "Fix the medium issue.",
   });
 
-  const prompts = getFixPromptsForProject(projectId, "https://example.com", { severity: "high" });
+  const prompts = getFixPromptsForProject(projectId, "https://example.com", {
+    min_severity: "high",
+  });
 
   assert.deepEqual(prompts.map((prompt) => prompt.check_id).sort(), [
     "code.security.high",

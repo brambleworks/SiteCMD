@@ -81,6 +81,27 @@ export function requestVerification(attemptId: number, summary: string): void {
   }
 }
 
+export function getLatestFixAttemptForIssue(
+  projectId: number,
+  envUrl: string,
+  checkId: string,
+): { id: number; status: string; failure_detail: string | null } | null {
+  const trimmed = envUrl.replace(/\/+$/, "");
+  try {
+    const row = getDb()
+      .prepare(
+        `SELECT id, status, failure_detail FROM fix_attempts
+         WHERE project_id = ? AND env_url IN (?, ?) AND check_id = ?
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(projectId, trimmed, `${trimmed}/`, checkId) as
+      { id: number; status: string; failure_detail: string | null } | undefined;
+    return row ?? null;
+  } catch (e) {
+    rethrowFixAttemptError(e);
+  }
+}
+
 export function listFixAttempts(): FixAttemptSummary[] {
   const db = getDb();
   try {

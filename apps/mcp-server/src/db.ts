@@ -275,7 +275,7 @@ export function getProjectPathById(projectId: number): string | null {
 function loadOpenIssueRows(
   projectId: number,
   envUrl: string,
-  opts?: { severity?: string; category?: string; requireFixPrompt?: boolean },
+  opts?: { min_severity?: string; category?: string; requireFixPrompt?: boolean },
 ): SuppressedView<Issue> {
   const db = getDb();
   const [noSlash, withSlash] = envUrlVariants(envUrl);
@@ -286,7 +286,7 @@ function loadOpenIssueRows(
                AND source IN ('web_scan', 'code_scan')`;
   const params: unknown[] = [projectId, noSlash, withSlash];
   if (opts?.requireFixPrompt) sql += ` AND fix_prompt IS NOT NULL AND fix_prompt != ''`;
-  sql = addMinimumSeverityFilter(sql, params, opts?.severity);
+  sql = addMinimumSeverityFilter(sql, params, opts?.min_severity);
   if (opts?.category) {
     sql += ` AND category = ?`;
     params.push(opts.category);
@@ -321,7 +321,7 @@ export function getIssuesForProject(
   envUrl: string,
   opts?: {
     status?: string;
-    severity?: string;
+    min_severity?: string;
     category?: string;
   },
 ): Issue[] {
@@ -330,9 +330,44 @@ export function getIssuesForProject(
   }
 
   return loadOpenIssueRows(projectId, envUrl, {
-    severity: opts?.severity,
+    min_severity: opts?.min_severity,
     category: opts?.category,
   }).kept;
+}
+
+export type IssueOccurrence = Issue & {
+  manual_fix: string | null;
+  why_it_matters: string | null;
+  confidence_reason: string | null;
+};
+
+/** Every open occurrence of one check, most severe first; code findings may occur in many files. */
+export function getIssueOccurrences(
+  projectId: number,
+  envUrl: string,
+  checkId: string,
+): IssueOccurrence[] {
+  const [noSlash, withSlash] = envUrlVariants(envUrl);
+  const rows = getDb()
+    .prepare(
+      `SELECT id, source, category, check_id, severity, title, description, fix_prompt, page_url,
+              relative_path, line, confidence, detail_json, manual_fix, why_it_matters, confidence_reason
+       FROM work_items
+       WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
+         AND source IN ('web_scan', 'code_scan') AND check_id = ?
+       ORDER BY CASE severity
+         WHEN 'critical' THEN 0
+         WHEN 'high' THEN 1
+         WHEN 'medium' THEN 2
+         WHEN 'low' THEN 3
+         ELSE 4 END, relative_path, line, id`,
+    )
+    .all(projectId, noSlash, withSlash, checkId) as unknown as IssueOccurrence[];
+  return applyRepoSuppressions(
+    getProjectPathById(projectId),
+    excludeDismissedCheckIds(projectId, envUrl, rows),
+    new Date(),
+  ).kept;
 }
 
 export interface FixPromptRow {
@@ -347,7 +382,7 @@ export function getFixPromptsForProject(
   projectId: number,
   envUrl: string,
   opts?: {
-    severity?: string;
+    min_severity?: string;
     category?: string;
   },
 ): FixPromptRow[] {
