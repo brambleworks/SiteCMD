@@ -2,7 +2,7 @@ import { useState, type ComponentType } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/useToast";
 import { Button } from "@/components/ui/button";
-import { ClaudeLogo, CodexLogo, CursorLogo } from "@/components/icons/BrandLogos";
+import { ClaudeLogo, CodexLogo, CursorLogo, WindsurfLogo } from "@/components/icons/BrandLogos";
 import { IntegrationRow } from "./IntegrationRow";
 import { IntegrationModal } from "./IntegrationModal";
 import {
@@ -21,6 +21,7 @@ const AGENT_TOOL_LOGOS: Record<AgentTool, ComponentType<{ className?: string }>>
   "claude-code": ClaudeLogo,
   codex: CodexLogo,
   cursor: CursorLogo,
+  windsurf: WindsurfLogo,
 };
 
 const AGENT_TOOL_VISIBILITY_STALE_MS = 30_000;

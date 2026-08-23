@@ -131,6 +131,7 @@ const APP_COMMANDS: &[&str] = &[
     "get_fix_attempt_for_issue",
     "cancel_fix_attempt",
     "detect_agent_tools",
+    "get_agent_tool_manual_config",
     "get_license_status",
     "get_pages_with_issues",
     "get_issues_for_page",

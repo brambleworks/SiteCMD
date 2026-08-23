@@ -29,7 +29,7 @@ mod tests {
         ProjectSummary, ResolvedProjectPath, ScanScopeWriteResult, SiteBaseline,
         TodayProjectWorkSummary, UpdateCheckOutcome, UpdateInstallOutcome,
     };
-    use crate::core::agent_tools::{AgentTool, AgentToolStatus};
+    use crate::core::agent_tools::{AgentTool, AgentToolStatus, McpManualConfig, McpServerSpec};
     use crate::core::correlation::preview::{DeployRiskPreview, WhatIfResult};
     use crate::core::event_correlations::Correlation;
     use crate::core::git::{GitCommit, GitStatus};
@@ -133,6 +133,8 @@ mod tests {
         issue_context: IssueContext,
         agent_tool: AgentTool,
         agent_tool_status: AgentToolStatus,
+        mcp_server_spec: McpServerSpec,
+        mcp_manual_config: McpManualConfig,
         git_status: GitStatus,
         git_commit: GitCommit,
         webhook_config: WebhookConfig,

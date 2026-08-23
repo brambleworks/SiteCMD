@@ -10,7 +10,7 @@ import {
 import type { CreateFixAttemptArgs } from "@/generated/ipc-bindings";
 
 // Must match the AgentTool serde enum in src-tauri/src/core/agent_tools.rs
-export type AgentTool = "claude-code" | "codex" | "cursor";
+export type AgentTool = "claude-code" | "codex" | "cursor" | "windsurf";
 
 // Must match ALL_FIX_ATTEMPT_STATUSES in src-tauri/src/db/fix_attempts.rs
 export type FixAttemptStatus =
@@ -82,6 +82,7 @@ export const AGENT_TOOL_LABELS: Record<AgentTool, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   cursor: "Cursor",
+  windsurf: "Windsurf",
 };
 
 export function isAttemptActive(status: FixAttemptStatus): boolean {

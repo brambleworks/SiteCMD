@@ -95,6 +95,7 @@ permissions = [
     "allow-get-fix-attempt-for-issue",
     "allow-cancel-fix-attempt",
     "allow-detect-agent-tools",
+    "allow-get-agent-tool-manual-config",
     "allow-get-license-status",
     "allow-get-pages-with-issues",
     "allow-get-issues-for-page",

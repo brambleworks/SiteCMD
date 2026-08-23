@@ -13,10 +13,26 @@ use crate::constants::{
 #[cfg(feature = "desktop")]
 use crate::constants::{MCP_HEALTH_CHECK_POLL_INTERVAL, MCP_HEALTH_CHECK_TIMEOUT};
 
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "ipc-bindings.ts")]
 pub struct McpServerSpec {
     pub command: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+}
+
+/// What a user pastes when SiteCMD cannot write the editor config itself.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "ipc-bindings.ts")]
+pub struct McpManualConfig {
+    pub tool: AgentTool,
+    pub config_path: String,
+    pub spec: McpServerSpec,
+    /// The exact file fragment: JSON for mcpServers-style configs, TOML for Codex.
+    pub snippet: String,
+    /// Claude Code registers through its CLI; other editors have no command.
+    pub cli_command: Option<String>,
 }
 
 mod config;
@@ -168,6 +184,7 @@ pub enum AgentTool {
     ClaudeCode,
     Codex,
     Cursor,
+    Windsurf,
 }
 
 impl AgentTool {
@@ -179,6 +196,7 @@ impl AgentTool {
             AgentTool::ClaudeCode => "claude-code",
             AgentTool::Codex => "codex",
             AgentTool::Cursor => "cursor",
+            AgentTool::Windsurf => "windsurf",
         }
     }
 
@@ -188,6 +206,7 @@ impl AgentTool {
             AgentTool::ClaudeCode => "Claude Code",
             AgentTool::Codex => "Codex",
             AgentTool::Cursor => "Cursor",
+            AgentTool::Windsurf => "Windsurf",
         }
     }
 }
@@ -198,6 +217,7 @@ pub fn agent_tool_display_name(token: &str) -> &str {
         "claude-code" => AgentTool::ClaudeCode.display_name(),
         "codex" => AgentTool::Codex.display_name(),
         "cursor" => AgentTool::Cursor.display_name(),
+        "windsurf" => AgentTool::Windsurf.display_name(),
         other => other,
     }
 }
@@ -208,24 +228,28 @@ pub fn handoff_deep_link(
     tool: AgentTool,
     kickoff_prompt: &str,
     project_path: Option<&str>,
-) -> String {
+) -> Option<String> {
     let prompt = urlencoding::encode(kickoff_prompt);
     let folder = project_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(urlencoding::encode);
     match tool {
-        AgentTool::ClaudeCode => match folder {
+        AgentTool::ClaudeCode => Some(match folder {
             Some(folder) => format!("claude://code/new?q={prompt}&folder={folder}"),
             None => format!("claude://code/new?q={prompt}"),
-        },
+        }),
         // Cursor's prompt deep link has no folder/workspace parameter; the
         // prompt lands in whichever workspace Cursor has focused.
-        AgentTool::Cursor => format!("cursor://anysphere.cursor-deeplink/prompt?text={prompt}"),
-        AgentTool::Codex => match folder {
+        AgentTool::Cursor => Some(format!(
+            "cursor://anysphere.cursor-deeplink/prompt?text={prompt}"
+        )),
+        AgentTool::Codex => Some(match folder {
             Some(path) => format!("codex://threads/new?prompt={prompt}&path={path}"),
             None => format!("codex://threads/new?prompt={prompt}"),
-        },
+        }),
+        // Windsurf publishes no prompt deep link; the kickoff prompt is on the clipboard.
+        AgentTool::Windsurf => None,
     }
 }
 
@@ -261,6 +285,65 @@ pub fn claude_config_path() -> Result<PathBuf, String> {
     Ok(home_dir()?.join(".claude.json"))
 }
 
+pub fn windsurf_config_path() -> Result<PathBuf, String> {
+    Ok(home_dir()?
+        .join(".codeium")
+        .join("windsurf")
+        .join("mcp_config.json"))
+}
+
+pub fn manual_config_path(tool: AgentTool) -> Result<PathBuf, String> {
+    match tool {
+        AgentTool::ClaudeCode => claude_config_path(),
+        AgentTool::Codex => codex_config_path(),
+        AgentTool::Cursor => cursor_config_path(),
+        AgentTool::Windsurf => windsurf_config_path(),
+    }
+}
+
+pub fn manual_config_snippet(tool: AgentTool, spec: &McpServerSpec) -> Result<String, String> {
+    match tool {
+        AgentTool::Codex => upsert_codex_config("", spec),
+        AgentTool::ClaudeCode | AgentTool::Cursor | AgentTool::Windsurf => {
+            upsert_cursor_config("", spec)
+        }
+    }
+}
+
+pub fn manual_config_cli_command(tool: AgentTool, spec: &McpServerSpec) -> Option<String> {
+    if tool != AgentTool::ClaudeCode {
+        return None;
+    }
+    let mut parts = vec![
+        "claude".to_string(),
+        "mcp".into(),
+        "add".into(),
+        "--scope".into(),
+        "user".into(),
+        "sitecmd".into(),
+    ];
+    for (key, value) in &spec.env {
+        parts.push("--env".into());
+        parts.push(format!("{key}={value}"));
+    }
+    parts.push("--".into());
+    parts.push(spec.command.clone());
+    parts.extend(spec.args.iter().cloned());
+    Some(parts.join(" "))
+}
+
+#[cfg(feature = "desktop")]
+pub fn manual_config(app: &tauri::AppHandle, tool: AgentTool) -> Result<McpManualConfig, String> {
+    let spec = sitecmd_server_spec(app)?;
+    Ok(McpManualConfig {
+        tool,
+        config_path: manual_config_path(tool)?.display().to_string(),
+        snippet: manual_config_snippet(tool, &spec)?,
+        cli_command: manual_config_cli_command(tool, &spec),
+        spec,
+    })
+}
+
 #[cfg(feature = "desktop")]
 fn read_config_or_empty(path: &Result<PathBuf, String>) -> String {
     path.as_ref()
@@ -291,6 +374,15 @@ fn codex_installed() -> bool {
         || home_dir()
             .map(|home| home.join(".codex").is_dir())
             .unwrap_or(false)
+}
+
+#[cfg(feature = "desktop")]
+fn windsurf_installed() -> bool {
+    #[cfg(target_os = "macos")]
+    if Path::new("/Applications/Windsurf.app").exists() {
+        return true;
+    }
+    binary_available("windsurf")
 }
 
 #[cfg(feature = "desktop")]
@@ -393,6 +485,19 @@ fn detect_with_probe(
                 format!("Adds mcpServers.sitecmd (command: {invocation}) to {config_path}"),
             )
         }
+        AgentTool::Windsurf => {
+            let path = windsurf_config_path();
+            let config_path = display_config_path(&path);
+            let config = read_config_or_empty(&path);
+            (
+                windsurf_installed(),
+                cursor_config_has_sitecmd(&config),
+                spec.as_ref()
+                    .is_ok_and(|spec| cursor_config_matches_sitecmd_spec(&config, spec)),
+                config_path.clone(),
+                format!("Adds mcpServers.sitecmd (command: {invocation}) to {config_path}"),
+            )
+        }
     };
     let healthy = registered && config_matches && health.is_ok();
     let repair_reason = if !registered {
@@ -432,10 +537,15 @@ pub fn detect_all(app: &tauri::AppHandle) -> Vec<AgentToolStatus> {
     let health = spec
         .as_ref()
         .map_or_else(|error| Err(error.clone()), run_server_health_check);
-    [AgentTool::ClaudeCode, AgentTool::Codex, AgentTool::Cursor]
-        .into_iter()
-        .map(|tool| detect_with_probe(tool, &spec, &health))
-        .collect()
+    [
+        AgentTool::ClaudeCode,
+        AgentTool::Codex,
+        AgentTool::Cursor,
+        AgentTool::Windsurf,
+    ]
+    .into_iter()
+    .map(|tool| detect_with_probe(tool, &spec, &health))
+    .collect()
 }
 
 /// Build the spawn command for a resolved `claude` binary. On Windows, npm
@@ -619,6 +729,9 @@ pub fn register(app: &tauri::AppHandle, tool: AgentTool) -> Result<(), String> {
         AgentTool::Cursor => rewrite_config(&cursor_config_path()?, |existing| {
             upsert_cursor_config(existing, &spec)
         }),
+        AgentTool::Windsurf => rewrite_config(&windsurf_config_path()?, |existing| {
+            upsert_cursor_config(existing, &spec)
+        }),
     }
 }
 
@@ -627,6 +740,9 @@ pub fn unregister(tool: AgentTool) -> Result<(), String> {
         AgentTool::ClaudeCode => run_claude_cli(&["mcp", "remove", "--scope", "user", "sitecmd"]),
         AgentTool::Codex => unregister_via_config(&codex_config_path()?, remove_codex_config),
         AgentTool::Cursor => unregister_via_config(&cursor_config_path()?, remove_cursor_config),
+        AgentTool::Windsurf => {
+            unregister_via_config(&windsurf_config_path()?, remove_cursor_config)
+        }
     }
 }
 

@@ -538,6 +538,7 @@ pub fn run() {
             commands::get_fix_attempt_for_issue,
             commands::cancel_fix_attempt,
             commands::detect_agent_tools,
+            commands::get_agent_tool_manual_config,
             licensing::commands::get_license_status,
             commands::get_pages_with_issues,
             commands::get_issues_for_page,
