@@ -1,3 +1,5 @@
+import type { AgentTool } from "@/generated/ipc-bindings";
+
 /** Central query-key registry. Each domain exposes an `all` prefix and typed keys. */
 export const queryKeys = {
   /** Project list used by the shell and project switcher. */
@@ -174,6 +176,9 @@ export const queryKeys = {
     databaseInfo: () => ["settings", "databaseInfo"] as const,
     pagespeedKey: () => ["settings", "pagespeedKey"] as const,
     agentTools: () => ["settings", "agentTools"] as const,
+    /** One editor's manual MCP setup block (`get_agent_tool_manual_config`). */
+    agentToolManualConfig: (tool: AgentTool) =>
+      ["settings", "agentToolManualConfig", tool] as const,
     autostart: () => ["settings", "autostart"] as const,
     appVersion: () => ["settings", "appVersion"] as const,
     catalogStatus: () => ["settings", "catalogStatus"] as const,
