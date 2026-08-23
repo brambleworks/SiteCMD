@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { Monitor, RefreshCw, Smartphone, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { ExtLink } from "@/components/ui/external-link";
 import { userFacingError } from "@/lib/user-facing-error";
 import {
@@ -291,141 +291,118 @@ export function WebVitalsDetailModal({ url, hostname, onClose }: Props) {
     };
   }, []);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
-
-  return createPortal(
-    <div className="fix-prompt-modal-backdrop" onClick={onClose}>
-      <section
-        className="fix-prompt-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="web-vitals-title"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="fix-prompt-modal-header">
-          <div className="min-w-0">
-            <h3 id="web-vitals-title" className="fix-prompt-modal-title">
-              Web Vitals
-            </h3>
-            <p className="text-meta text-truncate vitals-modal-subtitle">
-              {hostname} · Google PageSpeed Insights
-            </p>
-          </div>
-          <div className="row no-shrink">
-            <div className="toggle-group" role="group" aria-label="PageSpeed strategy">
-              <Button
-                unstyled
-                type="button"
-                className={`toggle-btn ${strategy === "mobile" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
-                aria-pressed={strategy === "mobile"}
-                onClick={() => setStrategy("mobile")}>
-                <Smartphone className="icon-sm vitals-toggle-icon" />
-                Mobile
-              </Button>
-              <Button
-                unstyled
-                type="button"
-                className={`toggle-btn ${strategy === "desktop" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
-                aria-pressed={strategy === "desktop"}
-                onClick={() => setStrategy("desktop")}>
-                <Monitor className="icon-sm vitals-toggle-icon" />
-                Desktop
-              </Button>
-            </div>
+  return (
+    <Dialog labelledBy="web-vitals-title" onClose={onClose} className="fix-prompt-modal">
+      <div className="fix-prompt-modal-header">
+        <div className="min-w-0">
+          <h3 id="web-vitals-title" className="fix-prompt-modal-title">
+            Web Vitals
+          </h3>
+          <p className="text-meta text-truncate vitals-modal-subtitle">
+            {hostname} · Google PageSpeed Insights
+          </p>
+        </div>
+        <div className="row no-shrink">
+          <div className="toggle-group" role="group" aria-label="PageSpeed strategy">
             <Button
               unstyled
               type="button"
-              className="details-close"
-              aria-label="Close"
-              onClick={onClose}>
-              <X />
+              className={`toggle-btn ${strategy === "mobile" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
+              aria-pressed={strategy === "mobile"}
+              onClick={() => setStrategy("mobile")}>
+              <Smartphone className="icon-sm vitals-toggle-icon" />
+              Mobile
+            </Button>
+            <Button
+              unstyled
+              type="button"
+              className={`toggle-btn ${strategy === "desktop" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
+              aria-pressed={strategy === "desktop"}
+              onClick={() => setStrategy("desktop")}>
+              <Monitor className="icon-sm vitals-toggle-icon" />
+              Desktop
             </Button>
           </div>
-        </div>
-
-        <div className="agent-handoff-body">
-          {loading ? (
-            <div className="vitals-modal-status">
-              <RefreshCw
-                className="icon-lg animate-spin text-muted-foreground"
-                aria-hidden="true"
-              />
-              <p className="text-body-muted">Running PageSpeed Insights for {hostname}...</p>
-            </div>
-          ) : error ? (
-            <div className="vitals-modal-status">
-              <p className="text-body vitals-heading">Couldn&apos;t load PageSpeed</p>
-              <p className="text-body-muted">{error}</p>
-              {isRateLimitError(error) ? (
-                <div className="vitals-key-prompt">
-                  <p className="text-meta">
-                    {hasKey
-                      ? "A PageSpeed API key is saved, but the shared limit was still hit. Wait a minute and retry, or replace the key below."
-                      : "The keyless PageSpeed API is shared and rate-limited. Add a free API key (25,000 runs/day) to fix this - it is stored in your OS keychain."}
-                  </p>
-                  <div className="vitals-key-row">
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      aria-label="PageSpeed API key"
-                      value={keyInput}
-                      onChange={(event) => setKeyInput(event.target.value)}
-                      placeholder={hasKey ? "Paste a new key" : "Paste your PageSpeed API key"}
-                      className="field-control field-control--card"
-                      disabled={savingKey}
-                    />
-                    <Button
-                      type="button"
-                      onClick={saveKeyAndRetry}
-                      disabled={!keyInput.trim() || savingKey}>
-                      {savingKey ? "Saving..." : "Save & retry"}
-                    </Button>
-                  </div>
-                  <ExtLink
-                    href="https://developers.google.com/speed/docs/insights/v5/get-started#APIKey"
-                    className="vitals-key-link">
-                    Get a free key →
-                  </ExtLink>
-                </div>
-              ) : (
-                <p className="text-meta">
-                  PageSpeed only works on publicly reachable URLs (not localhost or private
-                  networks).
-                </p>
-              )}
-              <Button variant="outline" type="button" onClick={() => load(strategy)}>
-                Try again
-              </Button>
-            </div>
-          ) : report ? (
-            <ReportView report={report} />
-          ) : null}
-        </div>
-
-        <div className="fix-prompt-modal-footer">
           <Button
-            variant="outline"
+            unstyled
             type="button"
-            onClick={() => load(strategy)}
-            disabled={loading}
-            className="modal-footer-lead">
-            <RefreshCw className={`icon-md ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-          <Button variant="outline" type="button" onClick={onClose}>
-            Close
+            className="details-close"
+            aria-label="Close"
+            onClick={onClose}>
+            <X />
           </Button>
         </div>
-      </section>
-    </div>,
-    document.body,
+      </div>
+
+      <div className="agent-handoff-body">
+        {loading ? (
+          <div className="vitals-modal-status">
+            <RefreshCw className="icon-lg animate-spin text-muted-foreground" aria-hidden="true" />
+            <p className="text-body-muted">Running PageSpeed Insights for {hostname}...</p>
+          </div>
+        ) : error ? (
+          <div className="vitals-modal-status">
+            <p className="text-body vitals-heading">Couldn&apos;t load PageSpeed</p>
+            <p className="text-body-muted">{error}</p>
+            {isRateLimitError(error) ? (
+              <div className="vitals-key-prompt">
+                <p className="text-meta">
+                  {hasKey
+                    ? "A PageSpeed API key is saved, but the shared limit was still hit. Wait a minute and retry, or replace the key below."
+                    : "The keyless PageSpeed API is shared and rate-limited. Add a free API key (25,000 runs/day) to fix this - it is stored in your OS keychain."}
+                </p>
+                <div className="vitals-key-row">
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    aria-label="PageSpeed API key"
+                    value={keyInput}
+                    onChange={(event) => setKeyInput(event.target.value)}
+                    placeholder={hasKey ? "Paste a new key" : "Paste your PageSpeed API key"}
+                    className="field-control field-control--card"
+                    disabled={savingKey}
+                  />
+                  <Button
+                    type="button"
+                    onClick={saveKeyAndRetry}
+                    disabled={!keyInput.trim() || savingKey}>
+                    {savingKey ? "Saving..." : "Save & retry"}
+                  </Button>
+                </div>
+                <ExtLink
+                  href="https://developers.google.com/speed/docs/insights/v5/get-started#APIKey"
+                  className="vitals-key-link">
+                  Get a free key →
+                </ExtLink>
+              </div>
+            ) : (
+              <p className="text-meta">
+                PageSpeed only works on publicly reachable URLs (not localhost or private networks).
+              </p>
+            )}
+            <Button variant="outline" type="button" onClick={() => load(strategy)}>
+              Try again
+            </Button>
+          </div>
+        ) : report ? (
+          <ReportView report={report} />
+        ) : null}
+      </div>
+
+      <div className="fix-prompt-modal-footer">
+        <Button
+          variant="outline"
+          type="button"
+          onClick={() => load(strategy)}
+          disabled={loading}
+          className="modal-footer-lead">
+          <RefreshCw className={`icon-md ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+        <Button variant="outline" type="button" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </Dialog>
   );
 }
