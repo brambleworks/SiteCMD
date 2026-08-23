@@ -301,8 +301,11 @@
   .scan-overlay-stage--active {
     transform: scale(1.05);
   }
-  .scan-overlay-stage--pending {
-    opacity: 0.25;
+  /* Dim only the icon for a pending stage. CSS opacity on the whole row would
+     also wash out the label text below the WCAG AA contrast minimum, since a
+     descendant cannot opt back out of an ancestor's opacity. */
+  .scan-overlay-stage--pending .scan-overlay-stage-icon {
+    opacity: 0.4;
   }
   .scan-overlay-stage-icon {
     position: relative;
