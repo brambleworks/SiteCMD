@@ -56,7 +56,7 @@ pub async fn run_filesystem_access_command(
     request: PrivilegedCommandRequest,
 ) -> Result<Value, String> {
     super::BrokerScope::by_broker(BROKER_COMMAND)
-        .expect("registered scope")
+        .expect("registered scope") // allow-expect: BROKER_COMMAND is a SCOPES entry, proved by every_scope_admits_only_allowlisted_commands_with_live_tokens
         .admit(&token_state, &request)?;
     let PrivilegedCommandRequest {
         command,

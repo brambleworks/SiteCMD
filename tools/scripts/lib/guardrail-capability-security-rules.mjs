@@ -324,7 +324,7 @@ export function capabilitySecurityFailures(read, readJson, exists, listFiles) {
       privilegedBrokerSource.includes("args_signature") &&
       privilegedBrokerSource.includes("canonical_json_value") &&
       privilegedBrokerSource.includes("Sha256::digest") &&
-      privilegedBrokerSource.includes("token_state.consume(") &&
+      privilegedBrokerSource.includes("tokens.consume(") &&
       privilegedBrokerSource.includes("request.token.as_deref()") &&
       privilegedBrokerSource.includes("broker_command") &&
       privilegedBrokerSource.includes("&request.args") &&

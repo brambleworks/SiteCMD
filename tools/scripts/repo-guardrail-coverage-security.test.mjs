@@ -948,16 +948,18 @@ describe.concurrent(
       expectGuardrailFailure(
         privilegedTokenIssuerFailures,
         (fixtureRoot) => {
-          const broker = readFixtureFile(
-            fixtureRoot,
-            "apps/desktop/src-tauri/src/commands/privileged_command_broker/data_admin.rs",
-          );
+          // Every scoped broker admits through the shared BrokerScope::admit
+          // seam in mod.rs, the one place that calls TokenStore::consume; a
+          // regression here silently skips token consumption for all five.
+          const brokerPath = "apps/desktop/src-tauri/src/commands/privileged_command_broker/mod.rs";
+          const broker = readFixtureFile(fixtureRoot, brokerPath);
           writeFixtureFile(
             fixtureRoot,
-            "apps/desktop/src-tauri/src/commands/privileged_command_broker/data_admin.rs",
-            broker.replace(
-              "    token_state.consume(\n        request.token.as_deref(),\n        BROKER_COMMAND,\n        &command,\n        &request.args,\n    )?;\n",
-              "",
+            brokerPath,
+            mustMutate(
+              broker,
+              "        tokens.consume(\n            request.token.as_deref(),\n            self.broker_command,\n            &request.command,\n            &request.args,\n        )\n",
+              "        Ok(())\n",
             ),
           );
         },

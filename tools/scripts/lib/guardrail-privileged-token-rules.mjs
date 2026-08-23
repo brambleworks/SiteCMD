@@ -64,6 +64,12 @@ export function privilegedTokenIssuerFailures(read) {
     bridge.includes("token: request.token") &&
     bridge.includes('typeof value.token !== "string"') &&
     broker.includes("fn consume(") &&
+    // Every scoped broker admits through the shared BrokerScope seam, which
+    // is the only place that calls TokenStore::consume. `self.broker_command`
+    // only appears inside that call, never in a test's own `tokens.consume(`.
+    broker.includes("fn admit(") &&
+    broker.includes("tokens.consume(") &&
+    broker.includes("self.broker_command,") &&
     [
       "data_admin.rs",
       "external_connectors.rs",
@@ -72,15 +78,17 @@ export function privilegedTokenIssuerFailures(read) {
       "project_execution.rs",
     ].every((file) =>
       read(`apps/desktop/src-tauri/src/commands/privileged_command_broker/${file}`).includes(
-        "token_state.consume(",
+        ".admit(",
       ),
     ) &&
     broker.includes("ensure_main_token_issuer_window") &&
     broker.includes('window.label() == "main"') &&
     broker.includes("Privileged command tokens can only be issued from the main window") &&
     broker.includes("fn privileged_token_issue_requires_user_intent") &&
-    broker.includes("SENSITIVE_CONNECTOR_COMMANDS.contains(&command)") &&
-    broker.includes("SENSITIVE_FILESYSTEM_ACCESS_COMMANDS.contains(&command)") &&
+    // Sensitive lists are wired into the scope table and consulted by name.
+    broker.includes("sensitive: SENSITIVE_CONNECTOR_COMMANDS") &&
+    broker.includes("sensitive: SENSITIVE_FILESYSTEM_ACCESS_COMMANDS") &&
+    broker.includes("scope.sensitive.contains(&command)") &&
     broker.includes("async fn confirm_sensitive_token_issue") &&
     broker.includes("super::confirm_sensitive_action") &&
     broker.includes("confirm_sensitive_token_issue(app, broker_command") &&
