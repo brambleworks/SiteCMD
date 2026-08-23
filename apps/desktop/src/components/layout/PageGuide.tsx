@@ -14,7 +14,10 @@ interface PageGuideContent {
   proTip: string;
 }
 
-const PAGE_GUIDES: Record<NavPage, PageGuideContent> = {
+/** Nav pages plus the score strip, which has a guide without being a page. */
+export type PageGuideKey = NavPage | "score";
+
+const PAGE_GUIDES: Record<PageGuideKey, PageGuideContent> = {
   dashboard: {
     title: "Site Dashboard Guide",
     subtitle: "A quick daily read on this site's condition and next move.",
@@ -291,9 +294,32 @@ const PAGE_GUIDES: Record<NavPage, PageGuideContent> = {
     proTip:
       "A good report should answer: what is the state, why does it matter, and what happens next?",
   },
+  score: {
+    title: "SiteCMD Score Guide",
+    subtitle: "One number for the whole site, and exactly how it is computed.",
+    purpose:
+      "The SiteCMD Score is a 0 to 100 reading of the live site and its code together. It starts at 100 and loses points for every open issue, weighted by severity and by how sure SiteCMD is that the finding is real, so one critical problem costs more than a handful of low ones.",
+    lookFirst: [
+      "Open the breakdown under the ring to see the starting 100 and the points each severity band took away.",
+      "A capped score means a confirmed-exploitable critical issue was found; no amount of low-severity cleanup lifts it until that is fixed.",
+      "Watch the checked time. A score from last week describes last week's site.",
+    ],
+    useWell: [
+      "Fix the band that took the most points first; that is where the score moves fastest.",
+      "Rescan after a fix so the score reflects the site as it is now, not as it was.",
+      "Ignore only issues you have genuinely accepted. Ignoring to raise the number hides risk from you, not from visitors.",
+    ],
+    takeAction: [
+      "The score drops after a deploy, a content change, or a dependency update.",
+      "The breakdown shows critical or high points and you did not expect either.",
+      "The score is capped and the confirmed-exploitable issue is still open.",
+    ],
+    proTip:
+      "Treat the Excellent band as healthy and anything below Good as needing a plan this week. The bands are the same in every report, dashboard, and scan summary.",
+  },
 };
 
-export function PageGuideButton({ page, className }: { page: NavPage; className?: string }) {
+export function PageGuideButton({ page, className }: { page: PageGuideKey; className?: string }) {
   const guide = PAGE_GUIDES[page];
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);

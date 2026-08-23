@@ -477,13 +477,18 @@ describe("IssuesPage real behavior", () => {
       ),
     );
 
+    const getScoreTitle = () =>
+      screen.getByText(
+        (content, element) => content === "SiteCMD Score" && element?.className === "card__title",
+      );
+
     await waitFor(() => {
-      const scoreCard = screen.getByText("SiteCMD Score").closest(".panel")!;
+      const scoreCard = getScoreTitle().closest(".panel")!;
       expect(scoreCard).toHaveTextContent("25");
       expect(scoreCard).toHaveTextContent("20 issues");
     });
 
-    const scoreCard = screen.getByText("SiteCMD Score").closest(".panel")!;
+    const scoreCard = getScoreTitle().closest(".panel")!;
     expect(scoreCard).not.toHaveTextContent("10 issues");
     expect(scoreCard).not.toHaveTextContent("critical/high");
   });
