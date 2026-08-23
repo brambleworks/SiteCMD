@@ -1,5 +1,8 @@
 /** Shared tool-result helpers and annotation constants for every registered MCP tool. */
 
+import { isSiteCmdDatabaseNotFoundError, withBusyRetry } from "./db_connection.js";
+import { assertSupportedSchemaVersion } from "./schema_version.js";
+
 export type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
@@ -12,7 +15,14 @@ export function text(value: string): ToolResult {
 /** One error path for every tool: failures reach the agent as isError results, never transport faults. */
 export function runTool(body: () => ToolResult): ToolResult {
   try {
-    return body();
+    return withBusyRetry(() => {
+      try {
+        assertSupportedSchemaVersion();
+      } catch (error) {
+        if (!isSiteCmdDatabaseNotFoundError(error)) throw error;
+      }
+      return body();
+    });
   } catch (error) {
     return {
       content: [

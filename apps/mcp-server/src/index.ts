@@ -4,6 +4,7 @@
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getDb } from "./db_connection.js";
+import { assertSupportedSchemaVersion } from "./schema_version.js";
 import { createSiteCmdServer } from "./server.js";
 
 async function main() {
@@ -17,6 +18,7 @@ async function main() {
       )
       .get() as { table_count?: number } | undefined;
     if (row?.table_count !== 4) throw new Error("SiteCMD database schema health query failed");
+    assertSupportedSchemaVersion();
     process.stdout.write(`${JSON.stringify({ marker: "SITECMD_MCP_HEALTH_V1", ok: true })}\n`);
     return;
   }

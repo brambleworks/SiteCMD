@@ -7,8 +7,10 @@ import { applyRepoSuppressions, type SuppressedView } from "./suppressions.js";
 
 export {
   __test_isReadDbReadonly,
+  __test_readBusyTimeout,
   isSiteCmdDatabaseNotFoundError,
   resolveDbPath,
+  withBusyRetry,
 } from "./db_connection.js";
 export {
   __test_impactScoreGrid,
