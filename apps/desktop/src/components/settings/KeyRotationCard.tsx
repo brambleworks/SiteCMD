@@ -3,6 +3,7 @@ import type { ConnectedKeyRotation } from "@/generated/ipc-bindings-connected";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/useToast";
 import { abortConnectedKeyRotation, rotateConnectedFingerprintKey } from "@/lib/commands";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface KeyRotationCardProps {
   projectId: number;
@@ -43,7 +44,10 @@ export function KeyRotationCard({
         setElsewhere(claim);
       }
     } catch (error) {
-      toast.error("Could not start the key rotation", String(error));
+      toast.error(
+        "Could not start the key rotation",
+        userFacingError(error, "Try again in a moment."),
+      );
     } finally {
       setWorking(false);
     }
@@ -57,7 +61,7 @@ export function KeyRotationCard({
       await onChanged();
       toast.success("Key rotation aborted", "The claimed version number stays burned.");
     } catch (error) {
-      toast.error("Could not abort the rotation", String(error));
+      toast.error("Could not abort the rotation", userFacingError(error, "Try again in a moment."));
     } finally {
       setWorking(false);
     }

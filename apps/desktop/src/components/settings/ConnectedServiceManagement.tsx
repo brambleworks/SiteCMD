@@ -23,6 +23,7 @@ import { ConnectedCredentialsSection } from "./ConnectedCredentialsSection";
 import { ConnectedNotificationSettingsSection } from "./ConnectedNotificationSettingsSection";
 import { ConnectedReportsSection } from "./ConnectedReportsSection";
 import { KeyRotationCard } from "./KeyRotationCard";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ConnectedServiceManagementProps {
   scope: ConnectedScopeArgs;
@@ -67,7 +68,10 @@ export function ConnectedServiceManagement({
       setExportPassphrase("");
       toast.success("Encrypted connection created");
     } catch (error) {
-      toast.error("Connection export failed", String(error));
+      toast.error(
+        "Connection export failed",
+        userFacingError(error, "Nothing was written. Try again."),
+      );
     } finally {
       setExporting(false);
     }
@@ -94,7 +98,10 @@ export function ConnectedServiceManagement({
       );
       toast.success("CI token created", "Copy it now. It is not recoverable.");
     } catch (error) {
-      toast.error("Could not create a CI token", String(error));
+      toast.error(
+        "Could not create a CI token",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setMinting(false);
     }
@@ -108,7 +115,10 @@ export function ConnectedServiceManagement({
       await onConnectionReset();
       toast.success("Site unlinked", "The local fingerprint key was removed from this desktop.");
     } catch (error) {
-      toast.error("Could not unlink site", String(error));
+      toast.error(
+        "Could not unlink site",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setUnlinking(false);
     }
@@ -125,7 +135,10 @@ export function ConnectedServiceManagement({
         "The service stopped watching it. Its data is kept for 30 days if you reconnect.",
       );
     } catch (error) {
-      toast.error("Could not disconnect the site", String(error));
+      toast.error(
+        "Could not disconnect the site",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setDisconnecting(false);
     }
@@ -144,7 +157,7 @@ export function ConnectedServiceManagement({
           : "The service is watching this site again.",
       );
     } catch (error) {
-      toast.error("Could not resume the site", String(error));
+      toast.error("Could not resume the site", userFacingError(error, "Try again in a moment."));
     } finally {
       setReconnecting(false);
     }
@@ -159,7 +172,10 @@ export function ConnectedServiceManagement({
       await onConnectionReset();
       toast.success("Site data erased", "Copy the receipt token now. It is not recoverable.");
     } catch (error) {
-      toast.error("Could not erase the site", String(error));
+      toast.error(
+        "Could not erase the site",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setErasing(false);
     }

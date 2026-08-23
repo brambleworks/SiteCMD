@@ -9,6 +9,7 @@ import {
   importConnectedConnection,
   type ConnectedScopeArgs,
 } from "@/lib/commands";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ConnectedServiceSetupProps {
   scope: ConnectedScopeArgs;
@@ -43,7 +44,10 @@ export function ConnectedServiceSetup({
         `Your ${activation.tier === "pro" ? "Pro" : "Plus"} subscription now covers this desktop. No token needed below.`,
       );
     } catch (error) {
-      toast.error("Could not activate the connected service", String(error));
+      toast.error(
+        "Could not activate the connected service",
+        userFacingError(error, "Try again in a moment."),
+      );
     } finally {
       setActivatingService(false);
     }
@@ -66,7 +70,10 @@ export function ConnectedServiceSetup({
         "Publish the challenge below, then verify. Nothing is scanned until you do.",
       );
     } catch (error) {
-      toast.error("Could not create the site", String(error));
+      toast.error(
+        "Could not create the site",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setCreating(false);
     }
@@ -87,7 +94,10 @@ export function ConnectedServiceSetup({
       await onStatusChanged();
       toast.success("Connection imported", "This desktop can now inspect and sync the site.");
     } catch (error) {
-      toast.error("Connection import failed", String(error));
+      toast.error(
+        "Connection import failed",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setImporting(false);
     }

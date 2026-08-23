@@ -12,6 +12,7 @@ import {
   putConnectedNotificationSettings,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ConnectedNotificationSettingsSectionProps {
   projectId: number;
@@ -158,7 +159,10 @@ export function ConnectedNotificationSettingsSection({
           : "Changing the address emails the previous one to say alerts moved.",
       );
     } catch (error) {
-      toast.error("Could not save the alert settings", String(error));
+      toast.error(
+        "Could not save the alert settings",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setSaving(false);
     }

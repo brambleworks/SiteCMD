@@ -12,6 +12,7 @@ import {
   updateConnectedDestinationPolicy,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 /** Refused deletion with the sites that must be detached first. */
 interface DeliveryConflict {
@@ -90,7 +91,10 @@ export function ConnectedAlertDestinationsSection() {
           : "Nothing reaches it until someone opens the link in that email.",
       );
     } catch (error) {
-      toast.error("Could not add that address", String(error));
+      toast.error(
+        "Could not add that address",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setAdding(false);
     }
@@ -108,7 +112,10 @@ export function ConnectedAlertDestinationsSection() {
       await refresh();
       toast.success("Confirmation email sent again", "The new link lasts 24 hours.");
     } catch (error) {
-      toast.error("Could not send the confirmation email", String(error));
+      toast.error(
+        "Could not send the confirmation email",
+        userFacingError(error, "Try again in a moment."),
+      );
     } finally {
       setBusyDestination(null);
     }
@@ -128,7 +135,10 @@ export function ConnectedAlertDestinationsSection() {
       await refresh();
       if (!outcome.applied) toast.error("Nothing changed", outcome.message);
     } catch (error) {
-      toast.error("Could not change what this address receives", String(error));
+      toast.error(
+        "Could not change what this address receives",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setBusyDestination(null);
     }
@@ -146,7 +156,10 @@ export function ConnectedAlertDestinationsSection() {
       await refresh();
       toast.success("Address removed");
     } catch (error) {
-      toast.error("Could not remove that address", String(error));
+      toast.error(
+        "Could not remove that address",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setBusyDestination(null);
     }

@@ -15,6 +15,7 @@ import { useIntegrationsQuery } from "@/hooks/useIntegrationsQuery";
 import { invalidateProjectMonitoringSignals } from "@/lib/project-summary-signals";
 import { getHostname } from "@/lib/utils";
 import type { IntegrationType } from "@/lib/types";
+import { userFacingError } from "@/lib/user-facing-error";
 
 import { getServiceName } from "./inline-integration-setup-model";
 import {
@@ -104,7 +105,7 @@ export function useInlineIntegrationSetupState({
       toast.success(`Connected`, `${getServiceName(type)} is now active.`);
       onConnected?.(type);
     } catch (e) {
-      toast.error(`Failed to connect`, String(e));
+      toast.error(`Failed to connect`, userFacingError(e, "Your change was not saved. Try again."));
     }
     setSaving(false);
   };
@@ -180,7 +181,7 @@ export function useInlineIntegrationSetupState({
 
       setGooglePickerData(data);
     } catch (e) {
-      setGoogleError(String(e));
+      setGoogleError(userFacingError(e, "Your change was not saved. Try again."));
     } finally {
       setGoogleConnecting(false);
     }
@@ -194,7 +195,7 @@ export function useInlineIntegrationSetupState({
     try {
       await saveGoogleConnection(googleFlowId, type, selectedSiteId);
     } catch (e) {
-      toast.error("Failed to save", String(e));
+      toast.error("Failed to save", userFacingError(e, "Your change was not saved. Try again."));
     }
   };
 
@@ -221,7 +222,7 @@ export function useInlineIntegrationSetupState({
       setGhDeviceCode(null);
     } catch (e) {
       setGhDeviceCode(null);
-      toast.error("GitHub connection failed", String(e));
+      toast.error("GitHub connection failed", userFacingError(e, "Try again in a moment."));
     }
     setGhConnecting(false);
   };
@@ -240,7 +241,7 @@ export function useInlineIntegrationSetupState({
       toast.success("Connected", `GitHub repository ${repo} is now active.`);
       onConnected?.("github");
     } catch (e) {
-      toast.error("Failed to save", String(e));
+      toast.error("Failed to save", userFacingError(e, "Your change was not saved. Try again."));
     }
   };
 

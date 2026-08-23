@@ -9,6 +9,7 @@ import {
   requestAccountRecovery,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 /** Show and acknowledge subscription-owner recovery state. */
 export function AccountRecoveryCard() {
@@ -49,7 +50,7 @@ export function AccountRecoveryCard() {
         `Every verified destination is being warned. Unless an admin cancels, it can complete after ${requested.eligibleAt.slice(0, 10)}.`,
       );
     } catch (error) {
-      toast.error("Could not request recovery", String(error));
+      toast.error("Could not request recovery", userFacingError(error, "Try again in a moment."));
     } finally {
       setWorking(false);
     }
@@ -62,7 +63,10 @@ export function AccountRecoveryCard() {
       await refresh();
       toast.success("Recovery cancelled", "The pending request is dead.");
     } catch (error) {
-      toast.error("Could not cancel the recovery", String(error));
+      toast.error(
+        "Could not cancel the recovery",
+        userFacingError(error, "Try again in a moment."),
+      );
     } finally {
       setWorking(false);
     }

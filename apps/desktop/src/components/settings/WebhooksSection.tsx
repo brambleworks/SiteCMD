@@ -10,6 +10,7 @@ import {
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export function WebhooksSection({ projectId }: { projectId?: number }) {
   const queryClient = useQueryClient();
@@ -46,7 +47,10 @@ export function WebhooksSection({ projectId }: { projectId?: number }) {
       await reloadWebhooks();
       toast.success("Webhook added");
     } catch (e) {
-      toast.error("Failed to add webhook", String(e));
+      toast.error(
+        "Failed to add webhook",
+        userFacingError(e, "Your change was not saved. Try again."),
+      );
     }
   };
 
@@ -55,7 +59,7 @@ export function WebhooksSection({ projectId }: { projectId?: number }) {
       await deleteWebhookConfig({ id });
       await reloadWebhooks();
     } catch (e) {
-      toast.error("Failed to delete", String(e));
+      toast.error("Failed to delete", userFacingError(e, "Your change was not saved. Try again."));
     }
   };
 
@@ -65,7 +69,7 @@ export function WebhooksSection({ projectId }: { projectId?: number }) {
       await testWebhook({ id: wh.id });
       toast.success("Test delivered", `Webhook sent to ${wh.url}`);
     } catch (e) {
-      toast.error("Test failed", String(e));
+      toast.error("Test failed", userFacingError(e, "Try again in a moment."));
     }
     setTesting(null);
   };

@@ -115,7 +115,7 @@ describe("AgentToolManualSetup", () => {
     fireEvent.click(screen.getByText("Manual setup"));
 
     expect(
-      await screen.findByText(/could not resolve the SiteCMD database path/),
+      await screen.findByText("Could not resolve the SiteCMD database path."),
     ).toBeInTheDocument();
   });
 });

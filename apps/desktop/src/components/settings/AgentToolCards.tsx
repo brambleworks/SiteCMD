@@ -17,6 +17,7 @@ import {
 import { queryKeys } from "@/lib/query/query-keys";
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 import { useVisibilityRefresh } from "@/lib/useVisibilityRefresh";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const AGENT_TOOL_LOGOS: Record<AgentTool, ComponentType<{ className?: string }>> = {
   "claude-code": ClaudeLogo,
@@ -84,7 +85,10 @@ export function AgentToolCards() {
       setModalTool(null);
       toast.success(`${AGENT_TOOL_LABELS[tool]} ${wasRepair ? "repaired" : "connected"}`);
     } catch (error) {
-      setCardErrors((prev) => ({ ...prev, [tool]: String(error) }));
+      setCardErrors((prev) => ({
+        ...prev,
+        [tool]: userFacingError(error, "Your change was not saved. Try again."),
+      }));
     } finally {
       setToolBusy(tool, false);
     }
@@ -98,7 +102,10 @@ export function AgentToolCards() {
       setModalTool(null);
       toast.info(`${AGENT_TOOL_LABELS[tool]} disconnected`);
     } catch (error) {
-      setCardErrors((prev) => ({ ...prev, [tool]: String(error) }));
+      setCardErrors((prev) => ({
+        ...prev,
+        [tool]: userFacingError(error, "Your change was not saved. Try again."),
+      }));
     } finally {
       setToolBusy(tool, false);
     }

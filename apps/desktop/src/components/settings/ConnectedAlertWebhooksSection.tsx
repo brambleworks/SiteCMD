@@ -12,6 +12,7 @@ import {
   testConnectedAlertWebhook,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ConnectedAlertWebhooksSectionProps {
   projectId: number;
@@ -62,7 +63,10 @@ export function ConnectedAlertWebhooksSection({
         "Copy the signing secret now. It is not shown again.",
       );
     } catch (error) {
-      toast.error("Could not add the webhook endpoint", String(error));
+      toast.error(
+        "Could not add the webhook endpoint",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setCreating(false);
     }
@@ -78,7 +82,10 @@ export function ConnectedAlertWebhooksSection({
         "The service signs and posts it shortly. A delivered test re-enables a disabled endpoint.",
       );
     } catch (error) {
-      toast.error("Could not send the test delivery", String(error));
+      toast.error(
+        "Could not send the test delivery",
+        userFacingError(error, "Try again in a moment."),
+      );
     } finally {
       setBusyWebhook(null);
     }
@@ -96,7 +103,10 @@ export function ConnectedAlertWebhooksSection({
       await refresh();
       toast.success("Secret rotated", "Copy the new secret now. It is not shown again.");
     } catch (error) {
-      toast.error("Could not rotate the secret", String(error));
+      toast.error(
+        "Could not rotate the secret",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setBusyWebhook(null);
     }
@@ -110,7 +120,10 @@ export function ConnectedAlertWebhooksSection({
       await refresh();
       toast.success("Webhook endpoint deleted");
     } catch (error) {
-      toast.error("Could not delete the webhook endpoint", String(error));
+      toast.error(
+        "Could not delete the webhook endpoint",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setBusyWebhook(null);
     }

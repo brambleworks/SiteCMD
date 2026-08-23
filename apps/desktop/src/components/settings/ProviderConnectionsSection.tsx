@@ -10,6 +10,7 @@ import {
 } from "@/lib/commands";
 import { openExternalUrl } from "@/lib/commands/desktop";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const PROVIDER_LABELS: Record<string, string> = { netlify: "Netlify", vercel: "Vercel" };
 
@@ -39,7 +40,10 @@ export function ProviderConnectionsSection() {
       setPendingRound(round);
       await refresh();
     } catch (error) {
-      toast.error("Could not start the provider connection", String(error));
+      toast.error(
+        "Could not start the provider connection",
+        userFacingError(error, "Try again in a moment."),
+      );
     } finally {
       setStarting(null);
     }
@@ -54,7 +58,10 @@ export function ProviderConnectionsSection() {
         "Approve the request there, then refresh this list to see the connection go active.",
       );
     } catch (error) {
-      toast.error("Could not open the provider sign-in", String(error));
+      toast.error(
+        "Could not open the provider sign-in",
+        userFacingError(error, "Try again in a moment."),
+      );
     }
   };
 
@@ -66,7 +73,10 @@ export function ProviderConnectionsSection() {
       await refresh();
       toast.success("Provider connection revoked");
     } catch (error) {
-      toast.error("Could not revoke the connection", String(error));
+      toast.error(
+        "Could not revoke the connection",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setBusyConnection(null);
     }

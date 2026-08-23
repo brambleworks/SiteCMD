@@ -4,7 +4,7 @@ import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { copyToClipboard } from "@/lib/clipboard";
 import { getAgentToolManualConfig } from "@/lib/commands";
-import { errorMessage } from "@/lib/error-message";
+import { userFacingError } from "@/lib/user-facing-error";
 import {
   MANUAL_SETUP_EDITORS,
   MANUAL_SETUP_EDITOR_LABELS,
@@ -75,7 +75,10 @@ function ManualSetupBody() {
       {configQuery.isPending ? <p className="text-meta">Preparing the setup block.</p> : null}
       {configQuery.isError ? (
         <p className="agent-handoff-error">
-          {errorMessage(configQuery.error) || "SiteCMD could not build the setup block."}
+          {userFacingError(
+            configQuery.error,
+            "SiteCMD could not build the setup block. Install Node 22.22.1 or newer and reopen Manual setup.",
+          )}
         </p>
       ) : null}
       {block ? (

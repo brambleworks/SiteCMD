@@ -11,6 +11,7 @@ import {
   rotateConnectedSiteCredential,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ConnectedCredentialsSectionProps {
   projectId: number;
@@ -80,7 +81,10 @@ export function ConnectedCredentialsSection({
       await refresh();
       toast.success("Webhook secret minted", "Copy it now. It is not shown again.");
     } catch (error) {
-      toast.error("Could not mint the webhook secret", String(error));
+      toast.error(
+        "Could not mint the webhook secret",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setMinting(false);
     }
@@ -98,7 +102,10 @@ export function ConnectedCredentialsSection({
       await refresh();
       toast.success("Secret rotated", "Copy the new secret now. It is not shown again.");
     } catch (error) {
-      toast.error("Could not rotate the secret", String(error));
+      toast.error(
+        "Could not rotate the secret",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setBusyCredential(null);
     }
@@ -112,7 +119,10 @@ export function ConnectedCredentialsSection({
       await refresh();
       toast.success("Credential revoked");
     } catch (error) {
-      toast.error("Could not revoke the credential", String(error));
+      toast.error(
+        "Could not revoke the credential",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setBusyCredential(null);
     }
