@@ -554,6 +554,7 @@ describe("telemetrySafetyFailures build attribution", () => {
   const WRAPPER = "apps/desktop/src/lib/telemetry.ts";
   const VITE_CONFIG = "apps/desktop/vite.config.ts";
   const APP_CONTENT = "apps/desktop/src/app/AppContent.tsx";
+  const APP_SHELL_HELPERS = "apps/desktop/src/app/app-shell-helpers.ts";
   const cleanSources = {
     [WRAPPER]: [
       "getTelemetryConsent",
@@ -576,7 +577,16 @@ describe("telemetrySafetyFailures build attribution", () => {
       "if (bootstrapState) {",
       "  return <StartupShell />;",
       "}",
-      "return hasCompletedFirstScan && projects.length > 0 ? <TelemetryConsentPrompt /> : null;",
+      "const showTelemetryConsentPrompt = shouldShowTelemetryConsentPrompt({",
+      "  hasCompletedFirstScan,",
+      "});",
+      "return showTelemetryConsentPrompt ? <TelemetryConsentPrompt /> : null;",
+    ].join("\n"),
+    [APP_SHELL_HELPERS]: [
+      "export function shouldShowTelemetryConsentPrompt({ hasCompletedFirstScan, projectCount, showScanSummary, showFirstRunWalkthrough }) {",
+      "  if (!hasCompletedFirstScan || projectCount === 0) return false;",
+      "  return !showScanSummary && !showFirstRunWalkthrough;",
+      "}",
     ].join("\n"),
   };
   const run = (overrides = {}) => {

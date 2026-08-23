@@ -85,8 +85,12 @@ export function telemetrySafetyFailures(read, exists, listFiles) {
   }
 
   const appContentPath = "apps/desktop/src/app/AppContent.tsx";
+  const appShellHelpersPath = "apps/desktop/src/app/app-shell-helpers.ts";
   if (exists(appContentPath)) {
     const appContent = stripJsComments(read(appContentPath));
+    const shellHelpers = exists(appShellHelpersPath)
+      ? stripJsComments(read(appShellHelpersPath))
+      : "";
     const bootstrapBranch = blockStartingAt(appContent, "if (bootstrapState)");
     check(
       bootstrapBranch !== null && !bootstrapBranch.includes("<TelemetryConsentPrompt"),
@@ -94,9 +98,11 @@ export function telemetrySafetyFailures(read, exists, listFiles) {
     );
     check(
       appContent.includes("useHasCompletedFirstScan") &&
-        appContent.includes("hasCompletedFirstScan && projects.length > 0") &&
-        appContent.includes("<TelemetryConsentPrompt />"),
-      "AppContent must gate <TelemetryConsentPrompt /> with useHasCompletedFirstScan().",
+        appContent.includes("shouldShowTelemetryConsentPrompt({") &&
+        appContent.includes("<TelemetryConsentPrompt />") &&
+        shellHelpers.includes("if (!hasCompletedFirstScan || projectCount === 0) return false;") &&
+        shellHelpers.includes("return !showScanSummary && !showFirstRunWalkthrough;"),
+      "AppContent must gate <TelemetryConsentPrompt /> through shouldShowTelemetryConsentPrompt(), which requires useHasCompletedFirstScan() and hides the prompt behind the scan summary and the first-run walkthrough.",
     );
   }
 

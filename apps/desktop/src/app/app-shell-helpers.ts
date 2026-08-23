@@ -58,6 +58,22 @@ export function getProjectBootstrapState({
   return "welcome";
 }
 
+/** The consent prompt waits until the first score and the tour are out of the way. */
+export function shouldShowTelemetryConsentPrompt({
+  hasCompletedFirstScan,
+  projectCount,
+  showScanSummary,
+  showFirstRunWalkthrough,
+}: {
+  hasCompletedFirstScan: boolean;
+  projectCount: number;
+  showScanSummary: boolean;
+  showFirstRunWalkthrough: boolean;
+}): boolean {
+  if (!hasCompletedFirstScan || projectCount === 0) return false;
+  return !showScanSummary && !showFirstRunWalkthrough;
+}
+
 export function shouldDeferAppTargetUntilProjectsReady({
   projectCount,
   projectsLoading,

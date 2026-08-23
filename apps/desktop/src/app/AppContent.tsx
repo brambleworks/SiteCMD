@@ -10,7 +10,11 @@ import { useAppScanActions } from "@/app/useAppScanActions";
 import { useBaselineScanQueue } from "@/app/useBaselineScanQueue";
 import { FirstRunWalkthrough } from "@/app/lazy-pages";
 import { StartupShell } from "@/app/StartupShell";
-import { createProjectDeletedHandler, getProjectBootstrapState } from "@/app/app-shell-helpers";
+import {
+  createProjectDeletedHandler,
+  getProjectBootstrapState,
+  shouldShowTelemetryConsentPrompt,
+} from "@/app/app-shell-helpers";
 import { useAppKeyboardShortcuts } from "@/app/useAppKeyboardShortcuts";
 import { useDeepLinkTargets } from "@/app/useDeepLinkTargets";
 import { useDesktopNotificationActions } from "@/app/useDesktopNotificationActions";
@@ -332,6 +336,13 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
     [navigateTo],
   );
 
+  const showTelemetryConsentPrompt = shouldShowTelemetryConsentPrompt({
+    hasCompletedFirstScan,
+    projectCount: projects.length,
+    showScanSummary,
+    showFirstRunWalkthrough,
+  });
+
   const handleProjectDeleted = useMemo(
     () => createProjectDeletedHandler({ refreshProjects, navigateTo }),
     [navigateTo, refreshProjects],
@@ -493,7 +504,7 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
           onReviewIssues={reviewScanSummaryIssues}
         />
       ) : null}
-      {hasCompletedFirstScan && projects.length > 0 ? <TelemetryConsentPrompt /> : null}
+      {showTelemetryConsentPrompt ? <TelemetryConsentPrompt /> : null}
     </div>
   );
 }
