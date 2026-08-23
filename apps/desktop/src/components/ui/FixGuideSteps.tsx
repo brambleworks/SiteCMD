@@ -106,6 +106,7 @@ function StepContent({ step }: { step: string }) {
 export function FixGuideSteps({ guide }: { guide: FixGuide }) {
   return (
     <div>
+      {guide.lead ? <p className="fix-guide-lead body-text">{guide.lead}</p> : null}
       <ol className="fix-guide-steps">
         {guide.steps.map((step, i) => (
           <li key={i} className="body-text">

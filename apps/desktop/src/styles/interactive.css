@@ -573,6 +573,10 @@
   .code-copy-button--persistent {
     opacity: 1;
   }
+  .fix-guide-lead {
+    margin-bottom: var(--space-snug);
+    color: var(--foreground);
+  }
   .fix-guide-steps {
     list-style: none;
   }

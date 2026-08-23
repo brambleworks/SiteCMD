@@ -9,6 +9,7 @@ import type { CodeFixGuideEntry } from "./types";
 export interface CodeFixGuide {
   effort: FixEffort;
   effortMinutes: number;
+  lead?: string;
   steps: string[];
 }
 
@@ -29,5 +30,10 @@ export const CODE_FIX_GUIDE_IDS: readonly string[] = Object.freeze(
 export function getCodeFixGuide(producerRuleId: string): CodeFixGuide | null {
   const entry = CODE_FIX_GUIDES[producerRuleId];
   if (!entry) return null;
-  return { effort: entry.effort, effortMinutes: entry.effortMinutes, steps: entry.default };
+  return {
+    effort: entry.effort,
+    effortMinutes: entry.effortMinutes,
+    lead: entry.lead,
+    steps: entry.default,
+  };
 }
