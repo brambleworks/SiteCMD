@@ -440,9 +440,8 @@ describe("one-click handoff with a remembered tool", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fix with your agent" }));
     await screen.findByText("Your agent is on it");
 
-    const backdrop = document.querySelector(".fix-prompt-modal-backdrop");
-    expect(backdrop).not.toBeNull();
-    fireEvent.pointerDown(backdrop as Element);
+    const dialog = screen.getByRole("dialog", { name: "Your agent is on it" });
+    fireEvent.click(dialog);
     expect(screen.getByText("Your agent is on it")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));

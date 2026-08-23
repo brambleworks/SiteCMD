@@ -1,7 +1,7 @@
-import { useEffect, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import type { ReactNode } from "react";
 import { Bot, Check, Circle, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Markdown } from "@/components/ui/markdown";
 import {
   AGENT_TOOL_LABELS,
@@ -143,17 +143,6 @@ export function FixWithAgentModal({
   onClose,
   onOpenIntegrations,
 }: FixWithAgentModalProps) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
-
   const handoffLabel = handoffTool ? (AGENT_TOOL_LABELS[handoffTool] ?? handoffTool) : "your agent";
   const verified = attempt?.status === "verified";
   const failed = attempt?.status === "verify_failed";
@@ -306,56 +295,55 @@ export function FixWithAgentModal({
     </>
   );
 
-  return createPortal(
-    // Handoffs close only through explicit controls, never a backdrop click.
-    <div className="fix-prompt-modal-backdrop" data-dossier-switch="true">
-      <section
-        className="fix-prompt-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agent-handoff-title">
-        <div className="fix-prompt-modal-header">
-          <div className="stack-tight">
-            <p className="details-section-label">Fix with your agent</p>
-            <h3 id="agent-handoff-title" className="fix-prompt-modal-title">
-              {mode === "handoff" ? "Your agent is on it" : "Hand this fix to your coding agent"}
-            </h3>
-          </div>
-          <Button
-            unstyled
-            type="button"
-            className="details-close"
-            aria-label="Close agent handoff"
-            onClick={onClose}>
-            <X />
+  return (
+    <Dialog
+      labelledBy="agent-handoff-title"
+      onClose={onClose}
+      dismissOnBackdrop={false}
+      className="fix-prompt-modal">
+      {/* data-dossier-switch on each section: handoffs close only through explicit
+            controls, and a click anywhere in this modal must never read as an
+            outside click that closes a dossier panel layered underneath. */}
+      <div className="fix-prompt-modal-header" data-dossier-switch="true">
+        <div className="stack-tight">
+          <p className="details-section-label">Fix with your agent</p>
+          <h3 id="agent-handoff-title" className="fix-prompt-modal-title">
+            {mode === "handoff" ? "Your agent is on it" : "Hand this fix to your coding agent"}
+          </h3>
+        </div>
+        <Button
+          unstyled
+          type="button"
+          className="details-close"
+          aria-label="Close agent handoff"
+          onClick={onClose}>
+          <X />
+        </Button>
+      </div>
+      <div className="agent-handoff-body" data-dossier-switch="true">
+        {mode === "handoff" ? (
+          handoffBody
+        ) : detecting ? (
+          <p className="body-muted row">
+            <Loader2 className="spinner-sm" />
+            <span>Checking for connected agent tools...</span>
+          </p>
+        ) : (
+          setupBody
+        )}
+        {createError ? <p className="agent-handoff-error">{createError}</p> : null}
+      </div>
+      <div className="fix-prompt-modal-footer" data-dossier-switch="true">
+        <Button variant={verified ? "default" : "outline"} onClick={onClose} disabled={creating}>
+          {verified ? "Done" : "Close"}
+        </Button>
+        {mode === "setup" && registeredTools.length > 0 ? (
+          <Button onClick={onStartFix} disabled={creating || !selectedTool}>
+            {creating ? <Loader2 className="spinner-sm" /> : <Bot className="icon-sm" />}
+            <span>Start fix</span>
           </Button>
-        </div>
-        <div className="agent-handoff-body">
-          {mode === "handoff" ? (
-            handoffBody
-          ) : detecting ? (
-            <p className="body-muted row">
-              <Loader2 className="spinner-sm" />
-              <span>Checking for connected agent tools...</span>
-            </p>
-          ) : (
-            setupBody
-          )}
-          {createError ? <p className="agent-handoff-error">{createError}</p> : null}
-        </div>
-        <div className="fix-prompt-modal-footer">
-          <Button variant={verified ? "default" : "outline"} onClick={onClose} disabled={creating}>
-            {verified ? "Done" : "Close"}
-          </Button>
-          {mode === "setup" && registeredTools.length > 0 ? (
-            <Button onClick={onStartFix} disabled={creating || !selectedTool}>
-              {creating ? <Loader2 className="spinner-sm" /> : <Bot className="icon-sm" />}
-              <span>Start fix</span>
-            </Button>
-          ) : null}
-        </div>
-      </section>
-    </div>,
-    document.body,
+        ) : null}
+      </div>
+    </Dialog>
   );
 }
