@@ -128,6 +128,17 @@ describe("orderedBefore", () => {
     expect(orderedBefore("only rate here", "rate", "auth")).toBe(false);
     expect(orderedBefore("neither present", "rate", "auth")).toBe(false);
   });
+
+  it("does not let a YAML comment forge a marker's position", () => {
+    // "rate" only appears for real after "auth"; a comment mentioning it
+    // earlier must not let indexOf report the forged, earlier position.
+    const forged = "# rate limit already handled\nauth runs\nrate limit runs for real";
+    expect(orderedBefore(forged, "rate", "auth")).toBe(false);
+
+    // A marker that appears only inside a comment does not count at all.
+    const commentOnly = "# auth happens here\nrate limit runs for real";
+    expect(orderedBefore(commentOnly, "rate", "auth")).toBe(false);
+  });
 });
 
 describe("parseSnapshotTables", () => {

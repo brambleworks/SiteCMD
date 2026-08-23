@@ -244,6 +244,20 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
   });
 
+  it("is not fooled by a decoy comment that literally names the releases-admin URL", () => {
+    // Unlike the paraphrase above, this decoy quotes the exact needle
+    // orderedBefore searches for, planted ahead of the real (now displaced)
+    // step; a raw indexOf would find the comment and wrongly call this ordered.
+    const decoy = "      # https://releases.sitecmd.com/api/releases-admin ran above already\n";
+    const attestHeader = "      - name: Attest build provenance for the published artifacts\n";
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const step = advanceStepBlock(source);
+      return source.replace(step, decoy).replace(attestHeader, `${step}${attestHeader}`);
+    });
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
   it("catches a publisher that drops the upload-plan cross-check", () => {
     const failures = run((file, source) =>
       file.includes("release.yml")
@@ -350,6 +364,36 @@ describe("release pipeline probe and CRLF rules", () => {
     ].join("\n");
     const publishHeader = "      - name: Publish the GitHub Release with notes and checksums";
     const decoy = "      # gh release create already ran; nothing left to publish\n";
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const withoutAttest = source.replace(`\n\n${attestStep}\n`, "\n");
+      return withoutAttest.replace(
+        `${publishHeader}\n`,
+        `${decoy}\n${attestStep}\n\n${publishHeader}\n`,
+      );
+    });
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it('is not fooled by a decoy comment that literally names "gh release create"', () => {
+    // Unlike the paraphrase above, this decoy quotes the exact needle
+    // orderedBefore searches for, planted ahead of the attest step moved up
+    // in front of it; a raw indexOf would find the comment and wrongly call
+    // this ordered.
+    const attestStep = [
+      "      - name: Attest build provenance for the published artifacts",
+      "        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2",
+      "        with:",
+      "          subject-path: |",
+      "            payload/*/*.tar.gz",
+      "            payload/*/*.AppImage",
+      "            payload/*/*-setup.exe",
+      "            payload/*/*.zip",
+      "            payload/*/*.dmg",
+      "            payload/SHA256SUMS",
+    ].join("\n");
+    const publishHeader = "      - name: Publish the GitHub Release with notes and checksums";
+    const decoy = '      # gh release create "$TAG_NAME" already ran above\n';
     const failures = run((file, source) => {
       if (!file.includes("release.yml")) return source;
       const withoutAttest = source.replace(`\n\n${attestStep}\n`, "\n");

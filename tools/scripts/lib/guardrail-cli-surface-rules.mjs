@@ -253,9 +253,12 @@ export function cliSurfaceFailures(read, exists, listFiles) {
     `${PUBLIC_INSTALLER} must remain a public, reviewable installer bound to the updater trust root, with an inspect-before-run path in ${README}.`,
   );
   const installerKey = /MINISIGN_PUBLIC_KEY="([^"\n]+)"/.exec(publicInstaller)?.[1];
+  const readmeVerifyCommand = `minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -P ${installerKey}`;
   check(
-    installerKey !== undefined && readme.includes(`\n${installerKey}\n`),
-    `${README} must print the updater public key exactly as ${PUBLIC_INSTALLER} sets MINISIGN_PUBLIC_KEY; whoever verifies a download has to trust one key, not two.`,
+    installerKey !== undefined &&
+      readme.includes(`\n${installerKey}\n`) &&
+      readme.includes(readmeVerifyCommand),
+    `${README} must print the updater public key exactly as ${PUBLIC_INSTALLER} sets MINISIGN_PUBLIC_KEY, in the code block and the minisign -P argument; whoever verifies a download has to trust one key, not two.`,
   );
   check(
     gateAction.includes('"$GITHUB_ACTION_PATH/../setup-sitecmd/install.sh"') &&
