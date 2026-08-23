@@ -53,6 +53,12 @@ Configure these controls before making the repository public:
 - Keep default `GITHUB_TOKEN` permissions read-only. Grant write permissions only
   to the job that needs them.
 
+`.github/repository-protection.json` is the contract for the first three
+bullets and the two rulesets; `pnpm protection:check` proves every required
+check comes from a workflow that runs on every pull request, and
+`pnpm protection:check:live` reads the repository through `gh api` and fails
+on any drift. Run the live check after every settings change and quarterly.
+
 There is no routine bypass. A break-glass action is limited to an active security
 or release incident, must be recorded, and must restore the normal controls
 before unrelated work continues.
