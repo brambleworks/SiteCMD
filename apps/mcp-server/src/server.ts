@@ -274,9 +274,15 @@ function requireProjectEnvironmentUrl(projectId: number, url: string): string {
   const normalized = normalizeEnvUrl(url);
   const owned = ownedUrls.find((candidate) => normalizeEnvUrl(candidate) === normalized);
   if (owned) return owned;
-  const known = ownedUrls.length > 0 ? ownedUrls.join(", ") : "none recorded";
+  const noneRecorded = ownedUrls.length === 0 ? " No environment URLs are recorded." : "";
+  const knownNote =
+    ownedUrls.length > 0
+      ? `\n\n${UNTRUSTED_DATA_INSTRUCTION}\n\n${untrustedScanData(
+          `Its URLs: ${ownedUrls.map((candidate) => quoteUntrustedText(candidate, 500)).join(", ")}`,
+        )}`
+      : "";
   throw new Error(
-    `${url} is not an environment of project #${projectId} (its URLs: ${known}). Pass one of those, or omit project_id to scan the project that owns the URL.`,
+    `${url} is not an environment of project #${projectId}.${noneRecorded} Pass one of those, or omit project_id to scan the project that owns the URL.${knownNote}`,
   );
 }
 
@@ -1012,7 +1018,11 @@ function registerCoreTools(server: McpServer): void {
           }
           if (settled.status !== "fulfilled") {
             throw new Error(
-              `SiteCMD could not start the fix: ${settled.failure_detail ?? settled.status}`,
+              `SiteCMD could not start the fix: ${
+                settled.failure_detail
+                  ? quoteUntrustedText(settled.failure_detail, 2000)
+                  : settled.status
+              }`,
             );
           }
           const attemptId = parseFulfilledAttemptId(
@@ -1052,13 +1062,17 @@ function registerCoreTools(server: McpServer): void {
             );
           } else {
             const now = Date.now();
-            const detail = request.failure_detail
-              ? ` Failure detail: ${request.failure_detail}.`
-              : request.status === "expired"
+            const detail =
+              !request.failure_detail && request.status === "expired"
                 ? ` ${REQUEST_EXPIRY_EXPLANATION}`
                 : "";
+            const failureNote = request.failure_detail
+              ? `\n\n${UNTRUSTED_DATA_INSTRUCTION}\n\n${untrustedScanData(
+                  `Failure detail: ${quoteUntrustedText(request.failure_detail, 2000)}`,
+                )}`
+              : "";
             return text(
-              `Fix request #${request_id} is '${request.status}'.${detail} ${desktopStatusLine(now)}`,
+              `Fix request #${request_id} is '${request.status}'.${detail} ${desktopStatusLine(now)}${failureNote}`,
             );
           }
         }
@@ -1139,7 +1153,11 @@ function registerCoreTools(server: McpServer): void {
           }
           if (settled.status !== "fulfilled") {
             throw new Error(
-              `SiteCMD could not run the scan: ${settled.failure_detail ?? settled.status}`,
+              `SiteCMD could not run the scan: ${
+                settled.failure_detail
+                  ? quoteUntrustedText(settled.failure_detail, 2000)
+                  : settled.status
+              }`,
             );
           }
           const { executionId, status } = parseFulfilledExecution(

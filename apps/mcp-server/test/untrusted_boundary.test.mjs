@@ -105,6 +105,29 @@ test("every tool that prints scan data fences it", async () => {
       )
       .run(projectId, URL, HOSTILE, now, now).lastInsertRowid,
   );
+  // A start_fix request stuck in a non-fulfilled state so get_fix_status(request_id)
+  // prints its failure_detail directly, without an attempt row to fall back on.
+  const fixRequestId = Number(
+    fixtureDb
+      .prepare(
+        `INSERT INTO agent_requests
+           (kind, project_id, env_url, check_id, agent_tool, status, failure_detail, created_at, updated_at)
+         VALUES ('start_fix', ?, ?, 'security.csp', 'claude-code', 'failed', ?, ?, ?)`,
+      )
+      .run(projectId, URL, HOSTILE, now, now).lastInsertRowid,
+  );
+
+  // A project whose only recorded environment is hostile text, so a mismatched
+  // url on run_scan surfaces it in requireProjectEnvironmentUrl's thrown error.
+  // Recorded as 'staging' (not 'production') so it does not also become this
+  // project's get_projects summary URL, which is outside this fix's scope.
+  const mismatchProjectId = 903;
+  ensureProject(fixtureDb, mismatchProjectId);
+  fixtureDb
+    .prepare(
+      `INSERT OR IGNORE INTO environments (project_id, url, label, environment) VALUES (?, ?, 'Staging', 'staging')`,
+    )
+    .run(mismatchProjectId, HOSTILE);
 
   const calls = [
     ["get_projects", {}],
@@ -121,6 +144,7 @@ test("every tool that prints scan data fences it", async () => {
     ["whatif_resolve", { project_id: projectId, hypothetical_resolved: ["security.csp"] }],
     ["start_fix", { url: URL, check_id: "security.csp", wait: false }],
     ["get_fix_status", { attempt_id: attemptId }],
+    ["get_fix_status", { request_id: fixRequestId }],
     ["get_scan_status", { request_id: scanRequestId }],
     ["list_fix_attempts", {}],
   ];
@@ -131,6 +155,13 @@ test("every tool that prints scan data fences it", async () => {
       assert.notEqual(result.isError, true, `${name}: ${result.content[0].text}`);
       assertFenced(result.content[0].text, name);
     }
+
+    const mismatch = await session.client.callTool({
+      name: "run_scan",
+      arguments: { project_id: mismatchProjectId, url: "https://mismatch.test" },
+    });
+    assert.equal(mismatch.isError, true, "run_scan must reject a url the project does not own");
+    assertFenced(mismatch.content[0].text, "run_scan (env url mismatch)");
   } finally {
     await session.close();
   }
