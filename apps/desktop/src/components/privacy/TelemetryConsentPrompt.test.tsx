@@ -108,4 +108,23 @@ describe("TelemetryConsentPrompt", () => {
       spy.mockRestore();
     }
   });
+
+  it("shows one clean sentence, not a duplicated clause, on a wordless rejection", async () => {
+    const spy = vi.spyOn(telemetry, "setTelemetryConsent").mockRejectedValueOnce(undefined);
+
+    try {
+      render(<TelemetryConsentPrompt />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Keep Off" }));
+
+      const errorMessage = await screen.findByRole("alert");
+      expect(errorMessage).toHaveTextContent(/Try again/i);
+      expect(errorMessage).toHaveTextContent("Your choice was not saved. Try again.");
+      // The fallback sentence already says the choice was not saved; the
+      // "Couldn't save your telemetry choice" prefix must not also appear.
+      expect(errorMessage).not.toHaveTextContent(/Couldn't save your telemetry choice/i);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

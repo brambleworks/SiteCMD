@@ -282,7 +282,7 @@ describe("ScanConfigOverlay", () => {
     await waitFor(() =>
       expect(toastWarning).toHaveBeenCalledWith(
         "Local scope saved; connected scope still needs sync",
-        "connected service unavailable",
+        "Connected service unavailable.",
       ),
     );
   });

@@ -10,7 +10,6 @@ import {
   setScanScope,
   syncConnectedScanScope,
 } from "@/lib/commands";
-import { errorMessage } from "@/lib/error-message";
 import { getProjectCapabilities } from "@/lib/project-capabilities";
 import { userFacingError } from "@/lib/user-facing-error";
 import { queryKeys } from "@/lib/query/query-keys";
@@ -222,7 +221,10 @@ export function useScanConfigOverlayState({
           ]);
         })
         .catch((error) => {
-          toast.warning("Local scope saved; connected scope still needs sync", errorMessage(error));
+          toast.warning(
+            "Local scope saved; connected scope still needs sync",
+            userFacingError(error, "Try again in a moment."),
+          );
         });
     }
   }, [

@@ -17,6 +17,7 @@ import {
   parseLicenseActivationError,
 } from "@/lib/license-activation-error";
 import { getTierBadgeLabel, normalizePlanDisplayName } from "@/lib/tier-labels";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const BILLING_INTERVAL_LABEL: Record<BillingInterval, string> = {
   monthly: "MONTHLY",
@@ -150,7 +151,10 @@ export function AccountSection() {
         void refreshLicense();
         return;
       }
-      toast.error("Deactivation failed", message);
+      toast.error(
+        "Deactivation failed",
+        userFacingError(e, "Your account is still active. Try again."),
+      );
       // Local unlinking may have completed before a later backend failure.
       void refreshLicense();
     } finally {

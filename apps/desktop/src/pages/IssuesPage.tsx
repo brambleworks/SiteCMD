@@ -38,7 +38,7 @@ import { CompactTrendStrip } from "@/components/dashboard/CompactTrend";
 import { buildIssuesTrendModel } from "@/components/dashboard/compact-trend-model";
 import { loadIssuesView, saveIssuesView, type IssuesTab } from "@/pages/issues/issues-page-model";
 import type { NavTarget } from "@/components/layout/nav-page";
-import { errorMessage } from "@/lib/error-message";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const IssueDossier = lazy(() =>
   import("@/components/issues/IssueDossier").then((module) => ({ default: module.IssueDossier })),
@@ -363,7 +363,10 @@ export function IssuesPage({
         void refetchInactiveIssueKeys();
         toast.success("Issue restored", "It is active again and will appear in the issues list.");
       } catch (error) {
-        toast.error("Issue was not restored", errorMessage(error));
+        toast.error(
+          "Issue was not restored",
+          userFacingError(error, "Your change was not saved. Try again."),
+        );
       } finally {
         setRestoringPausedCheckId(null);
       }

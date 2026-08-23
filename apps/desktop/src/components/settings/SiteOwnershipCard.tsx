@@ -58,7 +58,7 @@ export function SiteOwnershipCard({
     } catch (error) {
       toast.error(
         "Verification failed",
-        userFacingError(error, "Run the verification again after the site has deployed."),
+        userFacingError(error, "Publish the record, then run the verification again."),
       );
     } finally {
       setVerifying(false);
@@ -85,7 +85,7 @@ export function SiteOwnershipCard({
     } catch (error) {
       toast.error(
         "Provider verification failed",
-        userFacingError(error, "Run the verification again after the site has deployed."),
+        userFacingError(error, "Publish the record, then run the verification again."),
       );
     } finally {
       setVerifying(false);

@@ -137,7 +137,7 @@ export function UpdatesPage({
           "Could not open editor",
           userFacingError(
             err,
-            "SiteCMD could not open it. Open the file from your editor instead.",
+            "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
           ),
         ),
       );

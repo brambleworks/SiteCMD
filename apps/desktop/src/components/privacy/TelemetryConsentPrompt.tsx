@@ -21,8 +21,13 @@ export function TelemetryConsentPrompt() {
     try {
       await setTelemetryConsent({ ...next, promptStatus: "saved" });
     } catch (error) {
-      const message = userFacingError(error, "Your choice was not saved. Try again.");
-      setSaveError(`Couldn't save your telemetry choice. ${message}`);
+      // A wordless rejection already gets one full sentence from the fallback;
+      // prefixing it again would say "not saved" twice.
+      const fallback = "Your choice was not saved. Try again.";
+      const message = userFacingError(error, fallback);
+      setSaveError(
+        message === fallback ? fallback : `Couldn't save your telemetry choice. ${message}`,
+      );
     } finally {
       setSaving(false);
     }

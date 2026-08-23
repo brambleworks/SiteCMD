@@ -150,7 +150,10 @@ export function useIssueDossierActions(config: IssueDossierActionsConfig): Issue
     } catch (err) {
       toast.error(
         "Could not open editor",
-        userFacingError(err, "SiteCMD could not open it. Open the file from your editor instead."),
+        userFacingError(
+          err,
+          "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
+        ),
       );
     }
   };
@@ -163,7 +166,10 @@ export function useIssueDossierActions(config: IssueDossierActionsConfig): Issue
     } catch (err) {
       toast.error(
         "Could not open editor",
-        userFacingError(err, "SiteCMD could not open it. Open the file from your editor instead."),
+        userFacingError(
+          err,
+          "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
+        ),
       );
     }
   };
