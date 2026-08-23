@@ -301,9 +301,9 @@ export function FixWithAgentModal({
       onClose={onClose}
       dismissOnBackdrop={false}
       className="fix-prompt-modal">
-      {/* data-dossier-switch on each section: handoffs close only through explicit
-            controls, and a click anywhere in this modal must never read as an
-            outside click that closes a dossier panel layered underneath. */}
+      {/* Clicks inside this modal land in its own <dialog>, and the dossier's
+            outside-click handler ignores clicks inside any open dialog, so they
+            never read as outside clicks for a dossier layered underneath. */}
       <div className="fix-prompt-modal-header" data-dossier-switch="true">
         <div className="stack-tight">
           <p className="details-section-label">Fix with your agent</p>
