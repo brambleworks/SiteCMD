@@ -191,6 +191,28 @@ export function releasePipelineSafetyFailures(read) {
     "release.yml must embed its source commit and sign, verify, and publish every CLI archive signature beside the archive.",
   );
 
+  // One signed checksum manifest per release: signed in isolation, verified
+  // without secrets, published beside the artifacts and on the GitHub Release.
+  check(
+    signerJob.includes('"$SIGNER" signer sign "$MANIFEST"') &&
+      signerJob.includes('MANIFEST="$GITHUB_WORKSPACE/signing-input/SHA256SUMS"') &&
+      signerRecordScript.includes(
+        'cp "signing-input/$manifest" "signed-release-payload/$manifest"',
+      ) &&
+      verifierCommands.includes("cmp -s checksum-signature.sig payload/SHA256SUMS.minisig") &&
+      verifierCommands.includes(
+        '"$verifier" updater-public-key.pub payload/SHA256SUMS checksum-signature.sig',
+      ) &&
+      publisherJob.includes("add_upload payload/SHA256SUMS SHA256SUMS") &&
+      publisherJob.includes("add_upload payload/SHA256SUMS.minisig SHA256SUMS.minisig") &&
+      publisherJob.includes("contents: write") &&
+      publisherJob.includes("gh release create") &&
+      publisherJob.includes("--verify-tag") &&
+      publisherJob.includes("payload/SHA256SUMS payload/SHA256SUMS.minisig") &&
+      orderedBefore(publisherJob, "Advance the production updater manifest", "gh release create"),
+    "release.yml must sign one release-wide SHA256SUMS with the production updater key, verify its .minisig without secrets, upload both beside the artifacts, and create the GitHub Release (verified tag, changelog notes, checksum assets) only after the updater manifest advanced.",
+  );
+
   check(
     verifierJob.includes("needs: [prepare-candidate, sign-updaters]") &&
       verifierJob.includes("Build the minimal secretless verifier") &&

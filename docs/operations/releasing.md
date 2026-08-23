@@ -280,14 +280,19 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`:
    a job-generated throwaway updater key, never the permanent updater key.
 7. **Updater and CLI signing** validates and stages an allowlisted payload,
    then exposes `TAURI_SIGNING_PRIVATE_KEY` only to the minimal standalone
-   signer step. It signs both the updater bundle and standalone CLI archive;
-   the latter publishes a `.sig` sidecar for CI installers.
+   signer step. It signs the updater bundle, the standalone CLI archive (whose
+   `.sig` sidecar feeds CI installers), and one release-wide `SHA256SUMS`
+   listing every installer and archive; the manifest's decoded `.minisig` is
+   what `minisign -V` reads.
 8. **Secretless verification** checks payload hashes, candidate provenance,
    updater and CLI archive signatures, CLI versions, and available platform
    signatures on all three platforms.
 9. **Publication** runs only after every verifier passes. A checkout-free job
-   hash-compares any existing R2 object before upload and then advances the
-   updater manifest. It never executes source, dependencies, or artifacts.
+   hash-compares any existing R2 object before upload (including `SHA256SUMS`,
+   `SHA256SUMS.sig`, and `SHA256SUMS.minisig`), advances the updater manifest,
+   and then creates the GitHub Release for the tag with the changelog section
+   as notes and the two checksum files attached. Binaries stay on R2. It never
+   executes source, dependencies, or artifacts.
 
 The candidate check now forces the tag, source files, and protected commit to
 agree. The version-sync guardrail separately prevents any release version
@@ -378,6 +383,11 @@ quarantines.
 Once the workflow is green, work through [launch-smoke.md](launch-smoke.md)
 with the exact signed artifacts. The public distribution service and download
 page have their own production pass maintained privately beside that service.
+
+Confirm the two public verification surfaces exist for the version:
+`https://releases.sitecmd.com/v<version>/SHA256SUMS` and
+`https://releases.sitecmd.com/v<version>/SHA256SUMS.minisig` return 200, and
+`gh release view v<version> --repo brambleworks/SiteCMD` lists both as assets.
 
 Download and active-install analytics are operated with the release service and
 documented privately beside that service. This repository's release procedure

@@ -774,6 +774,22 @@ jobs:
             "$SIGNER" signer sign "$GITHUB_WORKSPACE/signing-input/$target/$filename"
             "$SIGNER" signer sign "$GITHUB_WORKSPACE/signing-input/$target/$cli_archive"
           done < signing-plan.tsv
+          # One checksum manifest for the whole release, signed by the same key.
+          MANIFEST="$GITHUB_WORKSPACE/signing-input/SHA256SUMS"
+          : > "$MANIFEST"
+          record_hash() {
+            printf '%s  %s\n' "$(sha256sum "$1" | awk '{print $1}')" "$(basename "$1")" >> "$MANIFEST"
+          }
+          while IFS=$'\t' read -r target filename cli_archive; do
+            dir="$GITHUB_WORKSPACE/signing-input/$target"
+            record_hash "$dir/$filename"
+            record_hash "$dir/$cli_archive"
+            dmg_name=$(jq -r '.dmg_name // empty' "$dir/fragment.json")
+            if [ -n "$dmg_name" ]; then record_hash "$dir/$dmg_name"; fi
+          done < signing-plan.tsv
+          sort -k 2 -o "$MANIFEST" "$MANIFEST"
+          "$SIGNER" signer sign "$MANIFEST"
+          tr -d '\r' < "$MANIFEST.sig" | base64 --decode > "$MANIFEST.minisig"
 
       - name: Record signed payload provenance without secrets
         env:
@@ -886,7 +902,8 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
-      contents: read
+      # Creating the GitHub Release needs write; the job still checks out nothing.
+      contents: write
     # Publishing credentials are isolated from build and signer jobs.
     environment:
       name: release-publish
@@ -983,6 +1000,20 @@ jobs:
             exit 1
           fi
 
+          test -s payload/SHA256SUMS
+          while read -r hash name; do
+            grep -Fq "$(printf '\tv%s/%s\t%s' "$VERSION" "$name" "$hash")" publication/upload-plan.tsv
+          done < payload/SHA256SUMS
+          add_upload payload/SHA256SUMS SHA256SUMS
+          add_upload payload/SHA256SUMS.sig SHA256SUMS.sig
+          add_upload payload/SHA256SUMS.minisig SHA256SUMS.minisig
+          {
+            printf '%s\n\n' "$NOTES"
+            echo "## Verify"
+            echo
+            echo "Installers and CLI archives are served from https://releases.sitecmd.com/v${VERSION}/. The attached SHA256SUMS and SHA256SUMS.minisig are signed with the SiteCMD updater key; verification steps are in the README section https://github.com/${GITHUB_REPOSITORY}/blob/main/README.md#verify-your-download."
+          } > publication/release-notes.md
+
           jq -n \
             --arg version "$VERSION" \
             --arg notes "$NOTES" \
@@ -1038,3 +1069,22 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary @publication/manifest.json \
             https://releases.sitecmd.com/api/releases-admin
+
+      - name: Publish the GitHub Release with notes and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.prepare-candidate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG_NAME already exists; leaving it unchanged."
+            exit 0
+          fi
+          gh release create "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "SiteCMD $VERSION" \
+            --notes-file publication/release-notes.md \
+            payload/SHA256SUMS payload/SHA256SUMS.minisig

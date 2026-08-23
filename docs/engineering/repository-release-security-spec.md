@@ -179,6 +179,7 @@ key. The `release-updater-signing` job:
 - Installs the signer with scripts disabled
 - Verifies the candidate and every input hash before exposing the key
 - Signs the exact updater and CLI bytes
+- Signs one release-wide `SHA256SUMS` covering every installer and archive
 - Records candidate, source, and artifact hashes in the signed payload
 
 This isolates the hardest-to-rotate credential from product build code. It does
@@ -201,6 +202,8 @@ The `release-publish` job downloads only the candidate and verified signed
 payload. It checks the tuple again, uploads immutable versioned objects to R2,
 and advances the production updater manifest through the release administration
 endpoint. It does not check out or execute product source.
+It also creates the GitHub Release for the tag, carrying the changelog notes
+and the signed `SHA256SUMS` and `SHA256SUMS.minisig`; the binaries stay on R2.
 
 Publication stops if a platform is missing, an existing immutable object has
 different bytes, or any expected hash or signature differs.

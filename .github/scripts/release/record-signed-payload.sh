@@ -31,3 +31,8 @@ while IFS=$'\t' read -r target filename cli_archive; do
     printf '%s  %s\n' "$hash" "$(basename "$file")" >> "$dst/SHA256SUMS"
   done
 done < signing-plan.tsv
+
+for manifest in SHA256SUMS SHA256SUMS.sig SHA256SUMS.minisig; do
+  test -s "signing-input/$manifest"
+  cp "signing-input/$manifest" "signed-release-payload/$manifest"
+done

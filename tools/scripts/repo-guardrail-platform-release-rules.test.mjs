@@ -170,6 +170,27 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(run()).toEqual([]);
   });
 
+  it("catches a publisher that stopped uploading the signed checksum manifest", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace("          add_upload payload/SHA256SUMS.minisig SHA256SUMS.minisig\n", "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a verifier that stopped checking the checksum manifest signature", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace(
+            '"$verifier" updater-public-key.pub payload/SHA256SUMS checksum-signature.sig',
+            "true",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
   it("catches a removed updater-key probe job", () => {
     const failures = run((file, source) =>
       file.includes("release.yml")
