@@ -51,6 +51,7 @@ describe("TelemetryConsentPrompt", () => {
       </>,
     );
 
+    expect(screen.getByRole("dialog", { name: "Help improve SiteCMD" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Usage analytics" })).toHaveAttribute(
       "aria-checked",
       "false",

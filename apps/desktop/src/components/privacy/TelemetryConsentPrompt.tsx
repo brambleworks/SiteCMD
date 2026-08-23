@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BarChart3, Bug, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { buildTelemetryPreview, setTelemetryConsent, useTelemetryConsent } from "@/lib/telemetry";
 import { userFacingError } from "@/lib/user-facing-error";
 
@@ -34,87 +35,91 @@ export function TelemetryConsentPrompt() {
   };
 
   return (
-    <div className="overlay-backdrop overlay-backdrop--soft telemetry-consent-backdrop">
-      <section className="modal-panel telemetry-consent-panel" aria-labelledby="telemetry-title">
-        <div className="telemetry-consent-header">
-          <div className="icon-badge icon-badge--lg icon-badge--primary-strong">
-            <ShieldCheck className="icon-lg text-primary" aria-hidden="true" />
-          </div>
-          <div className="flex-fill">
-            <p className="section-label-mid text-brand-accent">Your data stays yours</p>
-            <h2 id="telemetry-title" className="telemetry-consent-title">
-              Help improve SiteCMD
-            </h2>
-          </div>
+    <Dialog
+      labelledBy="telemetry-title"
+      onClose={() => undefined}
+      dismissOnBackdrop={false}
+      closeOnEscape={false}
+      backdropClassName="dialog--blur telemetry-consent-backdrop"
+      className="modal-panel telemetry-consent-panel">
+      <div className="telemetry-consent-header">
+        <div className="icon-badge icon-badge--lg icon-badge--primary-strong">
+          <ShieldCheck className="icon-lg text-primary" aria-hidden="true" />
         </div>
+        <div className="flex-fill">
+          <p className="section-label-mid text-brand-accent">Your data stays yours</p>
+          <h2 id="telemetry-title" className="telemetry-consent-title">
+            Help improve SiteCMD
+          </h2>
+        </div>
+      </div>
 
-        <div className="telemetry-consent-body">
-          <p className="body-muted text-relaxed">
-            Both options stay off unless you choose to enable them. Scan URLs, source code, project
-            paths, credentials, raw logs, and page content are never included either way.
+      <div className="telemetry-consent-body">
+        <p className="body-muted text-relaxed">
+          Both options stay off unless you choose to enable them. Scan URLs, source code, project
+          paths, credentials, raw logs, and page content are never included either way.
+        </p>
+
+        <TelemetryToggleRow
+          icon={BarChart3}
+          title="Usage analytics"
+          body="Off by default. Anonymous workflow events: scan started, scan completed, settings opened, issue guidance copied. Turn on if you want to help shape what we build next."
+          checked={usageAnalytics}
+          onChange={setUsageAnalytics}
+        />
+        <TelemetryToggleRow
+          icon={Bug}
+          title="Crash and error reports"
+          body="Off by default. Sanitized frontend crashes and failed app commands through Sentry. No replay, no autocapture, and no broad tracing."
+          checked={crashReports}
+          onChange={setCrashReports}
+        />
+
+        {showPreview ? (
+          <pre className="telemetry-preview-box">{buildTelemetryPreview()}</pre>
+        ) : null}
+
+        {saveError ? (
+          <p
+            role="alert"
+            aria-live="polite"
+            className="telemetry-consent-error body-muted text-relaxed">
+            {saveError}
           </p>
+        ) : null}
+      </div>
 
-          <TelemetryToggleRow
-            icon={BarChart3}
-            title="Usage analytics"
-            body="Off by default. Anonymous workflow events: scan started, scan completed, settings opened, issue guidance copied. Turn on if you want to help shape what we build next."
-            checked={usageAnalytics}
-            onChange={setUsageAnalytics}
-          />
-          <TelemetryToggleRow
-            icon={Bug}
-            title="Crash and error reports"
-            body="Off by default. Sanitized frontend crashes and failed app commands through Sentry. No replay, no autocapture, and no broad tracing."
-            checked={crashReports}
-            onChange={setCrashReports}
-          />
-
-          {showPreview ? (
-            <pre className="telemetry-preview-box">{buildTelemetryPreview()}</pre>
-          ) : null}
-
-          {saveError ? (
-            <p
-              role="alert"
-              aria-live="polite"
-              className="telemetry-consent-error body-muted text-relaxed">
-              {saveError}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="telemetry-consent-footer">
+      <div className="telemetry-consent-footer">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowPreview((current) => !current)}>
+          {showPreview ? "Hide Preview" : "Preview Data"}
+        </Button>
+        <div className="row">
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             size="sm"
-            onClick={() => setShowPreview((current) => !current)}>
-            {showPreview ? "Hide Preview" : "Preview Data"}
+            disabled={saving}
+            onClick={() => {
+              void save({ usageAnalytics: false, crashReports: false });
+            }}>
+            Keep Off
           </Button>
-          <div className="row">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={saving}
-              onClick={() => {
-                void save({ usageAnalytics: false, crashReports: false });
-              }}>
-              Keep Off
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={saving}
-              onClick={() => {
-                void save({ usageAnalytics, crashReports });
-              }}>
-              {saving ? "Saving..." : "Save Choices"}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            size="sm"
+            disabled={saving}
+            onClick={() => {
+              void save({ usageAnalytics, crashReports });
+            }}>
+            {saving ? "Saving..." : "Save Choices"}
+          </Button>
         </div>
-      </section>
-    </div>
+      </div>
+    </Dialog>
   );
 }
 
