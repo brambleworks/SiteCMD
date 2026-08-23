@@ -3,6 +3,7 @@ import { CircleHelp, X } from "lucide-react";
 import type { NavPage } from "@/components/layout/NavSidebar";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 
 interface PageGuideContent {
   title: string;
@@ -322,18 +323,15 @@ const PAGE_GUIDES: Record<PageGuideKey, PageGuideContent> = {
 export function PageGuideButton({ page, className }: { page: PageGuideKey; className?: string }) {
   const guide = PAGE_GUIDES[page];
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const handleClose = useCallback(() => {
     setOpen(false);
-    requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
   return (
     <>
       <Button
         unstyled
-        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         className={cn("page-guide-trigger", className)}
@@ -349,7 +347,6 @@ export function PageGuideButton({ page, className }: { page: PageGuideKey; class
 
 function PageGuidePanel({ guide, onClose }: { guide: PageGuideContent; onClose: () => void }) {
   const [visible, setVisible] = useState(false);
-  const panelRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<number | null>(null);
   const onCloseRef = useRef(onClose);
@@ -374,85 +371,61 @@ function PageGuidePanel({ guide, onClose }: { guide: PageGuideContent; onClose: 
       setVisible(true);
       closeButtonRef.current?.focus();
     });
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") requestClose();
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      const targetNode = event.target instanceof Node ? event.target : null;
-      if (panelRef.current && targetNode && !panelRef.current.contains(targetNode)) {
-        requestClose();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       window.cancelAnimationFrame(frame);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("pointerdown", onPointerDown, true);
       if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
     };
-  }, [requestClose]);
+  }, []);
 
   return (
-    <>
-      <div
-        className={cn(
-          "page-guide-backdrop",
-          visible ? "page-guide-backdrop-visible" : "page-guide-backdrop-hidden",
-        )}
-        aria-hidden="true"
-      />
-      <aside
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={subtitleId}
-        className={cn(
-          "page-guide-panel",
-          visible ? "page-guide-panel-visible" : "page-guide-panel-hidden",
-        )}>
-        <div className="page-guide-header">
-          <div className="flex-fill">
-            <p className="details-eyebrow">Page Guide</p>
-            <h2 id={titleId} className="details-title">
-              {guide.title}
-            </h2>
-            <p id={subtitleId} className="details-subtitle">
-              {guide.subtitle}
-            </p>
-          </div>
-          <Button
-            unstyled
-            ref={closeButtonRef}
-            type="button"
-            onClick={requestClose}
-            aria-label="Close page guide"
-            className="details-close">
-            <X aria-hidden="true" />
-          </Button>
+    <Dialog
+      labelledBy={titleId}
+      describedBy={subtitleId}
+      onClose={requestClose}
+      className={cn(
+        "page-guide-panel",
+        visible ? "page-guide-panel-visible" : "page-guide-panel-hidden",
+      )}>
+      <div className="page-guide-header">
+        <div className="flex-fill">
+          <p className="details-eyebrow">Page Guide</p>
+          <h2 id={titleId} className="details-title">
+            {guide.title}
+          </h2>
+          <p id={subtitleId} className="details-subtitle">
+            {guide.subtitle}
+          </p>
         </div>
+        <Button
+          unstyled
+          ref={closeButtonRef}
+          type="button"
+          onClick={requestClose}
+          aria-label="Close page guide"
+          className="details-close">
+          <X aria-hidden="true" />
+        </Button>
+      </div>
 
-        <div className="page-guide-body">
-          <GuideSection index={1} label="What this page is for" tone="attention">
-            <p className="page-guide-paragraph">{guide.purpose}</p>
-          </GuideSection>
-          <GuideSection index={2} label="Look at first" tone="action">
-            <GuideList items={guide.lookFirst} />
-          </GuideSection>
-          <GuideSection index={3} label="Use it well" tone="supporting">
-            <GuideList items={guide.useWell} />
-          </GuideSection>
-          <GuideSection index={4} label="When to take action" tone="verify">
-            <GuideList items={guide.takeAction} />
-          </GuideSection>
-          <section className="page-guide-tip">
-            <p className="details-section-label">Operator tip</p>
-            <p>{guide.proTip}</p>
-          </section>
-        </div>
-      </aside>
-    </>
+      <div className="page-guide-body">
+        <GuideSection index={1} label="What this page is for" tone="attention">
+          <p className="page-guide-paragraph">{guide.purpose}</p>
+        </GuideSection>
+        <GuideSection index={2} label="Look at first" tone="action">
+          <GuideList items={guide.lookFirst} />
+        </GuideSection>
+        <GuideSection index={3} label="Use it well" tone="supporting">
+          <GuideList items={guide.useWell} />
+        </GuideSection>
+        <GuideSection index={4} label="When to take action" tone="verify">
+          <GuideList items={guide.takeAction} />
+        </GuideSection>
+        <section className="page-guide-tip">
+          <p className="details-section-label">Operator tip</p>
+          <p>{guide.proTip}</p>
+        </section>
+      </div>
+    </Dialog>
   );
 }
 

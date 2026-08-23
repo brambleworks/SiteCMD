@@ -536,22 +536,6 @@
       display: inline;
     }
   }
-  .page-guide-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 63;
-    background-color: var(--background);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 180ms ease-out;
-  }
-  .page-guide-backdrop-visible {
-    opacity: 0.54;
-    pointer-events: auto;
-  }
-  .page-guide-backdrop-hidden {
-    opacity: 0;
-  }
   .page-guide-panel {
     position: fixed;
     right: 0;
