@@ -657,6 +657,86 @@ fn heavy_image_evidence_keeps_the_scanned_sites_own_asset_name() {
 }
 
 #[test]
+fn asset_weight_result_keeps_same_origin_path_but_strips_it_without_page_origin() {
+    let url = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+    let asset = measured(url, AssetKind::Script, 200, Some(1024), false);
+
+    let mut coll = collection(1, 1, 1);
+    coll.page_origin = Some("https://sitecmd.com".to_string());
+    let same_origin = asset_weight_result(0, &coll, std::slice::from_ref(&asset));
+    let serialized = serde_json::to_string(&same_origin).expect("serialize result");
+    assert!(serialized.contains(url), "{serialized}");
+
+    coll.page_origin = None;
+    let no_origin = asset_weight_result(0, &coll, std::slice::from_ref(&asset));
+    let serialized = serde_json::to_string(&no_origin).expect("serialize result");
+    assert!(!serialized.contains(url), "{serialized}");
+    assert!(
+        serialized.contains("https://sitecmd.com/assets/[redacted]"),
+        "{serialized}"
+    );
+}
+
+#[test]
+fn broken_images_result_keeps_same_origin_path_but_strips_it_without_page_origin() {
+    let url = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+
+    let same_origin = broken_images_result(
+        &[measured(url, AssetKind::Image, 404, None, false)],
+        Some("https://sitecmd.com"),
+    );
+    assert!(
+        same_origin.description.contains(url),
+        "{}",
+        same_origin.description
+    );
+
+    let no_origin =
+        broken_images_result(&[measured(url, AssetKind::Image, 404, None, false)], None);
+    assert!(
+        no_origin
+            .description
+            .contains("https://sitecmd.com/assets/[redacted]"),
+        "{}",
+        no_origin.description
+    );
+    assert!(
+        !no_origin.description.contains(url),
+        "{}",
+        no_origin.description
+    );
+}
+
+#[test]
+fn asset_caching_result_keeps_same_origin_path_but_strips_it_without_page_origin() {
+    let url = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+
+    let same_origin = asset_caching_result(
+        &[cached(url, Some("no-cache"))],
+        Some("https://sitecmd.com"),
+    );
+    assert!(
+        same_origin.description.contains(url),
+        "{}",
+        same_origin.description
+    );
+
+    let no_origin = asset_caching_result(&[cached(url, Some("no-cache"))], None);
+    assert!(
+        no_origin
+            .description
+            .contains("https://sitecmd.com/assets/[redacted]"),
+        "{}",
+        no_origin.description
+    );
+    assert!(
+        !no_origin.description.contains(url),
+        "{}",
+        no_origin.description
+    );
+}
+
+#[test]
 fn fingerprint_detection_ignores_version_words() {
     // Version-ish names must not read as content hashes (would false-positive
     // on every un-fingerprinted vendored library).

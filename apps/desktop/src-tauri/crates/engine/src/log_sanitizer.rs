@@ -448,6 +448,65 @@ mod tests {
     }
 
     #[test]
+    fn evidence_safe_page_url_for_site_handles_origin_edge_cases() {
+        let site = Some("https://sitecmd.com");
+
+        // (a) A different subdomain is never the scanned site's origin, so it
+        // gets exactly the treatment the non-site-aware sanitizer already gave
+        // it (nothing here is long enough to redact either way).
+        let subdomain_url = "https://cdn.sitecmd.com/a/b.js";
+        assert_eq!(
+            evidence_safe_page_url_for_site(subdomain_url, site),
+            evidence_safe_page_url(subdomain_url),
+            "a different subdomain must not receive the same-origin exemption"
+        );
+        assert_eq!(
+            evidence_safe_page_url_for_site(subdomain_url, site),
+            "https://cdn.sitecmd.com/a/b.js"
+        );
+
+        // (b) An explicit default port on the URL folds away during parsing
+        // (url::Url never serializes a default port), so it still matches a
+        // site_origin with no port.
+        let long_name = "https://sitecmd.com:443/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+        assert_eq!(
+            evidence_safe_page_url_for_site(long_name, site),
+            "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js"
+        );
+        // The reverse does not fold: `site_origin` is compared as a literal
+        // string, never reparsed, so an explicit default port embedded in it
+        // does not match a port-free parsed origin. Every real caller (see
+        // `AssetCollection.page_origin`) supplies `site_origin` already
+        // normalized via `Url::origin().ascii_serialization()`, which never
+        // includes a default port, so this asymmetry is not reachable in
+        // practice.
+        assert_eq!(
+            evidence_safe_page_url_for_site(
+                "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js",
+                Some("https://sitecmd.com:443"),
+            ),
+            "https://sitecmd.com/assets/[redacted]"
+        );
+
+        // (c) Userinfo, query, and fragment are stripped even for a
+        // same-origin URL; only the path survives.
+        assert_eq!(
+            evidence_safe_page_url_for_site(
+                "https://user:pw@sitecmd.com/assets/app.js?token=abc#frag",
+                site,
+            ),
+            "https://sitecmd.com/assets/app.js"
+        );
+
+        // (d) Scheme and host compare case-insensitively (URL parsing
+        // lowercases both), but the retained path keeps its original case.
+        assert_eq!(
+            evidence_safe_page_url_for_site("HTTPS://SITECMD.COM/Assets/App.js", site),
+            "https://sitecmd.com/Assets/App.js"
+        );
+    }
+
+    #[test]
     fn url_reference_sanitizer_handles_relative_protocol_and_opaque_values() {
         assert_eq!(
             evidence_safe_url_reference("/account/reset/short-token?token=secret#part"),
