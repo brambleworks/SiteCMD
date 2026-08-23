@@ -93,6 +93,9 @@ is_semver() {
       numeric=$1
       ;;
   esac
+  case $numeric in
+    *.) return 1 ;;
+  esac
   old_ifs=$IFS
   set -f
   IFS=.
@@ -104,6 +107,11 @@ is_semver() {
     case $part in
       '' | *[!0-9]*) return 1 ;;
     esac
+    case $part in
+      0 | [1-9]*) ;;
+      *) return 1 ;;
+    esac
+    [ "${#part}" -le 9 ] || return 1
   done
 }
 
@@ -199,6 +207,9 @@ refuse_downgrade() {
   [ -z "$pinned_version" ] || return 0
   [ -x "$install_dir/sitecmd" ] || return 0
   installed_version=$("$install_dir/sitecmd" --version 2>/dev/null | sed -n 's/^sitecmd //p')
+  # This guard depends on the CLI printing exactly "sitecmd X.Y.Z[-suffix]"
+  # (apps/desktop/src-tauri/crates/cli/src/main.rs prints "sitecmd
+  # {CARGO_PKG_VERSION}"), so a format change there must update this parser.
   is_semver "$installed_version" || return 0
   if version_is_older "$version" "$installed_version"; then
     fail "the latest published release ($version) is older than the installed sitecmd $installed_version; refusing to downgrade. Set SITECMD_VERSION=$version to install it anyway."
@@ -209,6 +220,7 @@ main() {
   command -v curl >/dev/null 2>&1 || fail "curl is required"
   command -v tar >/dev/null 2>&1 || fail "tar is required"
   command -v grep >/dev/null 2>&1 || fail "grep is required"
+  command -v expr >/dev/null 2>&1 || fail "expr is required"
   require_minisign
 
   detect_target

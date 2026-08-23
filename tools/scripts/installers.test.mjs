@@ -417,4 +417,68 @@ describe("CLI installers", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Installed sitecmd 1.5.4");
   });
+
+  it("rejects a latest-version answer with a trailing dot", () => {
+    const fixture = createInstallerFixture();
+    const installed = seedInstalledCli(fixture);
+
+    const result = fixture.runPublic({
+      SITECMD_VERSION: "",
+      FAKE_LATEST_RESPONSE: '{"latest_version":"1.2.3."}',
+    });
+
+    expect(result.stderr).toContain("invalid release version");
+    expectPreserved(result, installed);
+  });
+
+  it("rejects a latest-version answer with a leading zero on a component", () => {
+    const fixture = createInstallerFixture();
+    const installed = seedInstalledCli(fixture);
+
+    const result = fixture.runPublic({
+      SITECMD_VERSION: "",
+      FAKE_LATEST_RESPONSE: '{"latest_version":"01.2.3"}',
+    });
+
+    expect(result.stderr).toContain("invalid release version");
+    expectPreserved(result, installed);
+  });
+
+  it("rejects an oversized version component without leaking a raw integer-comparison error", () => {
+    const fixture = createInstallerFixture();
+    const installed = seedInstalledCli(fixture);
+
+    const result = fixture.runPublic({
+      SITECMD_VERSION: "",
+      FAKE_LATEST_RESPONSE: '{"latest_version":"12345678901234567890.0.0"}',
+    });
+
+    expect(result.stderr).toContain("invalid release version");
+    expect(result.stderr).not.toContain("integer expression");
+    expectPreserved(result, installed);
+  });
+
+  it("requires expr as a prerequisite so a missing tool fails closed", () => {
+    const fixture = createInstallerFixture();
+    const installed = path.join(fixture.installDir, "sitecmd");
+    writeExecutable(installed, "#!/bin/sh\nprintf 'sitecmd 1.5.4-rc.1\\n'\n");
+
+    // Invoke the /bin/sh binary directly: the PATH override below excludes
+    // /bin (where expr lives) for the script's own `command -v` lookups,
+    // but spawnSync also uses that PATH to locate "sh" itself, so a bare
+    // "sh" would fail to launch at all.
+    const result = spawnSync("/bin/sh", [PUBLIC_INSTALLER], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: fixture.environment({
+        SITECMD_VERSION: "",
+        FAKE_LATEST_RESPONSE: '{"latest_version":"1.5.4-rc.2"}',
+        PATH: `${fixture.bin}:/usr/bin:/sbin`,
+      }),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("expr is required");
+    expect(fs.readFileSync(installed, "utf8")).toContain("1.5.4-rc.1");
+  });
 });
