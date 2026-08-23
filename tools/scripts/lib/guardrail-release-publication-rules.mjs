@@ -42,6 +42,10 @@ export function releasePublicationSafetyFailures(read) {
       verifierCommands.includes(
         '"$verifier" updater-public-key.pub payload/SHA256SUMS checksum-signature.sig',
       ) &&
+      verifierCommands.includes(
+        `expected=$(awk -v name="$(basename "$1")" '$2 == name { print $1 }' payload/SHA256SUMS)`,
+      ) &&
+      verifierCommands.includes('test "$(sha256_file "$1")" = "$expected"') &&
       verifierCommands.includes('verify_listed "$dir/$filename"') &&
       verifierCommands.includes('verify_listed "$dir/$cli_archive"') &&
       verifierCommands.includes('if [ -n "$dmg_name" ]; then verify_listed "$dir/$dmg_name"; fi') &&
@@ -54,7 +58,7 @@ export function releasePublicationSafetyFailures(read) {
       publisherJob.includes("payload/SHA256SUMS payload/SHA256SUMS.minisig") &&
       orderedBefore(
         publisherJob,
-        "Advance the production updater manifest",
+        "https://releases.sitecmd.com/api/releases-admin",
         'gh release create "$TAG_NAME"',
       ),
     "release.yml must sign one release-wide SHA256SUMS with the production updater key, verify its .minisig without secrets and every artifact (including the DMG) against it, cross-check every uploaded checksum against the upload plan, upload both beside the artifacts, and create the GitHub Release (verified tag, changelog notes, checksum assets) only after the updater manifest advanced.",

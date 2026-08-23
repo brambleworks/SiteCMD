@@ -218,6 +218,32 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
   });
 
+  it("catches a verify_listed whose body no longer reads the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace(/verify_listed\(\) \{[\s\S]*?\n\}/, "verify_listed() {\n  :\n}")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  const advanceStepBlock = (source) => {
+    const start = source.indexOf("      - name: Advance the production updater manifest");
+    const end = source.indexOf("\n      - ", start);
+    return source.slice(start, end + 1);
+  };
+
+  it("is not fooled by a decoy comment when the manifest advance moves after the release", () => {
+    const decoy = "      # Advance the production updater manifest ran in the step above\n";
+    const attestHeader = "      - name: Attest build provenance for the published artifacts\n";
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const step = advanceStepBlock(source);
+      return source.replace(step, decoy).replace(attestHeader, `${step}${attestHeader}`);
+    });
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
   it("catches a publisher that drops the upload-plan cross-check", () => {
     const failures = run((file, source) =>
       file.includes("release.yml")
