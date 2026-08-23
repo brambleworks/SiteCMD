@@ -302,11 +302,16 @@
     transform: scale(1);
   }
   .btn-action.bg-primary:hover,
-  .btn-action.bg-primary:focus-visible,
   .btn-action.bg-primary:active {
     background-color: var(--brand-button-hover);
     color: var(--brand-button-foreground);
     box-shadow: none;
+  }
+  /* No box-shadow: none here, unlike :hover/:active above, so a keyboard
+     focus indicator is never suppressed on this state. */
+  .btn-action.bg-primary:focus-visible {
+    background-color: var(--brand-button-hover);
+    color: var(--brand-button-foreground);
   }
   /* Inline skeleton loader (pulse animation) */
   .skeleton-inline {

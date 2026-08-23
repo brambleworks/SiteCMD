@@ -283,8 +283,10 @@
   }
   .rep-period-btn--active {
     /* 20% read 4.03:1 against --primary text, short of the 4.5:1 AA floor
-       (axe color-contrast, e2e/smoke.spec.ts seeded navigation, Reports page). */
-    background-color: color-mix(in oklab, var(--brand) 8%, transparent);
+       (axe color-contrast, e2e/smoke.spec.ts seeded navigation, Reports page).
+       12% measures 4.56:1 on #1c1b1d and matches the app's usual active wash
+       weight (nav 10%, card hover 10%); fix-round-1 review. */
+    background-color: color-mix(in oklab, var(--brand) 12%, transparent);
     color: var(--primary);
   }
   .rep-period-btn--inactive:hover {

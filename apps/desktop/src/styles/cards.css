@@ -405,11 +405,18 @@
     transition-duration: 180ms !important;
   }
   .scan-run-button:hover,
-  .scan-run-button:focus-visible,
   .scan-run-button:active {
     background-color: var(--brand-button-hover) !important;
     border-color: transparent !important;
     box-shadow: none !important;
+    filter: none !important;
+    transform: none !important;
+  }
+  /* No box-shadow: none here, unlike :hover/:active above, so .btn:focus-visible's
+     --ring outline (buttons.css) survives as the keyboard focus indicator. */
+  .scan-run-button:focus-visible {
+    background-color: var(--brand-button-hover) !important;
+    border-color: transparent !important;
     filter: none !important;
     transform: none !important;
   }

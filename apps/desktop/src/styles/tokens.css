@@ -7,10 +7,14 @@
   --brand: oklch(0.546 0.245 262.88);
   --brand-foreground: oklch(0.985 0 0);
   --brand-button: oklch(0.546 0.245 262.88);
-  /* L dropped from 0.623: white button text on that value read 3.58:1 against a
-     focused/hovered/pressed default button, short of the 4.5:1 AA floor (axe
-     color-contrast on the focus-restored Run Scan button, e2e/scan-flow.spec.ts). */
-  --brand-button-hover: oklch(0.54 0.214 259.13);
+  /* L 0.54 was luminance-identical to --brand-button (1.001:1 state-to-state):
+     white button text still read 3.58:1 against the hover/focus/active
+     background, and with the state-to-state step gone, the background swap
+     was invisible, so a keyboard focus ring became the only indicator left.
+     0.47 restores a visible step (about 1.35:1) and reads ~6.3:1 with white
+     text (axe color-contrast on the focus-restored Run Scan button,
+     e2e/scan-flow.spec.ts; fix-round-1 review). */
+  --brand-button-hover: oklch(0.47 0.214 259.13);
   --brand-button-foreground: oklch(0.985 0 0);
   --brand-muted: oklch(0.546 0.245 262.88 / 0.12);
   --brand-subtle: oklch(0.546 0.245 262.88 / 0.06);
@@ -111,18 +115,24 @@
   /* L raised from 0.623: at 0.623 this text-on-surface pairing read 4.16-4.46:1 against
      card, nav, and stage-active backgrounds, short of the 4.5:1 AA floor for small text
      (axe color-contrast, e2e issues-flow/scan-flow/smoke specs). 0.67 clears all three
-     with margin; --brand-button-hover, --ring, --chart-1, and --sidebar-primary keep the
-     original value since they were not implicated. */
+     with margin. --brand-muted, --brand-subtle, --ring, --chart-1, --sidebar-primary, and
+     --sidebar-ring below are derived from this same base so the dark brand family stays
+     one blue; --brand-button and --brand-button-hover are the only tokens that
+     intentionally diverge from --brand (see the comment on --brand-button-hover). */
   --brand: oklch(0.67 0.214 259.13);
   --brand-foreground: oklch(0.13 0.028 261.69);
   --brand-button: oklch(0.546 0.245 262.88);
-  /* L dropped from 0.623: white button text on that value read 3.58:1 against a
-     focused/hovered/pressed default button, short of the 4.5:1 AA floor (axe
-     color-contrast on the focus-restored Run Scan button, e2e/scan-flow.spec.ts). */
-  --brand-button-hover: oklch(0.54 0.214 259.13);
+  /* L 0.54 was luminance-identical to --brand-button (1.001:1 state-to-state):
+     white button text still read 3.58:1 against the hover/focus/active
+     background, and with the state-to-state step gone, the background swap
+     was invisible, so a keyboard focus ring became the only indicator left.
+     0.47 restores a visible step (about 1.35:1) and reads ~6.3:1 with white
+     text (axe color-contrast on the focus-restored Run Scan button,
+     e2e/scan-flow.spec.ts; fix-round-1 review). */
+  --brand-button-hover: oklch(0.47 0.214 259.13);
   --brand-button-foreground: oklch(0.985 0 0);
-  --brand-muted: oklch(0.623 0.214 259.13 / 0.16);
-  --brand-subtle: oklch(0.623 0.214 259.13 / 0.07);
+  --brand-muted: oklch(0.67 0.214 259.13 / 0.16);
+  --brand-subtle: oklch(0.67 0.214 259.13 / 0.07);
   --brand-accent: oklch(0.769 0.188 70.08);
   --brand-accent-foreground: oklch(0.13 0.028 261.69);
   --brand-accent-muted: oklch(0.769 0.188 70.08 / 0.16);
@@ -147,9 +157,9 @@
   --destructive-foreground: oklch(0.65 0.22 25.33);
   --border: rgba(255, 255, 255, 0.08); /* ghost border */
   --input: rgba(255, 255, 255, 0.08);
-  --ring: oklch(0.623 0.214 259.13);
+  --ring: var(--brand);
 
-  --chart-1: oklch(0.623 0.214 259.13);
+  --chart-1: var(--brand);
   --chart-2: oklch(0.769 0.188 70.08);
   --chart-3: oklch(0.696 0.17 162.48);
   --chart-4: oklch(0.66 0.18 300);
@@ -158,12 +168,12 @@
   /* Sidebar: slightly darker than background for tonal separation */
   --sidebar: #09090b;
   --sidebar-foreground: #c3c6d6; /* on-surface-variant for readability */
-  --sidebar-primary: oklch(0.623 0.214 259.13);
+  --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: #1c1b1d;
   --sidebar-accent-foreground: #e5e1e4;
   --sidebar-border: rgba(255, 255, 255, 0.05);
-  --sidebar-ring: oklch(0.623 0.214 259.13);
+  --sidebar-ring: var(--brand);
 
   --score-excellent: #34d399; /* emerald-400 */
   --score-good: #fbbf24; /* amber-400 */

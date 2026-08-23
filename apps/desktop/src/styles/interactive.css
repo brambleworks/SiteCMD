@@ -19,14 +19,20 @@
     transform: scale(1);
   }
   button.bg-primary.text-primary-foreground:hover,
-  button.bg-primary.text-primary-foreground:focus-visible,
   button.bg-primary.text-primary-foreground:active,
   a.bg-primary.text-primary-foreground:hover,
-  a.bg-primary.text-primary-foreground:focus-visible,
   a.bg-primary.text-primary-foreground:active {
     background-color: var(--brand-button-hover);
     color: var(--brand-button-foreground);
     box-shadow: none;
+  }
+  /* No box-shadow: none here, unlike :hover/:active above, so a keyboard
+     focus ring (from .btn:focus-visible, or the browser default on markup
+     that isn't a .btn) survives as the focus indicator. */
+  button.bg-primary.text-primary-foreground:focus-visible,
+  a.bg-primary.text-primary-foreground:focus-visible {
+    background-color: var(--brand-button-hover);
+    color: var(--brand-button-foreground);
   }
 
   /* Interactive: icon-only button */

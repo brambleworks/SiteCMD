@@ -2,8 +2,8 @@
 name: SiteCMD Desktop
 description: A dark-first instrument console for site and code health - dense, tonal, signal-driven
 colors:
-  brand-blue: "oklch(0.623 0.214 259.13)"
-  brand-blue-press: "oklch(0.546 0.245 262.88)"
+  brand-blue: "oklch(0.67 0.214 259.13)"
+  brand-blue-press: "oklch(0.47 0.214 259.13)"
   signal-amber: "oklch(0.769 0.188 70.08)"
   surface-floor: "#09090b"
   surface-low: "#0e0e10"
@@ -167,7 +167,7 @@ CSS variables from `tokens.css`; the app never hardcodes a hex.
 
 ### Primary
 
-- **Kinetic Blue** (`oklch(0.623 0.214 259.13)` dark, `oklch(0.546 0.245 262.88)` light): the brand voice and every primary action. It fills the default `<Button>`, paints the active nav item (over a `rgba(59,130,246,0.10)` wash), and tints interactive-card hover states. It presses to the deeper `oklch(0.546 ...)` on `:active`.
+- **Kinetic Blue** (`oklch(0.67 0.214 259.13)` dark, `oklch(0.546 0.245 262.88)` light): the brand voice and every primary action. It fills the default `<Button>`, paints the active nav item (over a `rgba(59,130,246,0.10)` wash), and tints interactive-card hover states. It presses to `oklch(0.47 0.214 259.13)` on hover, keyboard focus, and `:active`. The dark-theme value is lighter than the light theme's because this same blue is also used as small text on dark surfaces (nav, cards, stage labels), and needed the extra lightness to clear 4.5:1 AA contrast there.
 
 ### Secondary
 
