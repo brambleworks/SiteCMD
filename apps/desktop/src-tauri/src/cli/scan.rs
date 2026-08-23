@@ -7,6 +7,7 @@ pub struct ScanArgs {
     pub url: Option<String>,
     pub scan_type: ScanType,
     pub fail_under: Option<u32>,
+    pub fail_on: Option<Severity>,
     pub json: bool,
     pub timeout: Option<u64>,
     pub categories: Option<Vec<String>>,
@@ -264,6 +265,22 @@ fn check_threshold(scan: &ScanResult, args: &ScanArgs) -> u8 {
             return 1;
         }
     }
+    if let Some(minimum) = args.fail_on {
+        let hits = scan
+            .issues
+            .iter()
+            .filter(|issue| is_failing(issue) && issue.severity.sort_rank() <= minimum.sort_rank())
+            .count();
+        if hits > 0 {
+            eprintln!(
+                "\nFailed: {} failing issue{} at or above {}",
+                hits,
+                if hits == 1 { "" } else { "s" },
+                minimum
+            );
+            return 1;
+        }
+    }
     0
 }
 
@@ -511,6 +528,7 @@ mod tests {
             url: None,
             scan_type: ScanType::Health,
             fail_under: None,
+            fail_on: None,
             json: false,
             timeout: None,
             categories: None,
@@ -560,5 +578,30 @@ mod tests {
                 "{artifact} should be written"
             );
         }
+    }
+
+    #[test]
+    fn fail_on_exits_one_for_a_failing_issue_at_or_above_the_severity() {
+        let mut args = ScanArgs {
+            url: None,
+            scan_type: ScanType::Health,
+            fail_under: None,
+            fail_on: Some(Severity::High),
+            json: false,
+            timeout: None,
+            categories: None,
+            diff: false,
+            env_name: None,
+            no_browser: false,
+            cwv: false,
+        };
+        let failing_high = scan(vec![issue("a", Severity::High, CheckStatus::Fail)]);
+        assert_eq!(check_threshold(&failing_high, &args), 1);
+        let passing_high = scan(vec![issue("a", Severity::High, CheckStatus::Pass)]);
+        assert_eq!(check_threshold(&passing_high, &args), 0);
+        let failing_low = scan(vec![issue("b", Severity::Low, CheckStatus::Fail)]);
+        assert_eq!(check_threshold(&failing_low, &args), 0);
+        args.fail_on = None;
+        assert_eq!(check_threshold(&failing_high, &args), 0);
     }
 }

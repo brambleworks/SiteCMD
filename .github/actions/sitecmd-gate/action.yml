@@ -22,10 +22,15 @@ inputs:
       deployments, and submit code evidence. It cannot read findings,
       lifecycle state, or account data. This action uses it for the gate alone.
     required: true
-  threshold:
+  fail-on:
     description: >-
       The least severe NEW finding that fails the build: critical, high,
       medium, or low.
+    required: false
+    default: ""
+  threshold:
+    description: >-
+      Deprecated alias of fail-on. Used only when fail-on is empty.
     required: false
     default: high
   strict:
@@ -76,7 +81,7 @@ runs:
         SITECMD_CONNECTION_EXPORT: ${{ inputs.connection-export }}
         SITECMD_DB_PATH: ${{ runner.temp }}/sitecmd-gate/sitecmd.db
         SITECMD_STRICT: ${{ inputs.strict }}
-        SITECMD_THRESHOLD: ${{ inputs.threshold }}
+        SITECMD_FAIL_ON: ${{ inputs.fail-on != '' && inputs.fail-on || inputs.threshold }}
       run: |
         set -euo pipefail
         mkdir -p "${RUNNER_TEMP}/sitecmd-gate"
@@ -93,7 +98,7 @@ runs:
         set +e
         summary=$(sitecmd gate \
           --connection-export "$export_path" \
-          --threshold "$SITECMD_THRESHOLD" \
+          --fail-on "$SITECMD_FAIL_ON" \
           "${strict_flag[@]}")
         status=$?
         set -e

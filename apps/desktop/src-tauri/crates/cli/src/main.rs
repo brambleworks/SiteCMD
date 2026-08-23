@@ -17,7 +17,7 @@ mod tests;
 mod validators;
 use audit_dispatch::dispatch_audit;
 use help::*;
-use validators::{parse_categories, parse_positive_seconds, parse_score};
+use validators::{parse_categories, parse_positive_seconds, parse_score, warn_deprecated_flag};
 
 fn parse_init_args(mut args: impl Iterator<Item = String>) -> Result<InitArgs, String> {
     let mut url: Option<String> = None;
@@ -66,6 +66,7 @@ fn parse_scan_args(mut args: impl Iterator<Item = String>) -> Result<ScanArgs, S
     let mut url: Option<String> = None;
     let mut scan_type = ScanType::Health;
     let mut fail_under: Option<u32> = None;
+    let mut fail_on: Option<app_lib::checks::Severity> = None;
     let mut json = false;
     let mut timeout: Option<u64> = None;
     let mut categories: Option<Vec<String>> = None;
@@ -95,6 +96,13 @@ fn parse_scan_args(mut args: impl Iterator<Item = String>) -> Result<ScanArgs, S
             "--fail-under" => {
                 let value = next_value(&mut args, "--fail-under")?;
                 fail_under = Some(parse_score(&value, "--fail-under")?);
+            }
+            "--fail-on" => {
+                let value = next_value(&mut args, "--fail-on")?;
+                fail_on =
+                    Some(value.parse().map_err(|_| {
+                        "--fail-on must be critical, high, medium, or low".to_string()
+                    })?);
             }
             "--json" => {
                 json = true;
@@ -155,6 +163,7 @@ fn parse_scan_args(mut args: impl Iterator<Item = String>) -> Result<ScanArgs, S
         url,
         scan_type,
         fail_under,
+        fail_on,
         json,
         timeout,
         categories,
@@ -260,7 +269,12 @@ fn parse_check_args(mut args: impl Iterator<Item = String>) -> Result<CheckArgs,
             "--strict" => {
                 strict = true;
             }
+            "--fail-under" => {
+                let value = next_value(&mut args, "--fail-under")?;
+                threshold = Some(parse_score(&value, "--fail-under")?);
+            }
             "--threshold" => {
+                warn_deprecated_flag("--threshold", "--fail-under");
                 let value = next_value(&mut args, "--threshold")?;
                 threshold = Some(parse_score(&value, "--threshold")?);
             }
@@ -504,10 +518,13 @@ fn parse_gate_args(mut args: impl Iterator<Item = String>) -> Result<GateArgs, S
                     return Err("--token-env cannot be empty".into());
                 }
             }
-            "--threshold" => {
-                threshold = next_value(&mut args, "--threshold")?;
+            "--fail-on" | "--threshold" => {
+                if token == "--threshold" {
+                    warn_deprecated_flag("--threshold", "--fail-on");
+                }
+                threshold = next_value(&mut args, &token)?;
                 if !matches!(threshold.as_str(), "critical" | "high" | "medium" | "low") {
-                    return Err("--threshold must be critical, high, medium, or low".into());
+                    return Err("--fail-on must be critical, high, medium, or low".into());
                 }
             }
             "--strict" => strict = true,
