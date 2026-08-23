@@ -15,11 +15,17 @@ const contract = {
   },
   branchRuleset: {
     name: "protect-main",
+    target: "branch",
+    refNameInclude: ["refs/heads/main"],
+    refNameExclude: [],
     ruleTypes: ["deletion", "non_fast_forward", "required_linear_history", "pull_request"],
     requiredStatusChecks: ["Repository guardrails", "Analyze rust"],
   },
   tagRuleset: {
     name: "protect-release-tags",
+    target: "tag",
+    refNameInclude: ["refs/tags/v*"],
+    refNameExclude: [],
     ruleTypes: ["deletion", "non_fast_forward", "update"],
   },
 };
@@ -58,6 +64,36 @@ const workflows = {
     "          - rust",
     "",
   ].join("\n"),
+  ".github/workflows/frontend-quality.yml": [
+    "name: frontend-quality",
+    "",
+    "on:",
+    "  pull_request:",
+    "    branches: [main]",
+    "  merge_group:",
+    "    types: [checks_requested]",
+    "",
+    "jobs:",
+    "  check:",
+    "    name: Frontend quality",
+    "",
+  ].join("\n"),
+  ".github/workflows/size-limit.yml": [
+    "name: size-limit",
+    "",
+    "on:",
+    "  pull_request:",
+    "    types:",
+    "      - opened",
+    "      - reopened",
+    "  merge_group:",
+    "    types: [checks_requested]",
+    "",
+    "jobs:",
+    "  check:",
+    "    name: Bundle size",
+    "",
+  ].join("\n"),
   ".github/workflows/rust-tests.yml": [
     "name: rust-tests",
     "",
@@ -88,6 +124,8 @@ const liveClean = () => ({
   rulesets: [
     {
       name: "protect-main",
+      target: "branch",
+      conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } },
       enforcement: "active",
       bypass_actors: [],
       rules: [
@@ -108,6 +146,8 @@ const liveClean = () => ({
     },
     {
       name: "protect-release-tags",
+      target: "tag",
+      conditions: { ref_name: { include: ["refs/tags/v*"], exclude: [] } },
       enforcement: "active",
       bypass_actors: [],
       rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
@@ -141,7 +181,31 @@ describe("requiredCheckWorkflowFailures", () => {
       read,
       listFiles,
     );
-    expect(failures.join("\n")).toContain("path-filtered workflow");
+    expect(failures.join("\n")).toContain("filtered pull_request trigger");
+  });
+
+  it("rejects a check from a branch-filtered workflow", () => {
+    const failures = requiredCheckWorkflowFailures(
+      {
+        ...contract,
+        branchRuleset: { ...contract.branchRuleset, requiredStatusChecks: ["Frontend quality"] },
+      },
+      read,
+      listFiles,
+    );
+    expect(failures.join("\n")).toContain("filtered pull_request trigger");
+  });
+
+  it("rejects a check whose trigger types omit synchronize", () => {
+    const failures = requiredCheckWorkflowFailures(
+      {
+        ...contract,
+        branchRuleset: { ...contract.branchRuleset, requiredStatusChecks: ["Bundle size"] },
+      },
+      read,
+      listFiles,
+    );
+    expect(failures.join("\n")).toContain("filtered pull_request trigger");
   });
 });
 
@@ -163,6 +227,30 @@ describe("liveRepositoryProtectionFailures", () => {
     live.securityAndAnalysis.secret_scanning_push_protection.status = "disabled";
     expect(liveRepositoryProtectionFailures(contract, live).join("\n")).toContain(
       "secret_scanning_push_protection is disabled",
+    );
+  });
+
+  it("reports a branch ruleset retargeted at tags", () => {
+    const live = liveClean();
+    live.rulesets[0].target = "tag";
+    expect(liveRepositoryProtectionFailures(contract, live).join("\n")).toContain(
+      'ruleset "protect-main" targets tag, not branch',
+    );
+  });
+
+  it("reports a ruleset pointed at a branch the contract does not name", () => {
+    const live = liveClean();
+    live.rulesets[0].conditions.ref_name.include = ["refs/heads/retired"];
+    expect(liveRepositoryProtectionFailures(contract, live).join("\n")).toContain(
+      "ref_name.include is [refs/heads/retired]",
+    );
+  });
+
+  it("reports a ruleset that excludes refs the contract does not", () => {
+    const live = liveClean();
+    live.rulesets[1].conditions.ref_name.exclude = ["refs/tags/v9*"];
+    expect(liveRepositoryProtectionFailures(contract, live).join("\n")).toContain(
+      "ref_name.exclude is [refs/tags/v9*]",
     );
   });
 

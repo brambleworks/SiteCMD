@@ -1,6 +1,7 @@
 // Static half: every required check must come from a workflow that runs on
-// every pull request, or GitHub waits forever on pull requests outside its
-// paths filter. Live half: the settings SECURITY.md and the docs promise.
+// every pull request, or GitHub waits forever on the pull requests its path,
+// branch, or event filter skips. Live half: the settings SECURITY.md and the
+// docs promise, including which refs each ruleset actually governs.
 
 function pullRequestTriggerBody(source) {
   const trigger = /^ {2}pull_request:(.*)$/m.exec(source);
@@ -9,9 +10,35 @@ function pullRequestTriggerBody(source) {
   return rest.split(/^ {0,2}[a-z_-]+:/m)[0];
 }
 
+/** Returns the pull_request `types` list, or null when the trigger omits it. */
+function pullRequestTypes(body) {
+  const inline = /^ {4}types: *\[(.*)\] *$/m.exec(body);
+  if (inline) {
+    return inline[1]
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+  const start = body.search(/^ {4}types: *$/m);
+  if (start === -1) return null;
+  const values = [];
+  for (const line of body.slice(start).split("\n").slice(1)) {
+    const item = /^ {6}- (.+)$/.exec(line);
+    if (!item) break;
+    values.push(item[1].trim());
+  }
+  return values;
+}
+
+// A required check has to report on every pull request, so its workflow may not
+// filter the trigger by path or branch, and must still fire on the two events
+// that open and update one.
 function runsOnEveryPullRequest(source) {
   const body = pullRequestTriggerBody(source);
-  return body !== null && !/^ {4}paths(?:-ignore)?:/m.test(body);
+  if (body === null) return false;
+  if (/^ {4}(?:paths|paths-ignore|branches|branches-ignore):/m.test(body)) return false;
+  const types = pullRequestTypes(body);
+  return types === null || ["opened", "synchronize"].every((event) => types.includes(event));
 }
 
 function jobNames(source) {
@@ -56,9 +83,11 @@ export function requiredCheckWorkflowFailures(contract, read, listFiles) {
     }
     if (!owners.some(({ source }) => runsOnEveryPullRequest(source))) {
       failures.push(
-        `required check "${context}" comes from a path-filtered workflow (${owners
+        `required check "${context}" comes from a filtered pull_request trigger (${owners
           .map((owner) => owner.file)
-          .join(", ")}); a pull request outside those paths never reports it and cannot merge.`,
+          .join(
+            ", ",
+          )}); a path, branch, or types filter leaves pull requests that never report it and cannot merge.`,
       );
     }
   }
@@ -91,6 +120,22 @@ export function liveRepositoryProtectionFailures(contract, live) {
       failures.push(
         `ruleset "${expected.name}" grants bypass actors; administrators must be included.`,
       );
+    }
+    if (ruleset.target !== expected.target) {
+      failures.push(
+        `ruleset "${expected.name}" targets ${ruleset.target ?? "nothing"}, not ${expected.target}; it governs refs the contract does not.`,
+      );
+    }
+    for (const key of ["include", "exclude"]) {
+      const actual = [...(ruleset.conditions?.ref_name?.[key] ?? [])].sort().join(", ");
+      const wanted = [...expected[key === "include" ? "refNameInclude" : "refNameExclude"]]
+        .sort()
+        .join(", ");
+      if (actual !== wanted) {
+        failures.push(
+          `ruleset "${expected.name}" ref_name.${key} is [${actual}]; the contract says [${wanted}].`,
+        );
+      }
     }
     const types = new Set((ruleset.rules ?? []).map((rule) => rule.type));
     for (const type of expected.ruleTypes) {

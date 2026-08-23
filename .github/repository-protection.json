@@ -8,6 +8,9 @@
   },
   "branchRuleset": {
     "name": "protect-main",
+    "target": "branch",
+    "refNameInclude": ["refs/heads/main"],
+    "refNameExclude": [],
     "ruleTypes": [
       "deletion",
       "non_fast_forward",
@@ -26,6 +29,9 @@
   },
   "tagRuleset": {
     "name": "protect-release-tags",
+    "target": "tag",
+    "refNameInclude": ["refs/tags/v*"],
+    "refNameExclude": [],
     "ruleTypes": ["deletion", "non_fast_forward", "update"]
   }
 }
