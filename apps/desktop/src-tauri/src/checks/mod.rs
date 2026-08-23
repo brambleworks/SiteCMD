@@ -5,6 +5,7 @@ pub mod accessibility;
 pub mod compliance;
 pub mod config;
 pub use sitecmd_engine::checks::html_attrs;
+pub mod inventory;
 pub mod performance;
 pub mod polish;
 pub use sitecmd_engine::checks::predeploy;
@@ -109,6 +110,12 @@ pub trait AsyncCheck: Send + Sync {
     /// Whether multi-page scans may run this check once per origin.
     fn origin_scoped(&self) -> bool {
         false
+    }
+    /// Every check id this check can emit. Most checks emit exactly `id()`;
+    /// a runner shell that fans out into sub-ids overrides this so the
+    /// inventory sees the sub-ids too.
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![self.id().to_string()]
     }
 }
 

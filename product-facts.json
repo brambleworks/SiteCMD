@@ -18,12 +18,12 @@
     "ticketMirroring": "available"
   },
   "checkCounts": {
-    "web": 159,
+    "web": 129,
     "polish": 30,
     "codeScan": 168,
     "axe": 55,
     "dependencyEcosystems": 8,
-    "total": 420
+    "total": 390
   },
   "polishSignals": [
     {

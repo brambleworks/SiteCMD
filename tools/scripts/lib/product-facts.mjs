@@ -100,8 +100,11 @@ export function webCheckIdPrefixes(read, listFiles, trees = Object.values(WEB_CH
 }
 
 /** Derives the public check total from the owning engine sources. */
-export function deriveCheckCounts(read, listFiles) {
-  const ids = webCheckIdSources(read, listFiles);
+export function deriveCheckCounts(read, _listFiles) {
+  // The registries themselves generate this snapshot (`cargo test
+  // checks::inventory` in apps/desktop/src-tauri), including runner shells'
+  // sub-ids that a regex scrape of `id()`/`check_id` literals cannot see.
+  const web = JSON.parse(read("apps/desktop/src-tauri/check-inventory.json")).web.length;
 
   const polishSource = read("apps/desktop/src-tauri/src/checks/polish/mod.rs");
   const start = polishSource.indexOf("pub fn run_all_signals");
@@ -112,12 +115,12 @@ export function deriveCheckCounts(read, listFiles) {
   const codeScan = [...registry.matchAll(/^\s*d\("[a-z0-9-]+"/gm)].length;
 
   return {
-    web: ids.size,
+    web,
     polish,
     codeScan,
     axe: AXE_WCAG_A_AA_RULES,
     dependencyEcosystems: DEPENDENCY_ENGINE_ECOSYSTEMS,
-    total: ids.size + polish + codeScan + AXE_WCAG_A_AA_RULES + DEPENDENCY_ENGINE_ECOSYSTEMS,
+    total: web + polish + codeScan + AXE_WCAG_A_AA_RULES + DEPENDENCY_ENGINE_ECOSYSTEMS,
   };
 }
 

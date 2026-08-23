@@ -27,4 +27,10 @@ pub trait Check: Send + Sync {
     fn skip_in_predeploy(&self) -> bool {
         false
     }
+    /// Every check id this check can emit. Most checks emit exactly `id()`;
+    /// a check that fans out into sub-ids (e.g. one row per header) overrides
+    /// this so the inventory sees the sub-ids too.
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![self.id().to_string()]
+    }
 }

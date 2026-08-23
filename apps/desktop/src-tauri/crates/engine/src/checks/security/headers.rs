@@ -103,6 +103,20 @@ impl Check for SecurityHeadersCheck {
         ScanCategory::Security
     }
 
+    fn emitted_ids(&self) -> Vec<String> {
+        [
+            "csp",
+            "hsts",
+            "permissions_policy",
+            "referrer_policy",
+            "x_content_type_options",
+            "x_frame_options",
+        ]
+        .iter()
+        .map(|suffix| format!("security.headers.{suffix}"))
+        .collect()
+    }
+
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
         if ctx.is_localhost {
             let preview_note = "Skipped on localhost preview. Security headers are often controlled by the deployed edge or reverse proxy, so verify them on a real deployment target.".to_string();
