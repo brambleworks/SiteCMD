@@ -1616,3 +1616,43 @@ fn string_result_command_scan_sees_both_attribute_forms() {
     );
     assert_eq!(string_result_command_count(&migrated), 0);
 }
+
+/// `run_blocking(` call sites in src/. Lower with every migration commit.
+const RUN_BLOCKING_CALL_BUDGET: usize = 163;
+/// Sync `self.execute(`/`self.execute_mut(`/`self.execute_with_timeout(` calls
+/// in src/db/. Lower as domain methods move to `run`/`run_mut`.
+const SYNC_DB_EXECUTE_BUDGET: usize = 198;
+
+fn count_matches(dir: &Path, pattern: &regex::Regex) -> usize {
+    let mut files = Vec::new();
+    rust_source_files(dir, &mut files);
+    files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+        .map(|file| {
+            let source = std::fs::read_to_string(file).expect("read Rust source file");
+            pattern.find_iter(&production_half(&source)).count()
+        })
+        .sum()
+}
+
+#[test]
+fn blocking_database_call_sites_only_decrease() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let run_blocking = count_matches(
+        &root,
+        &regex::Regex::new(r"\brun_blocking\(").expect("run_blocking pattern"),
+    );
+    assert_eq!(
+        run_blocking, RUN_BLOCKING_CALL_BUDGET,
+        "run_blocking call sites changed; set RUN_BLOCKING_CALL_BUDGET to {run_blocking} only if it went down"
+    );
+    let sync_execute = count_matches(
+        &root.join("db"),
+        &regex::Regex::new(r"self\.execute(?:_mut)?(?:_with_timeout)?\(").expect("execute pattern"),
+    );
+    assert_eq!(
+        sync_execute, SYNC_DB_EXECUTE_BUDGET,
+        "sync Database::execute call sites changed; set SYNC_DB_EXECUTE_BUDGET to {sync_execute} only if it went down"
+    );
+}

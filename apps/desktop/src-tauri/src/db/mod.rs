@@ -170,6 +170,56 @@ impl Database {
         }
     }
 
+    /// Async-aware shared-connection operation. The calling task yields while
+    /// the worker runs `f`, so a slow query never parks a runtime worker.
+    pub(crate) async fn run<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&Connection) -> T + Send + 'static,
+    ) -> Result<T, DbError> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<T>();
+        let op: DbOp = Box::new(move |conn| {
+            let _ = tx.send(f(&*conn));
+        });
+        self.dispatch_async(op, rx).await
+    }
+
+    /// Async-aware mutable operation (transactions). No domain method calls
+    /// this yet (only `run` has a caller so far, in `get_project_path_async`);
+    /// it exists now so `run`/`run_mut` land as one pair and a later migration
+    /// commit only has to call it, not build it. Covered directly by
+    /// `run_mut_delivers_the_worker_s_value` in `db::tests`.
+    #[allow(dead_code)] // first write-path caller lands in a later migration commit
+    pub(crate) async fn run_mut<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> T + Send + 'static,
+    ) -> Result<T, DbError> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<T>();
+        let op: DbOp = Box::new(move |conn| {
+            let _ = tx.send(f(conn));
+        });
+        self.dispatch_async(op, rx).await
+    }
+
+    async fn dispatch_async<T: Send + 'static>(
+        &self,
+        op: DbOp,
+        rx: tokio::sync::oneshot::Receiver<T>,
+    ) -> Result<T, DbError> {
+        #[cfg(test)]
+        self.operation_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.sender
+            .send(op)
+            .map_err(|_| DbError::WorkerUnavailable)?;
+        match tokio::time::timeout(DB_OP_TIMEOUT, rx).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(_)) => Err(DbError::WorkerTerminated),
+            Err(_) => Err(DbError::Timeout {
+                secs: DB_OP_TIMEOUT.as_secs(),
+            }),
+        }
+    }
+
     /// Open or create the database at the given path.
     ///
     /// Runs schema migrations and data fixups on the connection directly,

@@ -14,10 +14,7 @@ pub async fn get_git_status(
     project_id: i64,
     limit: Option<u32>,
 ) -> Result<git::GitStatus, String> {
-    let project_path = {
-        let db = (*db).clone();
-        run_blocking(move || db.get_project_path(project_id)).await?
-    };
+    let project_path = db.get_project_path_async(project_id).await;
     let Some(project_path) = project_path else {
         return Ok(git::GitStatus {
             is_git_repo: false,
@@ -42,10 +39,7 @@ pub async fn get_commits_since(
     since: String,
 ) -> Result<Vec<git::GitCommit>, String> {
     let db = (*db).clone();
-    let project_path = {
-        let db = db.clone();
-        run_blocking(move || db.get_project_path(project_id)).await?
-    };
+    let project_path = db.get_project_path_async(project_id).await;
     let Some(project_path) = project_path else {
         return Ok(Vec::new());
     };
