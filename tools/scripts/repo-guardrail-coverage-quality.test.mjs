@@ -584,10 +584,10 @@ describe.concurrent(
       expectGuardrailFailure(
         documentationSafetyFailures,
         (fixtureRoot) => {
-          const source = readFixtureFile(fixtureRoot, "apps/mcp-server/src/index.ts");
+          const source = readFixtureFile(fixtureRoot, "apps/mcp-server/src/server.ts");
           writeFixtureFile(
             fixtureRoot,
-            "apps/mcp-server/src/index.ts",
+            "apps/mcp-server/src/server.ts",
             source.replace(
               "Return guidance for running a scan manually and then checking results via compare_scans. It only explains the manual scan flow.",
               "Request a new scan in SiteCMD and start or queue desktop scans.",

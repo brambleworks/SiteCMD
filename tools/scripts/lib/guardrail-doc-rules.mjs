@@ -111,9 +111,12 @@ export function documentationSafetyFailures(read, exists, listFiles) {
     );
   }
 
-  const mcpToolNames = Array.from(
-    read("apps/mcp-server/src/index.ts").matchAll(/server\.tool\(\s*\n\s*"([^"]+)"/g),
-    (match) => match[1],
+  const mcpToolSources = [
+    "apps/mcp-server/src/server.ts",
+    "apps/mcp-server/src/correlation_tools.ts",
+  ];
+  const mcpToolNames = mcpToolSources.flatMap((file) =>
+    Array.from(read(file).matchAll(/server\.tool\(\s*\n\s*"([^"]+)"/g), (match) => match[1]),
   );
   const undocumentedMcpTools = mcpToolNames.filter(
     (toolName) => !mcpReadmeSource.includes(`\`${toolName}\``),
@@ -136,7 +139,7 @@ export function documentationSafetyFailures(read, exists, listFiles) {
   }
   if (
     /Request a new scan in SiteCMD|start or queue desktop scans/.test(
-      read("apps/mcp-server/src/index.ts"),
+      read("apps/mcp-server/src/server.ts"),
     )
   ) {
     failures.push(

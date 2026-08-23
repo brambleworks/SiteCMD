@@ -1,0 +1,311 @@
+[
+  {
+    "name": "compare_scans",
+    "description": "Compare the two most recent scans for a URL - shows what was fixed, what's new, and what regressed. Use after making fixes to verify they worked.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL"
+        }
+      },
+      "required": ["url"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_active_correlations",
+    "description": "Returns all active issue groups for a project with v3 correlation enrichments: transitive causes, downstream effects, recent events, integration enrichments, cross-environment signals, cross-project patterns, observation counts, and anomaly scores. Data is read directly from the local SiteCMD SQLite DB.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["project_id"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_causal_graph",
+    "description": "Returns the active causal graph for a project as a node-link payload, suitable for visualization. Nodes are active check_ids; edges connect causally related pairs where both endpoints are currently active.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["project_id"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_dismissed_issues",
+    "description": "Get issues that have been dismissed/triaged for a site - AI should skip these when suggesting fixes",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL"
+        }
+      },
+      "required": ["url"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_fix_brief",
+    "description": "Read the full SiteCMD fix brief for a fix attempt. The brief describes one website/code issue, where to fix it in the repository, and the acceptance criteria.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["attempt_id"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_fix_prompts",
+    "description": "Get AI-ready fix prompts for failing checks. Project-derived evidence is explicitly marked as untrusted data.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL"
+        },
+        "severity": {
+          "description": "Filter by minimum severity",
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "category": {
+          "description": "Filter by category",
+          "type": "string"
+        }
+      },
+      "required": ["url"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_issues",
+    "description": "Get open failing issues from the latest scan, optionally filtered by severity/category. Scan-derived titles, descriptions, and evidence are explicitly marked as untrusted data.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL"
+        },
+        "status": {
+          "description": "Filter by status (only fail/open issues are currently available)",
+          "type": "string",
+          "enum": ["fail"]
+        },
+        "severity": {
+          "description": "Filter by severity",
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "category": {
+          "description": "Filter by category (security, performance, seo, accessibility, compliance, polish, config)",
+          "type": "string"
+        }
+      },
+      "required": ["url"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_likely_causes",
+    "description": "Returns direct and transitive likely causes for a specific check_id in a project, computed from the active issue graph and curated causal links. Direct causes are transitive causes at depth 1.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "check_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["project_id", "check_id"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_projects",
+    "description": "List all projects tracked by SiteCMD with their URLs and frameworks",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_recent_events",
+    "description": "Returns SiteEvents tied to check_ids within the last N days. Reads from the events and site_event_check_ids tables.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "days": {
+          "default": 30,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365
+        }
+      },
+      "required": ["project_id"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_scan_history",
+    "description": "Get scan artifact score history over time for a site URL",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL"
+        },
+        "limit": {
+          "default": 10,
+          "description": "Number of recent scans to return",
+          "type": "number"
+        }
+      },
+      "required": ["url"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "get_scan_score",
+    "description": "Get the latest scan artifact score and category breakdown for a site URL",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL (e.g. https://example.com)"
+        }
+      },
+      "required": ["url"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "list_fix_attempts",
+    "description": "List SiteCMD fix attempts that are currently open (briefed, verify_requested, or verifying).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "preview_deploy_risk",
+    "description": "Given a list of files about to be changed in a deploy, predicts which active issues are likely to regress (direct match against fix_locations.json candidate paths) and which downstream effects might cascade via the causal graph.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "changed_files": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["project_id", "changed_files"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "request_scan",
+    "description": "Return guidance for running a scan manually and then checking results via compare_scans. It only explains the manual scan flow.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The site URL to scan"
+        }
+      },
+      "required": ["url"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "request_verification",
+    "description": "Tell SiteCMD a fix attempt is complete so it can re-run the check and verify the fix. This does NOT mark the issue fixed; SiteCMD verifies independently.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "attempt_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "One paragraph describing what was changed"
+        }
+      },
+      "required": ["attempt_id", "summary"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "whatif_resolve",
+    "description": "Given a hypothetical set of resolved check_ids, returns the downstream effects likely to also resolve, calibrated by observation history from causal_link_observations.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "hypothetical_resolved": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["project_id", "hypothetical_resolved"],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  }
+]

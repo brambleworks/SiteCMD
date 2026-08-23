@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const source = readFileSync(join(import.meta.dirname, "..", "src", "index.ts"), "utf8");
+const source = readFileSync(join(import.meta.dirname, "..", "src", "server.ts"), "utf8");
 
 function handlerRegion(toolName, nextToolName) {
   const start = source.indexOf(`"${toolName}"`);

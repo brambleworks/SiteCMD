@@ -13,7 +13,7 @@ export function scoreArtifactLabelingFailures(read) {
   const codeScanCommandSource = read("apps/desktop/src-tauri/src/commands/scan/code_scan.rs");
   const scanSchedulerSource = read("apps/desktop/src-tauri/src/background/scan_scheduler.rs");
   const executionSource = read("apps/desktop/src-tauri/src/commands/scan/execution.rs");
-  const mcpIndexSource = read("apps/mcp-server/src/index.ts");
+  const mcpIndexSource = read("apps/mcp-server/src/server.ts");
   const mcpReadmeSource = read("apps/mcp-server/README.md");
 
   check(

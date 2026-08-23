@@ -408,10 +408,10 @@ describe.concurrent(
       expectGuardrailFailure(
         repoGuardrailFailures,
         (fixtureRoot) => {
-          const index = readFixtureFile(fixtureRoot, "apps/mcp-server/src/index.ts");
+          const index = readFixtureFile(fixtureRoot, "apps/mcp-server/src/server.ts");
           writeFixtureFile(
             fixtureRoot,
-            "apps/mcp-server/src/index.ts",
+            "apps/mcp-server/src/server.ts",
             index.replace(
               'issues: getWorkspaceIssues(url, { ...opts, status: "fail" }),',
               'issues: getWorkspaceIssues(url, { ...opts, status: "fail" }) as unknown as Issue[],',

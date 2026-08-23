@@ -1090,7 +1090,7 @@ describe.concurrent(
       expectGuardrailFailure(
         scoreArtifactLabelingFailures,
         (fixtureRoot) => {
-          const mcpIndexPath = "apps/mcp-server/src/index.ts";
+          const mcpIndexPath = "apps/mcp-server/src/server.ts";
           const source = readFixtureFile(fixtureRoot, mcpIndexPath);
           writeFixtureFile(
             fixtureRoot,
