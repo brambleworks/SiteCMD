@@ -628,3 +628,71 @@ fn manual_config_snippets_are_the_exact_editor_fragments() {
     assert!(claude.ends_with("-- /usr/bin/node --disable-warning=ExperimentalWarning /home/tester/.local/share/com.sitecmd.app/sitecmd-mcp/sitecmd-mcp.mjs"));
     assert_eq!(manual_config_cli_command(AgentTool::Cursor, &spec), None);
 }
+
+// Minimal POSIX word splitter covering the unquoted, single-quoted, and
+// backslash-escaped forms the registration command is allowed to emit.
+fn split_shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut started = false;
+    let mut chars = command.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' => {
+                in_quotes = !in_quotes;
+                started = true;
+            }
+            '\\' if !in_quotes => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                    started = true;
+                }
+            }
+            ' ' if !in_quotes => {
+                if started {
+                    words.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            _ => {
+                current.push(ch);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(current);
+    }
+    words
+}
+
+#[test]
+fn claude_cli_command_survives_paths_with_spaces_and_quotes() {
+    let bundle = "/Users/tester/Library/Application Support/com.o'neill.sitecmd";
+    let spec = build_server_spec(
+        Path::new("/usr/bin/node"),
+        Path::new(&format!("{bundle}/sitecmd-mcp/sitecmd-mcp.mjs")),
+        Path::new(&format!("{bundle}/sitecmd.db")),
+    );
+    let command = manual_config_cli_command(AgentTool::ClaudeCode, &spec).expect("claude cli");
+
+    assert_eq!(
+        split_shell_words(&command),
+        vec![
+            "claude".to_string(),
+            "mcp".into(),
+            "add".into(),
+            "--scope".into(),
+            "user".into(),
+            "sitecmd".into(),
+            "--env".into(),
+            format!("SITECMD_DB_PATH={bundle}/sitecmd.db"),
+            "--".into(),
+            "/usr/bin/node".into(),
+            "--disable-warning=ExperimentalWarning".into(),
+            format!("{bundle}/sitecmd-mcp/sitecmd-mcp.mjs"),
+        ],
+        "the pasted command must split back into the exact argv"
+    );
+}

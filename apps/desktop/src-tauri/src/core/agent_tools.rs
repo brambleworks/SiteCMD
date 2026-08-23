@@ -310,6 +310,19 @@ pub fn manual_config_snippet(tool: AgentTool, spec: &McpServerSpec) -> Result<St
     }
 }
 
+/// Quotes a token for a POSIX shell so a pasted command survives paths that
+/// contain spaces or single quotes.
+fn shell_quote(token: &str) -> String {
+    let readable = !token.is_empty()
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "_./:=@%+-".contains(ch));
+    if readable {
+        return token.to_string();
+    }
+    format!("'{}'", token.replace('\'', r"'\''"))
+}
+
 pub fn manual_config_cli_command(tool: AgentTool, spec: &McpServerSpec) -> Option<String> {
     if tool != AgentTool::ClaudeCode {
         return None;
@@ -329,7 +342,13 @@ pub fn manual_config_cli_command(tool: AgentTool, spec: &McpServerSpec) -> Optio
     parts.push("--".into());
     parts.push(spec.command.clone());
     parts.extend(spec.args.iter().cloned());
-    Some(parts.join(" "))
+    Some(
+        parts
+            .iter()
+            .map(|part| shell_quote(part))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 #[cfg(feature = "desktop")]
