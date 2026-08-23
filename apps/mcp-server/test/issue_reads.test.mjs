@@ -144,6 +144,33 @@ test("get_issues min_severity and min_confidence are thresholds", async () => {
   assert.match(byConfidence, /c\.low/);
 });
 
+test("get_issues rejects the removed severity and status inputs by name", async () => {
+  seedProject(812);
+  addWorkItem({
+    projectId: 812,
+    envUrl: URL,
+    checkId: "a.critical",
+    severity: "critical",
+    title: "Critical",
+  });
+  addWorkItem({
+    projectId: 812,
+    envUrl: URL,
+    checkId: "c.low",
+    severity: "low",
+    title: "Low",
+  });
+
+  const bySeverity = await call("get_issues", { url: URL, severity: "high" });
+  assert.match(bySeverity, /min_severity/);
+  assert.doesNotMatch(bySeverity, /a\.critical/);
+  assert.doesNotMatch(bySeverity, /c\.low/);
+
+  const byStatus = await call("get_issues", { url: URL, status: "fail" });
+  assert.match(byStatus, /status/);
+  assert.doesNotMatch(byStatus, /c\.low/);
+});
+
 test("get_issue returns one finding with guidance, occurrences, and the active attempt", async () => {
   seedProject(803);
   addWorkItem({

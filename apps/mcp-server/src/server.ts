@@ -459,11 +459,32 @@ function registerCoreTools(server: McpServer): void {
           .max(100)
           .default(25)
           .describe("Issues to return, most severe first"),
+        severity: z
+          .string()
+          .optional()
+          .describe("Removed: pass min_severity instead. Sending this is an error."),
+        status: z
+          .string()
+          .optional()
+          .describe(
+            "Removed: this tool returns open failing issues only. Sending this is an error.",
+          ),
       },
       annotations: READ_ONLY,
     },
-    async ({ url, min_severity, category, min_confidence, limit }) =>
+    async ({ url, min_severity, category, min_confidence, limit, severity, status }) =>
       runTool(() => {
+        // Silently dropping these would hand back every severity and every lifecycle state.
+        if (severity !== undefined) {
+          throw new Error(
+            "get_issues no longer takes severity; pass min_severity (critical, high, medium, or low), which is a threshold, not an exact match.",
+          );
+        }
+        if (status !== undefined) {
+          throw new Error(
+            "get_issues no longer takes status; it returns open failing issues only. Call get_dismissed_issues for ignored, blocked, snoozed, and verified ones.",
+          );
+        }
         const { issues: matching, projectId } = getIssuesWithWorkspaceFallback(url, {
           min_severity,
           category,

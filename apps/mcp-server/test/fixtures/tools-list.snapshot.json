@@ -284,6 +284,14 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        },
+        "severity": {
+          "description": "Removed: pass min_severity instead. Sending this is an error.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Removed: this tool returns open failing issues only. Sending this is an error.",
+          "type": "string"
         }
       },
       "required": [
