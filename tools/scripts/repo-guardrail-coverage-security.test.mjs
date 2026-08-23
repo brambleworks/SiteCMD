@@ -500,6 +500,25 @@ describe.concurrent(
       );
     });
 
+    it("fails when one MCP literal hides an agent_requests update behind its insert", () => {
+      expectGuardrailFailure(
+        mcpSchemaParityFailures,
+        (fixtureRoot) => {
+          const requestsPath = "apps/mcp-server/src/db_agent_requests.ts";
+          const source = readFixtureFile(fixtureRoot, requestsPath);
+          writeFixtureFile(
+            fixtureRoot,
+            requestsPath,
+            source.replace(
+              "VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?)`",
+              "VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?);\n       UPDATE agent_requests SET status = 'fulfilled'`",
+            ),
+          );
+        },
+        'apps/mcp-server/src/db_agent_requests.ts mutates "agent_requests"',
+      );
+    });
+
     it("fails when an MCP read module imports the write-capable connection", () => {
       expectGuardrailFailure(
         mcpSchemaParityFailures,

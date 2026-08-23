@@ -237,7 +237,7 @@ export function mcpSchemaParityFailures(read, listFiles) {
           (sourcePath === MCP_FIX_ATTEMPTS_FILE && table === "fix_attempts") ||
           (sourcePath === MCP_AGENT_REQUESTS_FILE &&
             table === "agent_requests" &&
-            /INSERT INTO agent_requests/.test(sql));
+            mutation[0].startsWith("INSERT INTO"));
         if (!allowed) {
           failures.push(
             `${sourcePath} mutates "${table}"; the MCP write boundary permits guarded updates to existing fix_attempts rows and inserts into agent_requests only.`,
