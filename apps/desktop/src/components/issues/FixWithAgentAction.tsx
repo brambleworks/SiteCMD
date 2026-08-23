@@ -17,6 +17,7 @@ import {
   createFixAttempt,
   detectAgentTools,
   getFixAttemptForIssue,
+  hasPromptDeepLink,
   isRemoteWebAttempt,
   launchAgentHandoff,
   type AgentTool,
@@ -249,6 +250,11 @@ export function FixWithAgentAction({
     setRememberedTool(tool);
     onAttemptCreated?.(attempt);
 
+    if (!hasPromptDeepLink(tool)) {
+      // No deep link exists to open, so the copied prompt is the finished handoff, not a failure.
+      patchFixHandoff(handoffStoreKey, { phase: "manual" });
+      return;
+    }
     patchFixHandoff(handoffStoreKey, { phase: "launching" });
     if (tool === "cursor" && projectPath) {
       try {

@@ -85,6 +85,14 @@ export const AGENT_TOOL_LABELS: Record<AgentTool, string> = {
   windsurf: "Windsurf",
 };
 
+// Must match handoff_deep_link in src-tauri/src/core/agent_tools.rs.
+const AGENT_TOOLS_WITHOUT_PROMPT_DEEP_LINK: readonly AgentTool[] = ["windsurf"];
+
+/** False when the editor publishes no prompt deep link, so the clipboard copy is the whole handoff. */
+export function hasPromptDeepLink(tool: AgentTool): boolean {
+  return !AGENT_TOOLS_WITHOUT_PROMPT_DEEP_LINK.includes(tool);
+}
+
 export function isAttemptActive(status: FixAttemptStatus): boolean {
   return ACTIVE_ATTEMPT_STATUSES.includes(status);
 }
