@@ -20,12 +20,12 @@ export function rustlsCryptoProviderFailures(read, listFiles) {
 
   const probe = read("apps/desktop/src-tauri/src/ssl_probe.rs");
   if (
-    !probe.includes("fn webpki_roots_client_config") ||
+    !probe.includes("fn platform_verified_client_config") ||
     !probe.includes("builder_with_provider") ||
     !probe.includes("crypto::ring::default_provider")
   ) {
     failures.push(
-      "ssl_probe.rs must expose webpki_roots_client_config() that binds the ring provider via builder_with_provider so headless scans never depend on a process-default crypto provider",
+      "ssl_probe.rs must expose platform_verified_client_config() that binds the ring provider via builder_with_provider so headless scans never depend on a process-default crypto provider",
     );
   }
 
