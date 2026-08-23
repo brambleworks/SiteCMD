@@ -395,10 +395,14 @@
     padding: var(--space-base);
     border: 1px solid rgba(255, 255, 255, 0.06);
   }
+  /* box-shadow: none here is not !important (fix-round-2 review): .btn--default
+     and .btn--sm never declare a resting box-shadow, so nothing needed
+     overriding by importance, and an !important base value beat
+     .btn:focus-visible's ring in every state, including :focus-visible. */
   .scan-run-button {
     gap: 0.375rem;
     border: 1px solid transparent;
-    box-shadow: none !important;
+    box-shadow: none;
     filter: none !important;
     transform: none !important;
     transition-property: background-color, color, border-color !important;
@@ -412,11 +416,16 @@
     filter: none !important;
     transform: none !important;
   }
-  /* No box-shadow: none here, unlike :hover/:active above, so .btn:focus-visible's
-     --ring outline (buttons.css) survives as the keyboard focus indicator. */
+  /* Explicit ring, not inherited from .btn:focus-visible: --ring token so it
+     stays in sync with buttons.css, declared directly so the ring renders
+     even if this button ever loses the .btn class or the cascade order
+     between cards.css and buttons.css changes. */
   .scan-run-button:focus-visible {
     background-color: var(--brand-button-hover) !important;
     border-color: transparent !important;
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
     filter: none !important;
     transform: none !important;
   }

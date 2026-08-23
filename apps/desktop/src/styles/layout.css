@@ -307,11 +307,16 @@
     color: var(--brand-button-foreground);
     box-shadow: none;
   }
-  /* No box-shadow: none here, unlike :hover/:active above, so a keyboard
-     focus indicator is never suppressed on this state. */
+  /* Explicit ring (fix-round-2 review): .btn-action never carries the .btn
+     class, so there is no .btn:focus-visible ring to fall through to on
+     this selector; not suppressing box-shadow here was not enough by
+     itself, since there was nothing to leave unsuppressed. */
   .btn-action.bg-primary:focus-visible {
     background-color: var(--brand-button-hover);
     color: var(--brand-button-foreground);
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
   }
   /* Inline skeleton loader (pulse animation) */
   .skeleton-inline {
