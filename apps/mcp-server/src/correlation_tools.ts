@@ -10,6 +10,7 @@ import {
 } from "./db.js";
 import { CAUSAL_LINKS } from "./causal_graph.js";
 import { READ_ONLY, runTool, text } from "./tool_result.js";
+import { untrustedJson, untrustedScanData, UNTRUSTED_DATA_INSTRUCTION } from "./untrusted.js";
 
 /** Every correlation tool accepts a project_id or a url; the caller resolves it via resolveProject. */
 type ResolveProjectId = (args: { project_id?: number; url?: string }) => number;
@@ -37,7 +38,11 @@ export function registerCorrelationTools(
       runTool(() => {
         const projectId = resolveProject({ project_id, url });
         const groups = getActiveIssueGroupsEnriched(projectId, CAUSAL_LINKS);
-        return text(JSON.stringify(groups, null, 2));
+        return text(
+          [UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(untrustedJson(groups, 60000))].join(
+            "\n\n",
+          ),
+        );
       }),
   );
 
@@ -59,7 +64,11 @@ export function registerCorrelationTools(
       runTool(() => {
         const projectId = resolveProject({ project_id, url });
         const events = getRecentEvents(projectId, days);
-        return text(JSON.stringify(events, null, 2));
+        return text(
+          [UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(untrustedJson(events, 60000))].join(
+            "\n\n",
+          ),
+        );
       }),
   );
 
@@ -85,10 +94,16 @@ export function registerCorrelationTools(
         const target = groups.find((g) => g.checkId === check_id);
         const allCauses = target?.transitiveCauses ?? [];
         const payload = {
+          checkId: check_id,
+          title: target?.title ?? null,
           direct: allCauses.filter((c) => c.depth === 1),
           transitive: allCauses,
         };
-        return text(JSON.stringify(payload, null, 2));
+        return text(
+          [UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(untrustedJson(payload, 60000))].join(
+            "\n\n",
+          ),
+        );
       }),
   );
 
@@ -110,7 +125,11 @@ export function registerCorrelationTools(
       runTool(() => {
         const projectId = resolveProject({ project_id, url });
         const payload = getCausalMapPayload(projectId, CAUSAL_LINKS);
-        return text(JSON.stringify(payload, null, 2));
+        return text(
+          [UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(untrustedJson(payload, 60000))].join(
+            "\n\n",
+          ),
+        );
       }),
   );
 
@@ -133,7 +152,11 @@ export function registerCorrelationTools(
       runTool(() => {
         const projectId = resolveProject({ project_id, url });
         const preview = previewDeployRisk(projectId, changed_files, CAUSAL_LINKS);
-        return text(JSON.stringify(preview, null, 2));
+        return text(
+          [UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(untrustedJson(preview, 60000))].join(
+            "\n\n",
+          ),
+        );
       }),
   );
 
@@ -155,7 +178,20 @@ export function registerCorrelationTools(
       runTool(() => {
         const projectId = resolveProject({ project_id, url });
         const result = whatifResolve(projectId, hypothetical_resolved, CAUSAL_LINKS);
-        return text(JSON.stringify(result, null, 2));
+        const groups = getActiveIssueGroupsEnriched(projectId, CAUSAL_LINKS);
+        const titleByCheckId = new Map(groups.map((g) => [g.checkId, g.title]));
+        const payload = {
+          hypotheticalResolved: hypothetical_resolved.map((checkId) => ({
+            checkId,
+            title: titleByCheckId.get(checkId) ?? null,
+          })),
+          ...result,
+        };
+        return text(
+          [UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(untrustedJson(payload, 60000))].join(
+            "\n\n",
+          ),
+        );
       }),
   );
 }
