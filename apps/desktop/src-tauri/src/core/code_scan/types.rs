@@ -407,6 +407,7 @@ pub enum CodeScanReportFormat {
     Markdown,
     Review,
     Github,
+    Sarif,
 }
 
 #[cfg(test)]

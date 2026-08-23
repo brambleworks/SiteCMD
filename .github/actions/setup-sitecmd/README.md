@@ -15,7 +15,10 @@ steps:
   - uses: brambleworks/SiteCMD/.github/actions/setup-sitecmd@<full-release-commit-sha>
     with:
       version: <version>
-  - run: sitecmd audit . --fail-on high
+  - run: sitecmd audit . --fail-on high --format sarif --output sitecmd.sarif
+  - uses: github/codeql-action/upload-sarif@<full-commit-sha>
+    with:
+      sarif_file: sitecmd.sarif
 ```
 
 The release pipeline publishes the archive and its `.sig` sidecar together.
