@@ -6,6 +6,8 @@ const MCP_REQUIRED_QUERY_FILES = [
 ];
 const MCP_CONNECTION_FILE = "apps/mcp-server/src/db_connection.ts";
 const MCP_FIX_ATTEMPTS_FILE = "apps/mcp-server/src/db_fix_attempts.ts";
+const MCP_AGENT_REQUESTS_FILE = "apps/mcp-server/src/db_agent_requests.ts";
+const MCP_SCHEMA_VERSION_FILE = "apps/mcp-server/src/schema_version.ts";
 
 // Tokens that legally appear bare inside MCP SQL without naming a column.
 const SQL_KEYWORDS = new Set(
@@ -193,6 +195,7 @@ export function mcpSchemaParityFailures(read, listFiles) {
   }
   const dbModulePrefix = "apps/mcp-server/src/db";
   const sourcePaths = listFiles("apps/mcp-server/src", (sourcePath) => {
+    if (sourcePath === MCP_SCHEMA_VERSION_FILE) return true;
     if (!sourcePath.startsWith(dbModulePrefix) || !sourcePath.endsWith(".ts")) return false;
     const moduleSuffix = sourcePath.slice(dbModulePrefix.length, -3);
     return (
@@ -217,10 +220,11 @@ export function mcpSchemaParityFailures(read, listFiles) {
     if (
       sourcePath !== MCP_CONNECTION_FILE &&
       sourcePath !== MCP_FIX_ATTEMPTS_FILE &&
+      sourcePath !== MCP_AGENT_REQUESTS_FILE &&
       /\bgetDbWrite\b/.test(source)
     ) {
       failures.push(
-        `${sourcePath} imports or exposes the write-capable MCP connection; only ${MCP_FIX_ATTEMPTS_FILE} may use it.`,
+        `${sourcePath} imports or exposes the write-capable MCP connection; only ${MCP_FIX_ATTEMPTS_FILE} and ${MCP_AGENT_REQUESTS_FILE} may use it.`,
       );
     }
 
@@ -229,9 +233,14 @@ export function mcpSchemaParityFailures(read, listFiles) {
     for (const sql of literals) {
       for (const mutation of sql.matchAll(/\b(?:INSERT INTO|UPDATE|DELETE FROM)\s+(\w+)/g)) {
         const table = mutation[1];
-        if (sourcePath !== MCP_FIX_ATTEMPTS_FILE || table !== "fix_attempts") {
+        const allowed =
+          (sourcePath === MCP_FIX_ATTEMPTS_FILE && table === "fix_attempts") ||
+          (sourcePath === MCP_AGENT_REQUESTS_FILE &&
+            table === "agent_requests" &&
+            /INSERT INTO agent_requests/.test(sql));
+        if (!allowed) {
           failures.push(
-            `${sourcePath} mutates "${table}"; the MCP write boundary permits guarded updates to existing fix_attempts rows only.`,
+            `${sourcePath} mutates "${table}"; the MCP write boundary permits guarded updates to existing fix_attempts rows and inserts into agent_requests only.`,
           );
         }
       }

@@ -75,7 +75,7 @@ fn attempt_dto(row: FixAttemptRow, title: &str) -> FixAttemptDto {
 /// Core create flow, separated from the Tauri `State` wrapper so tests can
 /// exercise it against a `temp_db` (the brief-parity tests live in
 /// `fix_attempt_guidance`, hence `pub(super)`).
-pub(super) fn create_fix_attempt_inner(
+pub(crate) fn create_fix_attempt_inner(
     db: &Database,
     args: CreateFixAttemptArgs,
     now: i64,

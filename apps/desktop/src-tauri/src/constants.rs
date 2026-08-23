@@ -227,6 +227,18 @@ pub const SCAN_IDEMPOTENCY_RETRY_WINDOW_SECS: i64 = 15 * 60;
 /// attempts and settles agent verification requests.
 pub const FIX_ATTEMPT_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Polling cadence for the agent-request watcher that fulfils MCP start_fix
+/// and run_scan rows and refreshes the desktop heartbeat file.
+pub const AGENT_REQUEST_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Queued agent requests nobody fulfilled within a day are expired, matching
+/// the fix-attempt expiry window.
+pub const AGENT_REQUEST_EXPIRY_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// A heartbeat older than this means the desktop app is not running. The MCP
+/// server pins the same value in apps/mcp-server/src/heartbeat.ts.
+pub const DESKTOP_HEARTBEAT_STALE_MS: i64 = 30 * 1000;
+
 /// Hard cap on a `claude` CLI invocation (MCP registration). The CLI can hang
 /// on first-run prompts when stdin is closed, so registration must not block
 /// the app indefinitely.

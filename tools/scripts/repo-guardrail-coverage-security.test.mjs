@@ -515,7 +515,7 @@ describe.concurrent(
             ),
           );
         },
-        "only apps/mcp-server/src/db_fix_attempts.ts may use it",
+        "imports or exposes the write-capable MCP connection",
       );
     });
 

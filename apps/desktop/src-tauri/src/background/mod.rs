@@ -1,5 +1,6 @@
 //! Long-running application loops composed above `core` and `commands`.
 
+pub mod agent_request_watcher;
 pub mod catalog_refresh;
 pub mod connected_scope_sync;
 pub mod fix_attempt_watcher;

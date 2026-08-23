@@ -12,6 +12,7 @@ pub mod code_scan;
 pub mod confidence_policy;
 pub mod correlation;
 pub mod database_targets;
+pub mod desktop_heartbeat;
 pub mod detector;
 pub mod engine_release;
 pub mod event_correlations;
