@@ -398,6 +398,15 @@ already live and correct; only the attestation is missing. Re-running
 is still within its 24-hour retention window; once that artifact has expired,
 `sign-updaters` must run again to produce a new one.
 
+A failed or asset-less Release recovers the same way, and is more urgent. The
+updater manifest advances before the Release is created, so from that step on
+the new version is already offered to every client while the Release they are
+pointed at may not exist or may carry no checksums. Re-run `publish-release`
+within the same 24-hour window: it creates the Release when there is none, and
+attaches a missing `SHA256SUMS` or `SHA256SUMS.minisig` to one that already
+exists. A Release left in draft fails the step instead of passing silently,
+because clients cannot read it; publish or delete it, then re-run.
+
 Download and active-install analytics are operated with the release service and
 documented privately beside that service. This repository's release procedure
 ends at signed artifact publication and the public smoke pass; it carries no

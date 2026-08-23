@@ -239,6 +239,30 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
   });
 
+  it("catches a publisher that leaves an existing Release unrepaired", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            '              gh release upload "$TAG_NAME" "payload/$asset" \\\n                --repo "$GITHUB_REPOSITORY" --clobber\n',
+            "",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("must repair an existing Release");
+  });
+
+  it("catches a publisher that stopped failing on a draft Release", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            `if [ "$(jq -r '.isDraft' release-state.json)" = "true" ]; then`,
+            "if false; then",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("must repair an existing Release");
+  });
+
   it("catches a README that dropped the manifest-signature check the notes promise", () => {
     const failures = run((file, source) =>
       file === "README.md"

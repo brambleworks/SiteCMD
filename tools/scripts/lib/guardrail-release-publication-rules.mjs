@@ -60,6 +60,19 @@ export function releasePublicationSafetyFailures(read) {
     "release.yml must sign one release-wide SHA256SUMS with the production updater key, verify its .minisig without secrets and every artifact (including the DMG) against it, cross-check every uploaded checksum against the upload plan, upload both beside the artifacts, and create the GitHub Release (verified tag, changelog notes, checksum assets) only after the updater manifest advanced.",
   );
 
+  // The updater manifest advances before the Release is created, so a Release
+  // that is missing, draft, or asset-less leaves clients offered a version they
+  // cannot verify; re-running the publisher has to repair it.
+  check(
+    publisherJob.includes(`if [ "$(jq -r '.isDraft' release-state.json)" = "true" ]; then`) &&
+      publisherJob.includes(
+        `jq -e --arg name "$asset" '.assets | any(.name == $name)' release-state.json`,
+      ) &&
+      publisherJob.includes('gh release upload "$TAG_NAME" "payload/$asset"') &&
+      publisherJob.includes("--clobber"),
+    "release.yml publish-release must repair an existing Release instead of exiting clean: fail the step on a draft, and attach any missing SHA256SUMS or SHA256SUMS.minisig with gh release upload --clobber.",
+  );
+
   // The Release notes send readers to one README section for the checksum
   // manifest; that section has to carry the steps the notes promise.
   const readmeAnchor = "README.md#verify-your-download";

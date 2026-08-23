@@ -1081,8 +1081,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "GitHub Release $TAG_NAME already exists; leaving it unchanged."
+          # The updater manifest already advanced, so clients are offered this
+          # version before the Release exists. An existing Release is repaired
+          # rather than left as it is.
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" \
+               --json isDraft,assets > release-state.json 2>/dev/null; then
+            if [ "$(jq -r '.isDraft' release-state.json)" = "true" ]; then
+              echo "::error::Release $TAG_NAME is a draft while clients are already offered $VERSION. Publish or delete it, then re-run publish-release."
+              exit 1
+            fi
+            for asset in SHA256SUMS SHA256SUMS.minisig; do
+              if jq -e --arg name "$asset" '.assets | any(.name == $name)' release-state.json >/dev/null; then
+                continue
+              fi
+              echo "Release $TAG_NAME is missing $asset; attaching it."
+              gh release upload "$TAG_NAME" "payload/$asset" \
+                --repo "$GITHUB_REPOSITORY" --clobber
+            done
+            echo "GitHub Release $TAG_NAME exists with both checksum assets attached."
             exit 0
           fi
           gh release create "$TAG_NAME" \
