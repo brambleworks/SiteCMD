@@ -108,6 +108,20 @@ function diffThresholds(oldMap, newMap) {
   return violations;
 }
 
+function commitEditMessagePath() {
+  // `.git` is a file (a gitlink), not a directory, in a linked worktree, so a
+  // hardcoded `.git/COMMIT_EDITMSG` join silently misses the real file there
+  // and this falls back to the previous commit's message instead of the
+  // pending one. Ask git, which resolves the per-worktree path correctly.
+  try {
+    return execFileSync("git", ["rev-parse", "--git-path", "COMMIT_EDITMSG"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return path.join(".git", "COMMIT_EDITMSG");
+  }
+}
+
 function commitMessage(rangeTip) {
   // Accept a bypass marker from any commit in the checked range.
   if (rangeTip) {
@@ -119,7 +133,7 @@ function commitMessage(rangeTip) {
       return "";
     }
   }
-  const messageFile = path.join(".git", "COMMIT_EDITMSG");
+  const messageFile = commitEditMessagePath();
   if (fs.existsSync(messageFile)) {
     try {
       return fs.readFileSync(messageFile, "utf8");

@@ -282,6 +282,40 @@ export function rustLineBudgetFailures() {}
     expect(authorized.stderr).toMatch(/authorized via \[budget-raised:\]/);
   });
 
+  it("finds the pending commit message inside a linked worktree", () => {
+    // `.git` is a gitlink file, not a directory, inside a linked worktree, so
+    // a hardcoded `.git/COMMIT_EDITMSG` join misses the real file and this
+    // must fall back to the PREVIOUS commit's message instead of the pending
+    // one, refusing a raise even when the pending message carries the token.
+    const rustPath = "apps/desktop/src-tauri/src/lib_tests.rs";
+    const rustFile = `const STRING_RESULT_COMMAND_BUDGET: usize = 100;\n`;
+    write(repo, rustPath, rustFile);
+    commit(repo, "initial rust ratchet");
+
+    const worktreeParent = fs.mkdtempSync(path.join(os.tmpdir(), "budget-ratchet-worktree-"));
+    const worktreeDir = path.join(worktreeParent, "wt");
+    git(repo, "worktree", "add", "--quiet", worktreeDir, "-b", "wt-branch");
+
+    try {
+      write(worktreeDir, rustPath, rustFile.replace("usize = 100", "usize = 150"));
+      stageOnly(worktreeDir, rustPath);
+
+      // Set the pending message the same way git itself locates it, via the
+      // real per-worktree path rather than a `<cwd>/.git/...` guess.
+      const messageFile = git(worktreeDir, "rev-parse", "--git-path", "COMMIT_EDITMSG").trim();
+      fs.writeFileSync(
+        messageFile,
+        "Widen the migration ratchet\n\n[budget-raised: measured count moved during a rebase (#11)]\n",
+      );
+      const authorized = runScript(worktreeDir);
+      expect(authorized.status).toBe(0);
+      expect(authorized.stderr).toMatch(/authorized via \[budget-raised:\]/);
+    } finally {
+      git(repo, "worktree", "remove", "--force", worktreeDir);
+      fs.rmSync(worktreeParent, { recursive: true, force: true });
+    }
+  });
+
   it("supports a --range mode for CI hard-gate checks", () => {
     const tipPath = "tools/scripts/lib/guardrail-script-budgets.mjs";
     write(
