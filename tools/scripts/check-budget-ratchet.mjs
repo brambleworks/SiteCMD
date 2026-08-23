@@ -113,7 +113,17 @@ function commitMessage(rangeTip) {
       return "";
     }
   }
-  const messageFile = path.join(".git", "COMMIT_EDITMSG");
+  // `git rev-parse --git-path` resolves the real location even from a
+  // worktree checkout, where ".git" is a file (a pointer to the shared
+  // gitdir) rather than a directory, so the naive join below would miss it.
+  let messageFile;
+  try {
+    messageFile = execFileSync("git", ["rev-parse", "--git-path", "COMMIT_EDITMSG"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    messageFile = path.join(".git", "COMMIT_EDITMSG");
+  }
   if (fs.existsSync(messageFile)) {
     try {
       return fs.readFileSync(messageFile, "utf8");
