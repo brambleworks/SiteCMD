@@ -172,6 +172,10 @@ impl Database {
 
     /// Async-aware shared-connection operation. The calling task yields while
     /// the worker runs `f`, so a slow query never parks a runtime worker.
+    ///
+    /// The closure is sent to the worker before this future first awaits,
+    /// so it runs exactly once even if the caller's future is dropped; only
+    /// the reply is lost on cancellation.
     pub(crate) async fn run<T: Send + 'static>(
         &self,
         f: impl FnOnce(&Connection) -> T + Send + 'static,
@@ -188,6 +192,10 @@ impl Database {
     /// it exists now so `run`/`run_mut` land as one pair and a later migration
     /// commit only has to call it, not build it. Covered directly by
     /// `run_mut_delivers_the_worker_s_value` in `db::tests`.
+    ///
+    /// The closure is sent to the worker before this future first awaits,
+    /// so it runs exactly once even if the caller's future is dropped; only
+    /// the reply is lost on cancellation.
     #[allow(dead_code)] // first write-path caller lands in a later migration commit
     pub(crate) async fn run_mut<T: Send + 'static>(
         &self,
