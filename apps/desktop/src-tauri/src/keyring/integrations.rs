@@ -138,7 +138,7 @@ pub fn refuse_unmigrated_plaintext_secrets_with(
     refused
 }
 
-/// `refuse_unmigrated_plaintext_secrets` over a loaded config list.
+/// `refuse_unmigrated_plaintext_secrets_with` over a loaded config list.
 pub fn without_unmigrated_plaintext_secrets(
     configs: Vec<IntegrationConfig>,
 ) -> Vec<IntegrationConfig> {
