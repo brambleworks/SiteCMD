@@ -623,12 +623,6 @@
     margin-top: var(--space-tight);
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .page-guide-backdrop,
-    .page-guide-panel {
-      transition: none;
-    }
-  }
   .dossier-actions .issue-action-extra > * {
     width: 100%;
   }
