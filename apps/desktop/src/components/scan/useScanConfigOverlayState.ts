@@ -12,6 +12,7 @@ import {
 } from "@/lib/commands";
 import { errorMessage } from "@/lib/error-message";
 import { getProjectCapabilities } from "@/lib/project-capabilities";
+import { userFacingError } from "@/lib/user-facing-error";
 import { queryKeys } from "@/lib/query/query-keys";
 
 import {
@@ -197,7 +198,7 @@ export function useScanConfigOverlayState({
         }
         setScopeError(null);
       } catch (error) {
-        setScopeError(error instanceof Error ? error.message : String(error));
+        setScopeError(userFacingError(error, "Your change was not saved. Try again."));
         return;
       }
     }

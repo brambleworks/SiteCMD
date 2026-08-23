@@ -8,6 +8,7 @@ import type { CodeIssue, CodeScanResult, CodeScanSummary } from "@/lib/types";
 import { normalizeCodeScanResult } from "@/lib/code-scan-result-normalize";
 import { buildPendingVerificationId, resolvePendingVerification } from "@/lib/pending-verification";
 import { useToast } from "@/hooks/useToast";
+import { userFacingError } from "@/lib/user-facing-error";
 import { useResetOnChange } from "@/hooks/useResetOnChange";
 import { normalizeAppUrlForKey, type AppTarget } from "@/lib/app-targets";
 import type { NavTarget } from "@/components/layout/nav-page";
@@ -279,7 +280,10 @@ export function CodeScanResults({
           toast.success("Code issue cleared", diffSummary);
         }
       } catch (error) {
-        toast.error("Verification failed", String(error));
+        toast.error(
+          "Verification failed",
+          userFacingError(error, "Run the verification again after the site has deployed."),
+        );
       } finally {
         setVerifyingIssueId((current) => (current === issue.id ? null : current));
       }

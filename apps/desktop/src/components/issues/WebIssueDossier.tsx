@@ -24,6 +24,7 @@ import {
   useIssueDossierActions,
 } from "@/components/issues/useIssueDossierActions";
 import { WebIssueRichSections } from "./WebIssueDossierBody";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export function WebIssueDossier({
   issue,
@@ -146,7 +147,10 @@ export function WebIssueDossier({
         );
       }
     } catch (err) {
-      toast.error("Could not verify", String(err));
+      toast.error(
+        "Could not verify",
+        userFacingError(err, "Run the verification again after the site has deployed."),
+      );
     } finally {
       setVerifying(false);
     }

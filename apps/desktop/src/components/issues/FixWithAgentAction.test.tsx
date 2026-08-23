@@ -193,10 +193,10 @@ describe("FixWithAgentAction setup modal", () => {
     await screen.findByRole("radio", { name: "Claude Code" });
     fireEvent.click(screen.getByRole("button", { name: /Start fix/ }));
 
-    expect(await screen.findByText(/brief generation failed/)).toBeInTheDocument();
+    expect(await screen.findByText("Brief generation failed.")).toBeInTheDocument();
     expect(toastErrorMock).toHaveBeenCalledWith(
       "Could not start the fix",
-      expect.stringContaining("brief generation failed"),
+      "Brief generation failed.",
     );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(launchCalls()).toHaveLength(0);

@@ -12,6 +12,9 @@ import { getClearedUpdates } from "./update-history";
 import { useUpdateFollowUps } from "./useUpdateFollowUps";
 import { useUpdateTimelineRecorder } from "./useUpdateTimelineRecorder";
 import { findPackageUpdateByItemId } from "./updates-page-model";
+import { userFacingError } from "@/lib/user-facing-error";
+
+const VERIFICATION_FALLBACK = "Run the verification again after the site has deployed.";
 
 interface UpdatesToast {
   success: (title: string, message?: string) => void;
@@ -183,10 +186,10 @@ export function useUpdatesVerificationActions({
       } catch (e) {
         failJob(`updates-verify:${projectId}:${key}`, {
           label: "Update verification failed",
-          detail: `${update.name} \u2022 ${String(e)}`,
+          detail: `${update.name} \u2022 ${userFacingError(e, VERIFICATION_FALLBACK)}`,
           target,
         });
-        toast.error("Verification failed", String(e));
+        toast.error("Verification failed", userFacingError(e, VERIFICATION_FALLBACK));
       } finally {
         setVerifyingUpdateKey((current) => (current === key ? null : current));
       }
@@ -291,10 +294,10 @@ export function useUpdatesVerificationActions({
       } catch (error) {
         failJob(`updates-pending:${projectId}:${entry.itemId}`, {
           label: "Update verification failed",
-          detail: `${entry.label} \u2022 ${String(error)}`,
+          detail: `${entry.label} \u2022 ${userFacingError(error, VERIFICATION_FALLBACK)}`,
           target: buildUpdateTarget(entry.itemId),
         });
-        toast.error("Verification failed", String(error));
+        toast.error("Verification failed", userFacingError(error, VERIFICATION_FALLBACK));
       } finally {
         setVerifyingPendingId((current) => (current === entry.id ? null : current));
       }
@@ -399,7 +402,7 @@ export function useUpdatesVerificationActions({
     } catch (error) {
       failJob(jobId, {
         label: "Dependency verification failed",
-        detail: String(error),
+        detail: userFacingError(error, VERIFICATION_FALLBACK),
         target: leadPendingEntry
           ? buildUpdateTarget(leadPendingEntry.itemId)
           : {
@@ -408,7 +411,7 @@ export function useUpdatesVerificationActions({
               url: normalizedUrl,
             },
       });
-      toast.error("Verification failed", String(error));
+      toast.error("Verification failed", userFacingError(error, VERIFICATION_FALLBACK));
     } finally {
       setVerifyingAllPending(false);
     }

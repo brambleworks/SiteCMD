@@ -7,6 +7,7 @@ import { normalizeAppUrlForKey } from "@/lib/app-targets";
 import { verifyIssue } from "@/lib/issues";
 import { useToast } from "@/hooks/useToast";
 import { useResetOnChange } from "@/hooks/useResetOnChange";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const WebIssueDossier = lazy(() =>
   import("@/components/dashboard/DashboardComponents").then((module) => ({
@@ -105,7 +106,10 @@ export function IssueDossier({
           );
         }
       } catch (error) {
-        toast.error("Could not verify", String(error));
+        toast.error(
+          "Could not verify",
+          userFacingError(error, "Run the verification again after the site has deployed."),
+        );
       } finally {
         setVerifyingCheckId((current) => (current === checkId ? null : current));
       }

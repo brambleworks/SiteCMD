@@ -35,6 +35,9 @@ import {
   isActionableCheckResult,
   isPassingCheckResult,
 } from "@/lib/issues";
+import { userFacingError } from "@/lib/user-facing-error";
+
+const VERIFICATION_FALLBACK = "Run the verification again after the site has deployed.";
 
 interface SearchToast {
   success: (title: string, message?: string) => void;
@@ -240,7 +243,7 @@ export function useSearchConsoleVerificationActions({
           toast.warning("Still failing", diffSummary);
         }
       } catch (error) {
-        toast.error("Verification failed", String(error));
+        toast.error("Verification failed", userFacingError(error, VERIFICATION_FALLBACK));
       } finally {
         setVerifyingCheckId((current) => (current === issue.checkId ? null : current));
       }
@@ -391,10 +394,10 @@ export function useSearchConsoleVerificationActions({
         }
       } catch (error) {
         failJob(jobId, {
-          detail: String(error),
+          detail: userFacingError(error, VERIFICATION_FALLBACK),
           target: buildSearchTarget(matchingChecks[0] ?? null, entry.focus ?? null),
         });
-        toast.error("Verification failed", String(error));
+        toast.error("Verification failed", userFacingError(error, VERIFICATION_FALLBACK));
       } finally {
         setVerifyingPendingId((current) => (current === entry.id ? null : current));
       }
@@ -503,10 +506,10 @@ export function useSearchConsoleVerificationActions({
       toast.success("Pending search checks verified", detail);
     } catch (error) {
       failJob(jobId, {
-        detail: String(error),
+        detail: userFacingError(error, VERIFICATION_FALLBACK),
         target: buildSearchTarget(initialChecks[0] ?? null, firstEntry?.focus ?? null),
       });
-      toast.error("Verification failed", String(error));
+      toast.error("Verification failed", userFacingError(error, VERIFICATION_FALLBACK));
     } finally {
       setVerifyingAllPending(false);
     }

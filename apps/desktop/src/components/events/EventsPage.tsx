@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query/query-keys";
 import { normalizeAppUrlForKey } from "@/lib/app-targets";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export { buildEventScanTarget, humanizeEventDetail } from "./event-presentation";
 export {
@@ -165,7 +166,7 @@ export function EventsPage({ projectId, onOpenTarget }: EventsPageProps) {
         `${filteredEvents.length} events saved to ${filePath.split("/").pop()}`,
       );
     } catch (e) {
-      toast.error("Export failed", String(e));
+      toast.error("Export failed", userFacingError(e, "Nothing was written. Try again."));
     }
   };
 
@@ -184,7 +185,7 @@ export function EventsPage({ projectId, onOpenTarget }: EventsPageProps) {
         `${filteredEvents.length} events saved to ${filePath.split("/").pop()}`,
       );
     } catch (e) {
-      toast.error("Export failed", String(e));
+      toast.error("Export failed", userFacingError(e, "Nothing was written. Try again."));
     }
   };
 

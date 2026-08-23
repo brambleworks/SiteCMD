@@ -37,6 +37,7 @@ import {
   type ReportHistoryEntry,
   type SectionConfig,
 } from "@/components/reports/reports-page-model";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export {
   formatSavedReportDate,
@@ -176,7 +177,10 @@ function ReportsBuilder({
           logo_name: file.name,
         });
       } catch (error) {
-        toast.error("Logo upload failed", String(error));
+        toast.error(
+          "Logo upload failed",
+          userFacingError(error, "Your change was not saved. Try again."),
+        );
       }
     },
     [toast, updateBranding],
@@ -216,7 +220,10 @@ function ReportsBuilder({
         }
       }
     } catch (e) {
-      toast.error("Report generation failed", String(e));
+      toast.error(
+        "Report generation failed",
+        userFacingError(e, "Nothing was written. Try again."),
+      );
     } finally {
       setGenerating(false);
     }
@@ -253,7 +260,7 @@ function ReportsBuilder({
         toast.success("PDF saved", `Saved to ${filePath.split("/").pop()}`);
       }
     } catch (e) {
-      toast.error("PDF export failed", String(e));
+      toast.error("PDF export failed", userFacingError(e, "Nothing was written. Try again."));
     } finally {
       setGenerating(false);
     }
@@ -276,7 +283,7 @@ function ReportsBuilder({
         const html = await renderReportHtmlFromData({ data });
         setPreviewHtml(html);
       } catch (e) {
-        toast.error("Regeneration failed", String(e));
+        toast.error("Regeneration failed", userFacingError(e, "Nothing was written. Try again."));
       } finally {
         setGenerating(false);
       }

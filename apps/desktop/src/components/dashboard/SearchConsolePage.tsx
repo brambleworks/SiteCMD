@@ -31,6 +31,7 @@ import {
 import { useSearchConsoleVerificationActions } from "@/components/dashboard/useSearchConsoleVerificationActions";
 import { Button } from "@/components/ui/button";
 import { useSearchScanQuery } from "./useSearchScanQuery";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export {
   buildSeoCategoryScore,
@@ -72,7 +73,15 @@ export function SearchConsolePage({
     if (!arrivalPrompt?.absolutePath) return;
     openPathInEditor(arrivalPrompt.absolutePath)
       .then(() => toast.success("Opened changed file", arrivalPrompt.relativePath))
-      .catch((err) => toast.error("Could not open editor", String(err)));
+      .catch((err) =>
+        toast.error(
+          "Could not open editor",
+          userFacingError(
+            err,
+            "SiteCMD could not open it. Open the file from your editor instead.",
+          ),
+        ),
+      );
   }, [arrivalPrompt, toast]);
   const [period, setPeriod] = useState<Period>("28d");
   // The shared query owns transport and persistence; this page derives search views.
