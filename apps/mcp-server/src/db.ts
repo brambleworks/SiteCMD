@@ -3,6 +3,7 @@
 import { getDb, isSiteCmdDatabaseNotFoundError } from "./db_connection.js";
 import { OFFLINE_GRACE_PERIOD_SECS } from "./db_manifests.js";
 import { severitiesAtOrAbove } from "./severity.js";
+import { applyRepoSuppressions, type SuppressedView } from "./suppressions.js";
 
 export {
   __test_isReadDbReadonly,
@@ -33,12 +34,6 @@ function addMinimumSeverityFilter(sql: string, params: unknown[], severity?: str
   const severities = severitiesAtOrAbove(severity);
   params.push(...severities);
   return `${sql} AND severity IN (${severities.map(() => "?").join(", ")})`;
-}
-
-function addExactSeverityFilter(sql: string, params: unknown[], severity?: string): string {
-  if (!severity) return sql;
-  params.push(severity);
-  return `${sql} AND severity = ?`;
 }
 
 function parseIsoDate(value: string | null | undefined): Date | null {
@@ -246,6 +241,8 @@ export function getLatestScan(url: string): ScanScore | null {
 }
 
 export interface Issue {
+  id?: number;
+  source?: string;
   category: string;
   check_id: string;
   severity: string;
@@ -253,6 +250,10 @@ export interface Issue {
   description: string;
   fix_prompt: string | null;
   page_url: string | null;
+  relative_path?: string | null;
+  line?: number | null;
+  confidence?: string | null;
+  detail_json?: string | null;
 }
 
 function excludeDismissedCheckIds<T extends { check_id: string }>(
@@ -263,6 +264,56 @@ function excludeDismissedCheckIds<T extends { check_id: string }>(
   const dismissed = getDismissedCheckIds(projectId, envUrl);
   if (dismissed.size === 0) return rows;
   return rows.filter((row) => !dismissed.has(row.check_id));
+}
+
+export function getProjectPathById(projectId: number): string | null {
+  const row = getDb().prepare(`SELECT path FROM projects WHERE id = ?`).get(projectId) as
+    { path: string } | undefined;
+  return row?.path ? row.path : null;
+}
+
+function loadOpenIssueRows(
+  projectId: number,
+  envUrl: string,
+  opts?: { severity?: string; category?: string; requireFixPrompt?: boolean },
+): SuppressedView<Issue> {
+  const db = getDb();
+  const [noSlash, withSlash] = envUrlVariants(envUrl);
+  let sql = `SELECT id, source, category, check_id, severity, title, description, fix_prompt, page_url,
+                    relative_path, line, confidence, detail_json
+             FROM work_items
+             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
+               AND source IN ('web_scan', 'code_scan')`;
+  const params: unknown[] = [projectId, noSlash, withSlash];
+  if (opts?.requireFixPrompt) sql += ` AND fix_prompt IS NOT NULL AND fix_prompt != ''`;
+  sql = addMinimumSeverityFilter(sql, params, opts?.severity);
+  if (opts?.category) {
+    sql += ` AND category = ?`;
+    params.push(opts.category);
+  }
+  sql += ` ORDER BY CASE severity
+    WHEN 'critical' THEN 0
+    WHEN 'high' THEN 1
+    WHEN 'medium' THEN 2
+    WHEN 'low' THEN 3
+    ELSE 4 END, title, id`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = db.prepare(sql).all(...(params as any[])) as unknown as Issue[];
+  return applyRepoSuppressions(
+    getProjectPathById(projectId),
+    excludeDismissedCheckIds(projectId, envUrl, rows),
+    new Date(),
+  );
+}
+
+export function getRepoSuppressedIssues(
+  projectId: number,
+  envUrl: string,
+): Array<{ issue: Issue; reason: string }> {
+  return loadOpenIssueRows(projectId, envUrl).ignored.map(({ row, reason }) => ({
+    issue: row,
+    reason,
+  }));
 }
 
 export function getIssuesForProject(
@@ -278,30 +329,10 @@ export function getIssuesForProject(
     return [];
   }
 
-  const db = getDb();
-  const [noSlash, withSlash] = envUrlVariants(envUrl);
-  let sql = `SELECT category, check_id, severity, title, description, fix_prompt, page_url
-             FROM work_items
-             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
-               AND source IN ('web_scan', 'code_scan')`;
-  const params: unknown[] = [projectId, noSlash, withSlash];
-
-  sql = addExactSeverityFilter(sql, params, opts?.severity);
-  if (opts?.category) {
-    sql += ` AND category = ?`;
-    params.push(opts.category);
-  }
-
-  sql += ` ORDER BY CASE severity
-    WHEN 'critical' THEN 0
-    WHEN 'high' THEN 1
-    WHEN 'medium' THEN 2
-    WHEN 'low' THEN 3
-    ELSE 4 END, title`;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = db.prepare(sql).all(...(params as any[])) as unknown as Issue[];
-  return excludeDismissedCheckIds(projectId, envUrl, rows);
+  return loadOpenIssueRows(projectId, envUrl, {
+    severity: opts?.severity,
+    category: opts?.category,
+  }).kept;
 }
 
 export interface FixPromptRow {
@@ -320,31 +351,15 @@ export function getFixPromptsForProject(
     category?: string;
   },
 ): FixPromptRow[] {
-  const db = getDb();
-  const [noSlash, withSlash] = envUrlVariants(envUrl);
-  let sql = `SELECT title, severity, category, check_id, fix_prompt
-             FROM work_items
-             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
-               AND source IN ('web_scan', 'code_scan')
-               AND fix_prompt IS NOT NULL AND fix_prompt != ''`;
-  const params: unknown[] = [projectId, noSlash, withSlash];
-
-  sql = addMinimumSeverityFilter(sql, params, opts?.severity);
-  if (opts?.category) {
-    sql += ` AND category = ?`;
-    params.push(opts.category);
-  }
-
-  sql += ` ORDER BY CASE severity
-    WHEN 'critical' THEN 0
-    WHEN 'high' THEN 1
-    WHEN 'medium' THEN 2
-    WHEN 'low' THEN 3
-    ELSE 4 END`;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = db.prepare(sql).all(...(params as any[])) as unknown as FixPromptRow[];
-  return excludeDismissedCheckIds(projectId, envUrl, rows);
+  return loadOpenIssueRows(projectId, envUrl, { ...opts, requireFixPrompt: true }).kept.map(
+    ({ title, severity, category, check_id, fix_prompt }) => ({
+      title,
+      severity,
+      category,
+      check_id,
+      fix_prompt: fix_prompt ?? "",
+    }),
+  );
 }
 
 interface IssueComparisonRow extends Issue {

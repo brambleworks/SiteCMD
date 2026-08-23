@@ -14,6 +14,7 @@ import {
   getScanById,
   getDismissedIssues,
   getDismissedCheckIds,
+  getRepoSuppressedIssues,
   getProjectByUrl,
   getFixBrief,
   requestVerification,
@@ -454,16 +455,28 @@ function registerCoreTools(server: McpServer): void {
           return text(`No dismissed issues are tracked for repo-local .sitecmd scans yet.`);
         }
         const dismissed = getDismissedIssues(project.id, url);
-        if (dismissed.length === 0) {
-          return text(`No dismissed issues for ${url}. All issues are active.`);
+        const suppressed = getRepoSuppressedIssues(project.id, url);
+        if (dismissed.length === 0 && suppressed.length === 0) {
+          return text(`No dismissed or suppressed issues for ${url}. All issues are active.`);
         }
-        const body = dismissed
-          .map(
-            (d) => `• ${d.title ?? d.check_id} [${d.status}] (since ${d.last_status_changed_at})`,
-          )
-          .join("\n");
+        const dismissedLines = dismissed.map(
+          (d) => `- ${d.title ?? d.check_id} [${d.status}] (since ${d.last_status_changed_at})`,
+        );
+        const suppressedLines = suppressed.map(
+          ({ issue, reason }) =>
+            `- ${issue.check_id} in ${issue.relative_path ?? "(unknown path)"}: ${reason}`,
+        );
         return text(
-          `${dismissed.length} dismissed issue(s) for ${url}:\n\n${body}\n\nThese issues have been triaged and should be skipped when suggesting fixes.`,
+          [
+            `${dismissed.length} dismissed and ${suppressed.length} suppressed issue(s) for ${url}:`,
+            dismissedLines.length ? `Dismissed in SiteCMD:\n${dismissedLines.join("\n")}` : null,
+            suppressedLines.length
+              ? `Suppressed by .sitecmd/config.json (the same rules sitecmd audit applies):\n${suppressedLines.join("\n")}`
+              : null,
+            "Skip all of these when suggesting fixes.",
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
         );
       }),
   );

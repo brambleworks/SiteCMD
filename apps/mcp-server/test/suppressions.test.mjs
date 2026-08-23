@@ -1,0 +1,189 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  applyRepoSuppressions,
+  codeFindingFingerprint,
+  pathMatchesSuppression,
+} from "../dist/suppressions.js";
+import { getIssuesForProject, getRepoSuppressedIssues } from "../dist/db.js";
+import { ensureProject, makeSeeders, openSchemaFixtureDb } from "./helpers/schema-fixture.mjs";
+
+const fixtureDb = openSchemaFixtureDb("sitecmd-mcp-suppressions-");
+const { addWorkItem } = makeSeeders(fixtureDb);
+const RUST_VECTOR = "sha256:4522c6c0147aa43bbd24ea42bb759ad735e2dcddea6d2b83ed75de0fa5bfb1a6";
+const TODAY = new Date("2026-08-22T00:00:00.000Z");
+
+function projectWithConfig(projectId, suppressions) {
+  const root = mkdtempSync(join(tmpdir(), "sitecmd-mcp-suppressed-project-"));
+  mkdirSync(join(root, ".sitecmd"));
+  writeFileSync(
+    join(root, ".sitecmd", "config.json"),
+    JSON.stringify({
+      version: 1,
+      url: "https://example.com",
+      name: "suppression fixture",
+      code_scan: { suppressions },
+    }),
+  );
+  ensureProject(fixtureDb, projectId, { path: root });
+  return root;
+}
+
+function codeFinding(projectId, checkId, relativePath, excerpt) {
+  addWorkItem({
+    projectId,
+    source: "code_scan",
+    signalId: `code_scan:${checkId}:${relativePath}`,
+    checkId,
+    severity: "high",
+    title: `Finding in ${relativePath}`,
+    relativePath,
+    line: 10,
+    detailJson: JSON.stringify({
+      id: `${checkId.replace("code_scan.", "")}:${relativePath}`,
+      check_id: checkId,
+      relative_path: relativePath,
+      source_excerpt: excerpt,
+      evidence: null,
+    }),
+  });
+}
+
+test("fingerprints match the CLI vector and survive line movement", () => {
+  const identity = {
+    check_id: "code_scan.hardcoded-secret",
+    relative_path: "src/config.ts",
+    occurrence: "const secret = 'fixture';",
+  };
+  assert.equal(codeFindingFingerprint(identity), RUST_VECTOR);
+  assert.equal(
+    codeFindingFingerprint({ ...identity, occurrence: "  const   secret = 'fixture'; " }),
+    RUST_VECTOR,
+  );
+  assert.notEqual(
+    codeFindingFingerprint({ ...identity, occurrence: "const secret = 'different';" }),
+    RUST_VECTOR,
+  );
+});
+
+test("path patterns follow the gitignore semantics the CLI uses", () => {
+  assert.ok(pathMatchesSuppression("examples/**", "examples/insecure.ts"));
+  assert.ok(pathMatchesSuppression("examples", "examples/deep/insecure.ts"));
+  assert.ok(pathMatchesSuppression("src/keys.js", "src/keys.js"));
+  assert.ok(pathMatchesSuppression("*.fixture.ts", "src/deep/thing.fixture.ts"));
+  assert.ok(!pathMatchesSuppression("examples/**", "src/config.ts"));
+  assert.ok(!pathMatchesSuppression("src/keys.js", "src/keys.jsx"));
+});
+
+test("rule plus path suppression hides the finding and reports it as suppressed", () => {
+  const projectId = 701;
+  projectWithConfig(projectId, [
+    {
+      match: { path: "examples/**", rule: "code_scan.hardcoded-secret" },
+      reason: "The examples contain inert security fixtures.",
+    },
+  ]);
+  codeFinding(
+    projectId,
+    "code_scan.hardcoded-secret",
+    "examples/insecure.ts",
+    "const secret = 'fixture';",
+  );
+  codeFinding(projectId, "code_scan.hardcoded-secret", "src/config.ts", "const secret = 'real';");
+
+  const issues = getIssuesForProject(projectId, "https://example.com");
+  assert.deepEqual(
+    issues.map((issue) => issue.relative_path),
+    ["src/config.ts"],
+  );
+
+  const suppressed = getRepoSuppressedIssues(projectId, "https://example.com");
+  assert.equal(suppressed.length, 1);
+  assert.equal(suppressed[0].issue.relative_path, "examples/insecure.ts");
+  assert.equal(suppressed[0].reason, "The examples contain inert security fixtures.");
+});
+
+test("fingerprint suppression hides only the exact occurrence", () => {
+  const projectId = 702;
+  projectWithConfig(projectId, [
+    {
+      match: { fingerprint: RUST_VECTOR },
+      reason: "This exact occurrence is an inert test fixture.",
+    },
+  ]);
+  codeFinding(
+    projectId,
+    "code_scan.hardcoded-secret",
+    "src/config.ts",
+    "const secret = 'fixture';",
+  );
+  codeFinding(
+    projectId,
+    "code_scan.hardcoded-secret",
+    "src/other.ts",
+    "const secret = 'different';",
+  );
+
+  const issues = getIssuesForProject(projectId, "https://example.com");
+  assert.deepEqual(
+    issues.map((issue) => issue.relative_path),
+    ["src/other.ts"],
+  );
+});
+
+test("expired suppressions keep the finding visible", () => {
+  const rows = [
+    {
+      check_id: "code_scan.hardcoded-secret",
+      source: "code_scan",
+      relative_path: "src/config.ts",
+      detail_json: JSON.stringify({
+        id: "x",
+        check_id: "code_scan.hardcoded-secret",
+        relative_path: "src/config.ts",
+        source_excerpt: "const secret = 'fixture';",
+      }),
+    },
+  ];
+  const root = mkdtempSync(join(tmpdir(), "sitecmd-mcp-expired-"));
+  mkdirSync(join(root, ".sitecmd"));
+  writeFileSync(
+    join(root, ".sitecmd", "config.json"),
+    JSON.stringify({
+      version: 1,
+      url: "https://example.com",
+      name: "expired",
+      code_scan: {
+        suppressions: [
+          {
+            match: { rule: "code_scan.hardcoded-secret" },
+            reason: "Temporary.",
+            expires: "2026-08-18",
+          },
+        ],
+      },
+    }),
+  );
+  const view = applyRepoSuppressions(root, rows, TODAY);
+  assert.equal(view.kept.length, 1);
+  assert.equal(view.ignored.length, 0);
+});
+
+test("an invalid suppression fails the read with the CLI message", () => {
+  const projectId = 703;
+  projectWithConfig(projectId, [{ match: { rule: "code_scan.hardcoded-secret" }, reason: "  " }]);
+  codeFinding(
+    projectId,
+    "code_scan.hardcoded-secret",
+    "src/config.ts",
+    "const secret = 'fixture';",
+  );
+  assert.throws(
+    () => getIssuesForProject(projectId, "https://example.com"),
+    /Code Scan suppression 1 requires a non-empty reason/,
+  );
+});

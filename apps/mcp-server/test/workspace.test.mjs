@@ -385,7 +385,7 @@ test("getEffectiveTier rejects future validation timestamps", () => {
   assert.equal(getEffectiveTier(), "free");
 });
 
-test("getIssuesForProject keeps severity filtering exact for issue lists", () => {
+test("getIssuesForProject treats severity as a minimum threshold", () => {
   const projectId = 506;
   addWorkItem({
     projectId,
@@ -408,7 +408,7 @@ test("getIssuesForProject keeps severity filtering exact for issue lists", () =>
 
   assert.deepEqual(
     issues.map((issue) => issue.check_id),
-    ["code.security.high-list"],
+    ["security.critical-list", "code.security.high-list"],
   );
 });
 

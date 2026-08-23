@@ -65,19 +65,19 @@ package metadata, and SiteCMD release are bumped together.
 
 ## Tools
 
-| Tool                   | Description                                                       |
-| ---------------------- | ----------------------------------------------------------------- |
-| `get_projects`         | List projects with ids, URLs, frameworks, and linked folders      |
-| `get_scan_score`       | Get latest scan artifact score and category breakdown             |
-| `get_issues`           | Get failing issues, filterable by severity/category               |
-| `get_fix_prompts`      | Get AI-ready fix prompts for each issue                           |
-| `get_scan_history`     | Get scan artifact score history over time                         |
-| `get_dismissed_issues` | List issues dismissed or marked not applicable                    |
-| `compare_scans`        | Compare two web scans by id (default: the two most recent)        |
-| `request_scan`         | Return guidance for running a scan manually and comparing results |
-| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria     |
-| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify  |
-| `list_fix_attempts`    | List currently open fix attempts                                  |
+| Tool                   | Description                                                            |
+| ---------------------- | ---------------------------------------------------------------------- |
+| `get_projects`         | List projects with ids, URLs, frameworks, and linked folders           |
+| `get_scan_score`       | Get latest scan artifact score and category breakdown                  |
+| `get_issues`           | Get failing issues, filterable by severity/category                    |
+| `get_fix_prompts`      | Get AI-ready fix prompts for each issue                                |
+| `get_scan_history`     | Get scan artifact score history over time                              |
+| `get_dismissed_issues` | List issues dismissed in SiteCMD or suppressed by .sitecmd/config.json |
+| `compare_scans`        | Compare two web scans by id (default: the two most recent)             |
+| `request_scan`         | Return guidance for running a scan manually and comparing results      |
+| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria          |
+| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify       |
+| `list_fix_attempts`    | List currently open fix attempts                                       |
 
 ### Correlation tools
 

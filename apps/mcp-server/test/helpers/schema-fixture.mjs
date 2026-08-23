@@ -59,11 +59,11 @@ export function makeSeeders(db) {
     INSERT INTO work_items (
       project_id, env_url, source, signal_id, check_id, category, severity,
       title, description, scan_ref, first_seen_at, last_seen_at,
-      resolved_at, page_url, fix_prompt
+      resolved_at, page_url, fix_prompt, relative_path, line, confidence, detail_json
     ) VALUES (
       @projectId, @envUrl, @source, @signalId, @checkId, @category, @severity,
       @title, @description, @scanRef, @firstSeenAt, @lastSeenAt,
-      @resolvedAt, @pageUrl, @fixPrompt
+      @resolvedAt, @pageUrl, @fixPrompt, @relativePath, @line, @confidence, @detailJson
     )
   `);
 
@@ -86,6 +86,10 @@ export function makeSeeders(db) {
       resolvedAt: overrides.resolvedAt ?? null,
       pageUrl: overrides.pageUrl ?? null,
       fixPrompt: overrides.fixPrompt ?? null,
+      relativePath: overrides.relativePath ?? null,
+      line: overrides.line ?? null,
+      confidence: overrides.confidence ?? null,
+      detailJson: overrides.detailJson ?? null,
     });
   }
 
