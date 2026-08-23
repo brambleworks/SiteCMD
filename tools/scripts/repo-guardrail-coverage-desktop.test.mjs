@@ -30,6 +30,7 @@ const {
   emptyTestBodyFailures,
   engineVocabFailures,
   eventFabricFailures,
+  handRolledDialogFailures,
   issueStateSafetyFailures,
   overlayIo,
   performanceGateFailures,
@@ -1298,6 +1299,20 @@ fn category_str(category: &ScanCategory) -> &'static str {
       );
       expect(guardrails).toContain(
         "causal graph JSON must be parsed as unknown generated data before use",
+      );
+    });
+
+    it("rejects a new hand-rolled role=dialog outside the Dialog primitive", () => {
+      expectGuardrailFailure(
+        handRolledDialogFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenModal.tsx",
+            'export function BrokenModal() { return <div role="dialog" aria-modal="true" />; }\n',
+          );
+        },
+        'Hand-rolled role="dialog" count regressed',
       );
     });
 

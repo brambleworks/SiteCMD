@@ -41,6 +41,23 @@ if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) {
   });
 }
 
+// jsdom 30 has no modal dialog implementation; mirror the open attribute and the
+// real browser's initial-focus behavior so components can rely on showModal() and
+// close() in tests, including Escape reaching the dialog's own keydown handler.
+if (typeof HTMLDialogElement !== "undefined" && !HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+    const focusable = this.querySelector<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    (focusable ?? this).focus();
+  };
+  HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+    this.removeAttribute("open");
+    this.dispatchEvent(new Event("close"));
+  };
+}
+
 afterEach(() => {
   cleanup();
 });

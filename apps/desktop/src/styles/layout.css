@@ -1076,6 +1076,43 @@
   .overlay-backdrop--guided {
     background-color: color-mix(in oklab, var(--background) 85%, transparent);
   }
+  /* Native modal dialog: the element fills the viewport so backdrop clicks hit it. */
+  .dialog {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: var(--space-card);
+    border: 0;
+    background: transparent;
+    color: inherit;
+  }
+  .dialog[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .dialog::backdrop {
+    background-color: rgba(0, 0, 0, 0.6);
+  }
+  .dialog--soft::backdrop {
+    background-color: rgba(0, 0, 0, 0.5);
+  }
+  .dialog--blur::backdrop {
+    background-color: rgba(0, 0, 0, 0.65);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+  .dialog--top {
+    align-items: flex-start;
+    padding-top: 4rem;
+  }
+  .dialog-panel {
+    max-width: 100%;
+  }
   .toast-item {
     pointer-events: auto;
     display: flex;

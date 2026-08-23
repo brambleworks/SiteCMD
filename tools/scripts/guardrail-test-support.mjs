@@ -18,6 +18,7 @@ import { commandWrapperFailures } from "./lib/guardrail-command-wrapper-rules.mj
 import { desktopLicensingSafetyFailures } from "./lib/guardrail-desktop-licensing-rules.mjs";
 import { desktopOAuthSafetyFailures } from "./lib/guardrail-desktop-oauth-rules.mjs";
 import { desktopProjectCommandSafetyFailures } from "./lib/guardrail-desktop-rules.mjs";
+import { handRolledDialogFailures } from "./lib/guardrail-dialog-rules.mjs";
 import { documentationSafetyFailures } from "./lib/guardrail-doc-rules.mjs";
 import { emDashFailures } from "./lib/guardrail-em-dash-rules.mjs";
 import { emptyTestBodyFailures } from "./lib/guardrail-empty-test-body-rules.mjs";
@@ -244,6 +245,7 @@ const RULE_ARGUMENTS = new Map([
     frontendMaintainabilityFailures,
     (io) => [io.read, io.listFiles, desktopSourceFiles(io), new Map()],
   ],
+  [handRolledDialogFailures, (io) => [io.read, desktopSourceFiles(io)]],
   [integrationUrlSecretFailures, (io) => [io.read, io.exists, io.listFiles]],
   [issueStateSafetyFailures, (io) => [io.read, io.exists, desktopSourceFiles(io)]],
   [licenseCodeUnionFailures, (io) => [io.read]],
@@ -348,6 +350,7 @@ export const rules = Object.freeze({
   fixGuideCspGuidanceFailures,
   frontendMaintainabilityFailures,
   guardrailScriptLineBudgets,
+  handRolledDialogFailures,
   integrationUrlSecretFailures,
   issueStateSafetyFailures,
   licenseActivationErrorFailures,
