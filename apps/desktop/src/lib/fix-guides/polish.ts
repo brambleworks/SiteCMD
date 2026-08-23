@@ -204,7 +204,7 @@ export const POLISH_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "source-maps-production": {
     effort: "quick",
     effortMinutes: 10,
-    lead: "This site's production build appears to reference a source map, which can let anyone reconstruct your original code.",
+    lead: "A production file references a source map, and the scan saw only that reference; a reachable map would reveal original source.",
     default: [
       "Fetch the exact `sourceMappingURL` from the finding and inspect the final response; the scan saw only a reference, and a catch-all HTML response is not a source map. A public map is not automatically a vulnerability, but it makes bundled source and any accidental secrets easier to inspect, so decide whether that exposure is intentional. If browser access is unnecessary, switch to hidden maps uploaded to an access-controlled service, remove public references, and rotate anything exposed.",
     ],

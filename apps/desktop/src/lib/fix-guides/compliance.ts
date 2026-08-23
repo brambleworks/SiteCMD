@@ -77,7 +77,7 @@ export const COMPLIANCE_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "compliance.trackers": {
     effort: "moderate",
     effortMinutes: 15,
-    lead: "Known tracker provider scripts run on this site, and the scan cannot tell what visitor data they actually collect.",
+    lead: "Known tracker provider scripts are referenced in this page's source, and the scan cannot tell if they run or what they collect.",
     default: [
       "Treat the finding as an inventory lead: confirm in DevTools Network and Storage which provider code actually executes and what it sends, since a provider string alone does not establish that personal data is collected. Remove vendors that are not needed; for the rest, implement the disclosure, consent, opt-out, or regional gating the actual use case and governing rules require, and verify every preference state on the deployed site.",
     ],

@@ -70,6 +70,89 @@ describe("polishCopySafetyFailures", () => {
     expect(polishCopySafetyFailures(h.read, h.exists, h.listFiles)).toEqual([]);
   });
 
+  it.each([
+    [
+      "reconstruct claim",
+      "This site's production build ships a source map that lets anyone reconstruct your code.",
+    ],
+    [
+      "deployment-fail claim",
+      "A loopback URL is hardcoded into this code, which will fail once it runs somewhere else.",
+    ],
+    [
+      "absolute-inability claim",
+      "No skip link exists on this page, and a keyboard user has no way to reach the main content.",
+    ],
+    [
+      "confirmed-broken claim",
+      "An image on this page shows a broken image icon instead of the picture visitors expect.",
+    ],
+    [
+      "nearly-all-generic claim",
+      "This page is built almost entirely from generic containers with no semantic meaning.",
+    ],
+  ])("flags a planted overclaim lead: %s", (_label, leadText) => {
+    const files = baseFixture();
+    files[POLISH_LEAD_FILE] =
+      "export const POLISH_FIX_GUIDES = {\n" +
+      '  "floating-blobs": {\n' +
+      '    effort: "quick",\n' +
+      "    effortMinutes: 3,\n" +
+      `    lead: "${leadText}",\n` +
+      '    default: ["step"],\n' +
+      "  },\n" +
+      "};\n";
+
+    const h = harness(files);
+    const failures = polishCopySafetyFailures(h.read, h.exists, h.listFiles);
+    expect(failures.some((f) => f.includes(POLISH_LEAD_FILE) && f.includes("overclaim"))).toBe(
+      true,
+    );
+  });
+
+  it("still catches a planted overclaim in a single-quoted lead line", () => {
+    const files = baseFixture();
+    files[POLISH_LEAD_FILE] =
+      "export const POLISH_FIX_GUIDES = {\n" +
+      '  "seo.robots_txt": {\n' +
+      '    effort: "quick",\n' +
+      "    effortMinutes: 3,\n" +
+      "    lead: 'Your robots.txt file blocks crawling across the whole site.',\n" +
+      '    default: ["step"],\n' +
+      "  },\n" +
+      "};\n";
+
+    const h = harness(files);
+    const failures = polishCopySafetyFailures(h.read, h.exists, h.listFiles);
+    expect(
+      failures.some(
+        (f) =>
+          f.includes(POLISH_LEAD_FILE) &&
+          f.includes("overclaim") &&
+          /blocks crawling across/i.test(f),
+      ),
+    ).toBe(true);
+  });
+
+  it("fails loudly on a lead line whose value uses no recognized quote character", () => {
+    const files = baseFixture();
+    files[POLISH_LEAD_FILE] =
+      "export const POLISH_FIX_GUIDES = {\n" +
+      '  "floating-blobs": {\n' +
+      '    effort: "quick",\n' +
+      "    effortMinutes: 3,\n" +
+      "    lead: someImportedConstant,\n" +
+      '    default: ["step"],\n' +
+      "  },\n" +
+      "};\n";
+
+    const h = harness(files);
+    const failures = polishCopySafetyFailures(h.read, h.exists, h.listFiles);
+    expect(
+      failures.some((f) => f.includes(POLISH_LEAD_FILE) && /recognized quote style/i.test(f)),
+    ).toBe(true);
+  });
+
   it("keeps every real bundled polish lead sentence passing", () => {
     const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), "utf8");
     const exists = (relativePath) => fs.existsSync(path.join(ROOT, relativePath));

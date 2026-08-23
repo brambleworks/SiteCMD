@@ -132,7 +132,7 @@ export const ACCESSIBILITY_FIX_GUIDES: Record<string, FixGuideEntry> = {
   "accessibility.redundant_alt": {
     effort: "quick",
     effortMinutes: 5,
-    lead: "An image's alternative text is only filler, like image of or just photo, instead of describing what the image shows.",
+    lead: "An image's alternative text starts with or is only filler like image of or photo, which a screen reader already announces.",
     default: [
       'Review the purpose, nearby text, and accessible name of each image before editing; remove leading words such as "image of" or "photo of" only when the medium itself is irrelevant, and keep medium information when it matters, such as distinguishing a photograph from a rendering. If the alternative is only "image" or "photo", replace it with useful context, or use `alt=""` only after confirming the image is decorative or redundant. Confirm the announcement with a screen reader.',
     ],
