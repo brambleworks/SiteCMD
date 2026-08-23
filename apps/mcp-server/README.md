@@ -57,8 +57,9 @@ putting it in JSON; agent configuration files do not expand those placeholders.
 
 SiteCMD requires a maintenance release whose built-in `node:sqlite` runtime
 passes the server's full test suite. Its automatic connection flow verifies the
-Node version and SQLite support before writing agent configuration. The app does
-not need to be running after setup.
+Node version and SQLite support before writing agent configuration. Reads work
+while the app is closed. `start_fix`, `run_scan`, and verification need the app
+running; each of those tools says so when it is not.
 
 The bundled MCP server follows the desktop and CLI release version. Its package
 is private and is released only as a desktop resource, so the MCP handshake,
@@ -78,8 +79,12 @@ package metadata, and SiteCMD release are bumped together.
 | `compare_scans`        | Compare two web scans by id (default: the two most recent)                                                |
 | `how_to_rescan`        | Explain the CLI and desktop steps that produce a fresh scan; does not queue one                           |
 | `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria                                             |
+| `start_fix`            | Ask SiteCMD to open a fix attempt for one check; requires the app to be running                           |
+| `get_fix_status`       | Read a fix attempt's status, verify timing, and failure detail                                            |
+| `run_scan`             | Queue a SiteCMD scan for a project; requires the app to be running                                        |
+| `get_scan_status`      | Read a queued scan request's status and, once fulfilled, its execution id                                 |
 | `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify                                          |
-| `list_fix_attempts`    | List currently open fix attempts                                                                          |
+| `list_fix_attempts`    | List open fix attempts (include_settled for verified and failed ones)                                     |
 
 `request_scan` is a deprecated alias of `how_to_rescan`; it will be removed in the next major release.
 
@@ -125,12 +130,15 @@ the resolved path with the `SITECMD_DB_PATH` environment variable if needed.
 
 ## Recovery
 
-The MCP server is read-mostly. Its only writes are bounded updates to existing
-fix-attempt rows: `get_fix_brief` records the first time a brief is fetched, and
-`request_verification` records the agent summary and asks SiteCMD to verify the
-attempt. Neither operation can create rows or touch another table. If the
-database needs backup or restore during an incident, follow the recovery
-runbook (`apps/mcp-server/recovery-runbook.md` in the SiteCMD repository).
+The MCP server is read-mostly. Its writes are bounded updates to existing
+fix-attempt rows and inserts into the `agent_requests` queue the desktop
+fulfils. `get_fix_brief` records the first time a brief is fetched,
+`request_verification` records the agent summary and asks SiteCMD to verify
+the attempt, and `start_fix`/`run_scan` insert one queued request each; the
+desktop's own watcher claims and fulfils that row. None of these can touch
+another table. If the database needs backup or restore during an incident,
+follow the recovery runbook (`apps/mcp-server/recovery-runbook.md` in the
+SiteCMD repository).
 
 ## License
 

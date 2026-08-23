@@ -20,9 +20,14 @@ import {
   getFixBrief,
   requestVerification,
   listFixAttempts,
+  getFixAttempt,
   getLatestFixAttemptForIssue,
   isSiteCmdDatabaseNotFoundError,
   sanitizeHistoryLimit,
+  createAgentRequest,
+  getAgentRequest,
+  waitForAgentRequest,
+  withBusyRetry,
   type Issue,
   type IssueOccurrence,
   type FixPromptRow,
@@ -30,6 +35,7 @@ import {
 import { formatCausalityBlock, rankWithCausalReach } from "./causal_graph.js";
 import { registerCorrelationTools } from "./correlation_tools.js";
 import { READ_ONLY, WRITES_LOCAL_DB, runTool, text, type ToolResult } from "./tool_result.js";
+import { assertSupportedSchemaVersion } from "./schema_version.js";
 import {
   quoteUntrustedText,
   indentUntrustedEvidence,
@@ -37,6 +43,8 @@ import {
   UNTRUSTED_DATA_INSTRUCTION,
 } from "./untrusted.js";
 import { describeScanAge } from "./freshness.js";
+import { readDesktopHeartbeat, desktopStatusLine } from "./heartbeat.js";
+import { deriveFixStatus, DEPLOY_WAIT_NOTE } from "./fix_status.js";
 import {
   getWorkspaceIssues,
   getWorkspaceProject,
@@ -153,6 +161,56 @@ export function resolveProjectId(args: { project_id?: number; url?: string }): n
     );
   }
   throw new Error("Pass project_id (from get_projects) or url.");
+}
+
+const SUPPORTED_AGENT_TOOLS = ["cursor", "codex", "windsurf"] as const;
+
+/** Infer the desktop's agent_tool token from the connected MCP client name; unmatched clients brief as claude-code. */
+function agentToolFromClient(server: McpServer): string {
+  const clientName = server.server.getClientVersion()?.name?.toLowerCase() ?? "";
+  return SUPPORTED_AGENT_TOOLS.find((tool) => clientName.includes(tool)) ?? "claude-code";
+}
+
+/**
+ * Async counterpart to runTool for start_fix and run_scan, whose body awaits
+ * a real timer between polls of agent_requests. runTool's body is
+ * synchronous by contract, so it cannot host that wait itself.
+ */
+async function runToolAsync(body: () => Promise<ToolResult>): Promise<ToolResult> {
+  try {
+    try {
+      assertSupportedSchemaVersion();
+    } catch (error) {
+      if (!isSiteCmdDatabaseNotFoundError(error)) throw error;
+    }
+    return await body();
+  } catch (error) {
+    return {
+      content: [
+        { type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` },
+      ],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * url alone can resolve to more than one project: environments are unique
+ * per (project_id, url), not globally, so two projects may share a
+ * production URL. Prefer whichever one actually owns the open check.
+ */
+function resolveProjectIdForCheck(
+  args: { project_id?: number; url?: string },
+  checkId: string,
+): number {
+  if (args.project_id) return args.project_id;
+  const projectId = resolveProjectId(args);
+  if (!args.url) return projectId;
+  const sharingUrl = getProjects().filter((p) => p.url === args.url);
+  const owner = sharingUrl.find(
+    (p) => getIssueOccurrences(p.id, args.url as string, checkId).length > 0,
+  );
+  return owner ? owner.id : projectId;
 }
 
 const CONFIDENCE_ORDER = ["confirmed", "high", "needs_review"] as const;
@@ -803,11 +861,211 @@ function registerCoreTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "start_fix",
+    {
+      title: "Start a fix attempt",
+      description:
+        "Ask SiteCMD to open a fix attempt for one check. The desktop app writes the brief with its own guidance and file mapping; this tool waits up to 15 seconds for it, then returns the attempt id to pass to get_fix_brief. Requires the SiteCMD app to be running.",
+      inputSchema: {
+        project_id: z.number().int().positive().optional(),
+        url: z.string().optional().describe("Site URL when project_id is unknown"),
+        check_id: z.string().min(1).describe("Check id from get_issues"),
+        agent_tool: z
+          .enum(["claude-code", "codex", "cursor", "windsurf"])
+          .optional()
+          .describe("Which agent is working; defaults to the MCP client name"),
+        wait: z.boolean().default(true),
+      },
+      annotations: WRITES_LOCAL_DB,
+    },
+    async ({ project_id, url, check_id, agent_tool, wait }) =>
+      runToolAsync(async () => {
+        const setup = withBusyRetry(() => {
+          const projectId = resolveProjectIdForCheck({ project_id, url }, check_id);
+          const envUrl = url ?? getProjects().find((p) => p.id === projectId)?.url;
+          if (!envUrl) throw new Error(`Project #${projectId} has no production URL; pass url.`);
+          if (getIssueOccurrences(projectId, envUrl, check_id).length === 0) {
+            throw new Error(
+              `No open issue ${check_id} on ${envUrl}; call get_issues for the current list.`,
+            );
+          }
+          const requestId = createAgentRequest({
+            kind: "start_fix",
+            projectId,
+            envUrl,
+            checkId: check_id,
+            agentTool: agent_tool ?? agentToolFromClient(server),
+          });
+          return { requestId, now: Date.now() };
+        });
+        if (!readDesktopHeartbeat(setup.now).alive || !wait) {
+          return text(
+            `Fix request #${setup.requestId} for ${check_id} is pending. ${desktopStatusLine(setup.now)} Call get_fix_status with request_id=${setup.requestId} to pick up the attempt id.`,
+          );
+        }
+        const settled = await waitForAgentRequest(setup.requestId, 15_000);
+        if (!settled || settled.status === "requested" || settled.status === "running") {
+          return text(
+            `Fix request #${setup.requestId} is still pending after 15 seconds. Call get_fix_status with request_id=${setup.requestId}.`,
+          );
+        }
+        if (settled.status !== "fulfilled") {
+          throw new Error(
+            `SiteCMD could not start the fix: ${settled.failure_detail ?? settled.status}`,
+          );
+        }
+        const { attempt_id } = JSON.parse(settled.result_json ?? "{}") as { attempt_id: number };
+        return text(
+          `Fix attempt #${attempt_id} is briefed. Call get_fix_brief with attempt_id=${attempt_id}, make the fix, then call request_verification with the same id and a one-paragraph summary.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    "get_fix_status",
+    {
+      title: "Get fix attempt status",
+      description:
+        "Read the status of a fix attempt, or of a start_fix request that has not resolved to an attempt id yet. Pass attempt_id (from start_fix or get_fix_brief) or request_id (from start_fix's pending response).",
+      inputSchema: {
+        attempt_id: z.number().int().positive().optional(),
+        request_id: z.number().int().positive().optional(),
+      },
+      annotations: READ_ONLY,
+    },
+    async ({ attempt_id, request_id }) =>
+      runTool(() => {
+        let resolvedAttemptId = attempt_id ?? null;
+        if (resolvedAttemptId === null) {
+          if (!request_id) throw new Error("Pass attempt_id or request_id.");
+          const request = getAgentRequest(request_id);
+          if (!request) throw new Error(`No fix request #${request_id}.`);
+          if (request.status === "fulfilled") {
+            const result = JSON.parse(request.result_json ?? "{}") as { attempt_id?: number };
+            resolvedAttemptId = result.attempt_id ?? null;
+          }
+          if (resolvedAttemptId === null) {
+            const now = Date.now();
+            const detail = request.failure_detail
+              ? ` Failure detail: ${request.failure_detail}.`
+              : "";
+            return text(
+              `Fix request #${request_id} is '${request.status}'.${detail} ${desktopStatusLine(now)}`,
+            );
+          }
+        }
+        const attempt = getFixAttempt(resolvedAttemptId);
+        if (!attempt) throw new Error(`No fix attempt with id ${resolvedAttemptId}.`);
+        const now = Date.now();
+        const { label, awaitingDeploy } = deriveFixStatus(attempt);
+        const lines = [
+          `Fix attempt #${attempt.id} for ${attempt.check_id} on ${attempt.env_url}`,
+          `Status: ${label}`,
+          attempt.verify_started_at
+            ? `Verification started: ${new Date(attempt.verify_started_at).toISOString()}`
+            : null,
+          attempt.brief_fetched_at
+            ? `Brief fetched: ${new Date(attempt.brief_fetched_at).toISOString()}`
+            : null,
+          attempt.failure_detail ? `Failure detail: ${attempt.failure_detail}` : null,
+          awaitingDeploy ? DEPLOY_WAIT_NOTE : null,
+          desktopStatusLine(now),
+        ];
+        return text(lines.filter((line) => line !== null).join("\n"));
+      }),
+  );
+
+  server.registerTool(
+    "run_scan",
+    {
+      title: "Run a SiteCMD scan",
+      description:
+        "Ask SiteCMD to scan a project now. The desktop app performs the scan; this tool returns a request id right away by default (pass wait=true to poll up to 90 seconds). Requires the SiteCMD app to be running.",
+      inputSchema: {
+        project_id: z.number().int().positive().optional(),
+        url: z.string().optional().describe("Site URL when project_id is unknown"),
+        scope: z.enum(["web", "code", "full"]).default("web"),
+        wait: z.boolean().default(false),
+      },
+      annotations: WRITES_LOCAL_DB,
+    },
+    async ({ project_id, url, scope, wait }) =>
+      runToolAsync(async () => {
+        const setup = withBusyRetry(() => {
+          const projectId = resolveProjectId({ project_id, url });
+          const envUrl = url ?? getProjects().find((p) => p.id === projectId)?.url;
+          if (!envUrl) throw new Error(`Project #${projectId} has no production URL; pass url.`);
+          const requestId = createAgentRequest({
+            kind: "run_scan",
+            projectId,
+            envUrl,
+            scope,
+            agentTool: agentToolFromClient(server),
+          });
+          return { requestId, now: Date.now() };
+        });
+        if (!readDesktopHeartbeat(setup.now).alive || !wait) {
+          return text(
+            `Scan request #${setup.requestId} (${scope}) is pending. ${desktopStatusLine(setup.now)} Call get_scan_status with request_id=${setup.requestId} for the outcome.`,
+          );
+        }
+        const settled = await waitForAgentRequest(setup.requestId, 90_000);
+        if (!settled || settled.status === "requested" || settled.status === "running") {
+          return text(
+            `Scan request #${setup.requestId} is still running after 90 seconds. Call get_scan_status with request_id=${setup.requestId}.`,
+          );
+        }
+        if (settled.status !== "fulfilled") {
+          throw new Error(
+            `SiteCMD could not run the scan: ${settled.failure_detail ?? settled.status}`,
+          );
+        }
+        const { execution_id, status } = JSON.parse(settled.result_json ?? "{}") as {
+          execution_id: number;
+          status: string;
+        };
+        return text(
+          `Scan request #${setup.requestId} complete: execution #${execution_id} (${status}). Call compare_scans to see what changed.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    "get_scan_status",
+    {
+      title: "Get scan request status",
+      description: "Read the status of a run_scan request by the request id run_scan returned.",
+      inputSchema: { request_id: z.number().int().positive() },
+      annotations: READ_ONLY,
+    },
+    async ({ request_id }) =>
+      runTool(() => {
+        const request = getAgentRequest(request_id);
+        if (!request) throw new Error(`No scan request #${request_id}.`);
+        const now = Date.now();
+        const lines = [`Scan request #${request.id}: ${request.status}.`];
+        if (request.status === "fulfilled") {
+          const result = JSON.parse(request.result_json ?? "{}") as {
+            execution_id?: number;
+            status?: string;
+          };
+          lines.push(`execution #${result.execution_id} (${result.status}).`);
+          lines.push("Call compare_scans to see what changed.");
+        } else if (request.status === "failed") {
+          lines.push(`Failure detail: ${request.failure_detail ?? "unknown"}.`);
+        } else {
+          lines.push(desktopStatusLine(now));
+        }
+        return text(lines.join(" "));
+      }),
+  );
+
+  server.registerTool(
     "request_verification",
     {
       title: "Request verification of a fix",
       description:
-        "Tell SiteCMD a fix attempt is complete so it can re-run the check and verify the fix. This does NOT mark the issue fixed; SiteCMD verifies independently.",
+        "Tell SiteCMD a fix attempt is complete so it can re-run the check and verify the fix. This does NOT mark the issue fixed; SiteCMD verifies independently. Requires the SiteCMD app to be running; records the request and says so when it is not.",
       inputSchema: {
         attempt_id: z.number().int().positive(),
         summary: z.string().min(1).max(2000).describe("One paragraph describing what was changed"),
@@ -817,8 +1075,17 @@ function registerCoreTools(server: McpServer): void {
     async ({ attempt_id, summary }) =>
       runTool(() => {
         requestVerification(attempt_id, summary);
+        const attempt = getFixAttempt(attempt_id);
+        const now = Date.now();
+        const liveness = readDesktopHeartbeat(now).alive
+          ? "SiteCMD will re-run the check within about 5 seconds; the user sees the result in the app."
+          : "SiteCMD is not running; verification starts when it opens (attempts expire after 24 hours).";
+        const deploy =
+          attempt && deriveFixStatus({ ...attempt, status: "verifying" }).awaitingDeploy
+            ? ` This is a live-site check, so the fix is not live until you deploy; ${DEPLOY_WAIT_NOTE}`
+            : "";
         return text(
-          `Verification requested for attempt ${attempt_id}. SiteCMD will re-run the check within a few seconds; the user will see the result in the app.`,
+          `Verification requested for attempt ${attempt_id}. ${liveness}${deploy} Call get_fix_status with attempt_id=${attempt_id} to read the outcome.`,
         );
       }),
   );
@@ -828,13 +1095,18 @@ function registerCoreTools(server: McpServer): void {
     {
       title: "List fix attempts",
       description:
-        "List SiteCMD fix attempts that are currently open (briefed, verify_requested, or verifying).",
-      inputSchema: {},
+        "List SiteCMD fix attempts that are currently open (briefed, verify_requested, or verifying). Pass include_settled to also see recently verified, failed, canceled, or expired attempts.",
+      inputSchema: {
+        include_settled: z
+          .boolean()
+          .default(false)
+          .describe("Also list recent verified, verify_failed, canceled, and expired attempts"),
+      },
       annotations: READ_ONLY,
     },
-    async () =>
+    async ({ include_settled }) =>
       runTool(() => {
-        const attempts = listFixAttempts();
+        const attempts = listFixAttempts(include_settled);
         if (attempts.length === 0) {
           return text("No open fix attempts. The user starts one from an issue in SiteCMD.");
         }

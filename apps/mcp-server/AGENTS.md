@@ -22,17 +22,20 @@ Node test, or use the package test command.
 The server reads the desktop SQLite database through Node's built-in
 `node:sqlite`. It does not own the schema or run migrations.
 
-The only writes live in `db_fix_attempts`: `get_fix_brief` may stamp the first
-brief fetch, and `request_verification` may update the allowed fields of an
-existing `fix_attempts` row through `getDbWrite`. Neither path can create a row
-or touch another table. Do not add another write path. Compute derived tool
-output from reads.
+Two modules may use the write connection. `db_fix_attempts`: `get_fix_brief`
+may stamp the first brief fetch, and `request_verification` may update the
+allowed fields of an existing `fix_attempts` row through `getDbWrite`.
+`db_agent_requests`: `start_fix` and `run_scan` each insert one row into the
+`agent_requests` queue; the desktop's own watcher claims and fulfils it and is
+the only writer of its `status`, `result_json`, and `failure_detail` columns.
+Neither module can create a row in, or touch, any other table. Do not add
+another write path. Compute derived tool output from reads.
 
 Database modules are coupled to the generated desktop schema snapshot. Tests
 seed from `test/helpers/schema-fixture.mjs`; handwritten schema fixtures are
 banned except the missing-table degradation fixture. The schema guardrail also
-checks SQL literals and restricts the write connection to the verification
-module.
+checks SQL literals and restricts the write connection to the fix-attempt and
+agent-request modules.
 
 Fail clearly when a database is too old or too new. Do not partially interpret
 an incompatible schema. Issue lifecycle comes only from
@@ -57,8 +60,10 @@ stored by the desktop. Investigate it first when tools select the wrong project.
 
 Core tools read projects, scores, issues, prompts, history, dismissed state,
 scan comparisons, and fix attempts. `how_to_rescan` (alias `request_scan`)
-remains guidance-only; `run_scan` is the queued path once Task 11 lands.
-Fix-loop tools use only the bounded fix-attempt writes described above.
+stays guidance; `run_scan` queues a desktop scan through `agent_requests` and
+`get_scan_status` reads it back. `start_fix` and `get_fix_status` do the same
+for fix attempts. These tools use only the bounded writes described above:
+guarded updates to `fix_attempts` and inserts into `agent_requests`.
 
 Correlation tools are registered in `src/correlation_tools.ts`. They read
 Rust-computed groups and events, then walk generated graph and fix-location

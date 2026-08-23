@@ -143,6 +143,8 @@ export function documentationSafetyFailures(read, exists, listFiles) {
       "sitecmd-mcp README must describe how_to_rescan as guidance-only until it can actually queue desktop scans.",
     );
   }
+  if (!/`run_scan`[^\n]*app[^\n]*running/.test(mcpReadmeSource))
+    failures.push("sitecmd-mcp README run_scan row must say the desktop app has to be running.");
   if (
     /Request a new scan in SiteCMD|start or queue desktop scans/.test(
       read("apps/mcp-server/src/server.ts"),

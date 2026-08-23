@@ -21,6 +21,7 @@ export {
 } from "./db_manifests.js";
 export * from "./db_correlation.js";
 export * from "./db_fix_attempts.js";
+export * from "./db_agent_requests.js";
 
 export type Tier = "free" | "core" | "pro";
 

@@ -3,6 +3,7 @@ import { getDb, getDbWrite } from "./db_connection.js";
 // This is the only MCP module allowed to update existing fix_attempts rows.
 
 const ACTIVE_FIX_ATTEMPT_STATUSES = ["briefed", "verify_requested", "verifying"] as const;
+const SETTLED_FIX_ATTEMPT_STATUSES = ["verified", "verify_failed", "canceled", "expired"] as const;
 
 export interface FixAttemptSummary {
   id: number;
@@ -11,6 +12,21 @@ export interface FixAttemptSummary {
   status: string;
   agentTool: string;
   createdAt: number;
+}
+
+export interface FixAttemptRow {
+  id: number;
+  project_id: number;
+  env_url: string;
+  check_id: string;
+  producer_rule: string | null;
+  status: string;
+  agent_summary: string | null;
+  failure_detail: string | null;
+  verify_started_at: number | null;
+  brief_fetched_at: number | null;
+  created_at: number;
+  updated_at: number;
 }
 
 function rethrowFixAttemptError(e: unknown): never {
@@ -102,33 +118,67 @@ export function getLatestFixAttemptForIssue(
   }
 }
 
-export function listFixAttempts(): FixAttemptSummary[] {
+type FixAttemptSummaryRow = {
+  id: number;
+  project_id: number;
+  check_id: string;
+  status: string;
+  agent_tool: string;
+  created_at: number;
+};
+
+function toSummary(row: FixAttemptSummaryRow): FixAttemptSummary {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    checkId: row.check_id,
+    status: row.status,
+    agentTool: row.agent_tool,
+    createdAt: row.created_at,
+  };
+}
+
+/** Open attempts (unbounded); settled ones are added and capped when include_settled is asked for. */
+export function listFixAttempts(includeSettled = false): FixAttemptSummary[] {
   const db = getDb();
   try {
-    const placeholders = ACTIVE_FIX_ATTEMPT_STATUSES.map(() => "?").join(", ");
-    const rows = db
+    const activePlaceholders = ACTIVE_FIX_ATTEMPT_STATUSES.map(() => "?").join(", ");
+    const activeRows = db
       .prepare(
         `SELECT id, project_id, check_id, status, agent_tool, created_at
          FROM fix_attempts
-         WHERE status IN (${placeholders})
-         ORDER BY id`,
+         WHERE status IN (${activePlaceholders})
+         ORDER BY id DESC`,
       )
-      .all(...ACTIVE_FIX_ATTEMPT_STATUSES) as Array<{
-      id: number;
-      project_id: number;
-      check_id: string;
-      status: string;
-      agent_tool: string;
-      created_at: number;
-    }>;
-    return rows.map((r) => ({
-      id: r.id,
-      projectId: r.project_id,
-      checkId: r.check_id,
-      status: r.status,
-      agentTool: r.agent_tool,
-      createdAt: r.created_at,
-    }));
+      .all(...ACTIVE_FIX_ATTEMPT_STATUSES) as FixAttemptSummaryRow[];
+    if (!includeSettled) return activeRows.map(toSummary);
+
+    const settledPlaceholders = SETTLED_FIX_ATTEMPT_STATUSES.map(() => "?").join(", ");
+    const settledRows = db
+      .prepare(
+        `SELECT id, project_id, check_id, status, agent_tool, created_at
+         FROM fix_attempts
+         WHERE status IN (${settledPlaceholders})
+         ORDER BY id DESC
+         LIMIT 20`,
+      )
+      .all(...SETTLED_FIX_ATTEMPT_STATUSES) as FixAttemptSummaryRow[];
+    return [...activeRows, ...settledRows].map(toSummary);
+  } catch (e) {
+    rethrowFixAttemptError(e);
+  }
+}
+
+export function getFixAttempt(attemptId: number): FixAttemptRow | null {
+  try {
+    const row = getDb()
+      .prepare(
+        `SELECT id, project_id, env_url, check_id, producer_rule, status, agent_summary, failure_detail,
+                verify_started_at, brief_fetched_at, created_at, updated_at
+         FROM fix_attempts WHERE id = ?`,
+      )
+      .get(attemptId) as FixAttemptRow | undefined;
+    return row ?? null;
   } catch (e) {
     rethrowFixAttemptError(e);
   }

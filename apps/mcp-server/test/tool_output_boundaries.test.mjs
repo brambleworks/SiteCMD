@@ -10,6 +10,10 @@ const UNFENCED = new Set([
   "get_scan_history",
   "list_fix_attempts",
   "request_verification",
+  "start_fix",
+  "get_fix_status",
+  "run_scan",
+  "get_scan_status",
 ]);
 
 function registrations(file) {

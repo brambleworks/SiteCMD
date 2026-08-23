@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { connectInMemory } from "./tools_list_snapshot.test.mjs";
 
-const WRITERS = new Set(["request_verification"]);
+const WRITERS = new Set(["request_verification", "start_fix", "run_scan"]);
 
 test("every tool carries a title and honest read-only annotations", async () => {
   const session = await connectInMemory();
