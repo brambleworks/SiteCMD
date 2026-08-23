@@ -347,4 +347,74 @@ describe("CLI installers", () => {
     expect(result.stderr).toContain("minisign is required");
     expect(result.stderr).toContain("brew install minisign");
   });
+
+  it("names the apt-get install command on Linux when apt-get is available", () => {
+    const fixture = createInstallerFixture();
+    writeExecutable(path.join(fixture.bin, "apt-get"), "#!/bin/sh\nexit 0\n");
+    fs.unlinkSync(path.join(fixture.bin, "minisign"));
+
+    const result = fixture.runPublic({
+      FAKE_UNAME_SYSTEM: "Linux",
+      PATH: `${fixture.bin}:/usr/bin:/bin`,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("minisign is required");
+    expect(result.stderr).toContain("sudo apt-get install minisign");
+  });
+
+  it("falls back to the minisign docs URL on Linux without a known package manager", () => {
+    const fixture = createInstallerFixture();
+    fs.unlinkSync(path.join(fixture.bin, "minisign"));
+
+    const result = fixture.runPublic({
+      FAKE_UNAME_SYSTEM: "Linux",
+      PATH: `${fixture.bin}:/usr/bin:/bin`,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("minisign is required");
+    expect(result.stderr).toContain("https://jedisct1.github.io/minisign/#installation");
+  });
+
+  it("rejects a latest-version answer with a fourth version component", () => {
+    const fixture = createInstallerFixture();
+    const installed = seedInstalledCli(fixture);
+
+    const result = fixture.runPublic({
+      SITECMD_VERSION: "",
+      FAKE_LATEST_RESPONSE: '{"latest_version":"1.0.0.0"}',
+    });
+
+    expect(result.stderr).toContain("invalid release version");
+    expectPreserved(result, installed);
+  });
+
+  it("refuses a pre-release latest-version answer older than the installed release", () => {
+    const fixture = createInstallerFixture();
+    const installed = path.join(fixture.installDir, "sitecmd");
+    writeExecutable(installed, "#!/bin/sh\nprintf 'sitecmd 1.6.0\\n'\n");
+
+    const result = fixture.runPublic({
+      SITECMD_VERSION: "",
+      FAKE_LATEST_RESPONSE: '{"latest_version":"1.6.0-rc.1"}',
+    });
+
+    expect(result.stderr).toContain("refusing to downgrade");
+    expect(result.status).not.toBe(0);
+    expect(fs.readFileSync(installed, "utf8")).toContain("1.6.0");
+  });
+
+  it("installs a release that supersedes an installed pre-release of the same version", () => {
+    const fixture = createInstallerFixture();
+    writeExecutable(
+      path.join(fixture.installDir, "sitecmd"),
+      "#!/bin/sh\nprintf 'sitecmd 1.5.4-rc.1\\n'\n",
+    );
+
+    const result = fixture.runPublic({ SITECMD_VERSION: "" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Installed sitecmd 1.5.4");
+  });
 });
