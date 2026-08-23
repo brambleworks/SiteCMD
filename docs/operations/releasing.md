@@ -291,8 +291,11 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`:
    hash-compares any existing R2 object before upload (including `SHA256SUMS`,
    `SHA256SUMS.sig`, and `SHA256SUMS.minisig`), advances the updater manifest,
    and then creates the GitHub Release for the tag with the changelog section
-   as notes and the two checksum files attached. Binaries stay on R2. It never
-   executes source, dependencies, or artifacts.
+   as notes and the two checksum files attached. Binaries stay on R2. Once the
+   Release exists, a SHA-pinned `actions/attest-build-provenance` step attests
+   build provenance over every published artifact glob and `SHA256SUMS`,
+   scoped to this job alone. It never executes source, dependencies, or
+   artifacts.
 
 The candidate check now forces the tag, source files, and protected commit to
 agree. The version-sync guardrail separately prevents any release version
@@ -388,6 +391,12 @@ Confirm the two public verification surfaces exist for the version:
 `https://releases.sitecmd.com/v<version>/SHA256SUMS` and
 `https://releases.sitecmd.com/v<version>/SHA256SUMS.minisig` return 200, and
 `gh release view v<version> --repo brambleworks/SiteCMD` lists both as assets.
+
+If the attestation step fails, R2, the updater manifest, and the Release are
+already live and correct; only the attestation is missing. Re-running
+`publish-release` recovers it as long as the `signed-release-payload` artifact
+is still within its 24-hour retention window; once that artifact has expired,
+`sign-updaters` must run again to produce a new one.
 
 Download and active-install analytics are operated with the release service and
 documented privately beside that service. This repository's release procedure

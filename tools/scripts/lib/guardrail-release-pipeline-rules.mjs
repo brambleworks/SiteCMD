@@ -1,4 +1,5 @@
 import { orderedBefore } from "./guardrail-text-utils.mjs";
+import { releasePublicationSafetyFailures } from "./guardrail-release-publication-rules.mjs";
 
 export function releasePipelineSafetyFailures(read) {
   const releaseWorkflow = read(".github/workflows/release.yml");
@@ -191,47 +192,10 @@ export function releasePipelineSafetyFailures(read) {
     "release.yml must embed its source commit and sign, verify, and publish every CLI archive signature beside the archive.",
   );
 
-  // One signed checksum manifest per release: signed in isolation, verified
-  // without secrets, published beside the artifacts and on the GitHub Release.
-  check(
-    signerJob.includes('"$SIGNER" signer sign "$MANIFEST"') &&
-      signerJob.includes('MANIFEST="$GITHUB_WORKSPACE/signing-input/SHA256SUMS"') &&
-      signerRecordScript.includes(
-        'cp "signing-input/$manifest" "signed-release-payload/$manifest"',
-      ) &&
-      verifierCommands.includes("cmp -s checksum-signature.sig payload/SHA256SUMS.minisig") &&
-      verifierCommands.includes(
-        '"$verifier" updater-public-key.pub payload/SHA256SUMS checksum-signature.sig',
-      ) &&
-      verifierCommands.includes('verify_listed "$dir/$cli_archive"') &&
-      publisherJob.includes("add_upload payload/SHA256SUMS SHA256SUMS") &&
-      publisherJob.includes("add_upload payload/SHA256SUMS.minisig SHA256SUMS.minisig") &&
-      publisherJob.includes("while read -r hash name; do") &&
-      publisherJob.includes("contents: write") &&
-      publisherJob.includes("gh release create") &&
-      publisherJob.includes("--verify-tag") &&
-      publisherJob.includes("payload/SHA256SUMS payload/SHA256SUMS.minisig") &&
-      orderedBefore(
-        publisherJob,
-        "Advance the production updater manifest",
-        'gh release create "$TAG_NAME"',
-      ),
-    "release.yml must sign one release-wide SHA256SUMS with the production updater key, verify its .minisig without secrets and every artifact against it, upload both beside the artifacts, and create the GitHub Release (verified tag, changelog notes, checksum assets) only after the updater manifest advanced.",
-  );
-
-  // Provenance is attested only by the credentialed publisher, after every
-  // verification leg and the Release exist, never by a build or signer job.
-  const nonPublisherJobs = releaseWorkflow.replace(publisherJob, "");
-  check(
-    /uses: actions\/attest-build-provenance@[0-9a-f]{40}/.test(publisherJob) &&
-      publisherJob.includes("id-token: write") &&
-      publisherJob.includes("attestations: write") &&
-      publisherJob.includes("payload/SHA256SUMS\n") &&
-      !nonPublisherJobs.includes("attestations: write") &&
-      !nonPublisherJobs.includes("actions/attest-build-provenance@") &&
-      orderedBefore(publisherJob, "gh release create", "actions/attest-build-provenance@"),
-    "release.yml publish-release must run a SHA-pinned actions/attest-build-provenance over the verified payload (including SHA256SUMS) after the GitHub Release step, with id-token and attestations write scoped to that job alone.",
-  );
+  // Signed-checksum publication and provenance attestation live in their own
+  // module (guardrail-release-publication-rules.mjs) to stay under the line
+  // budget; merge their failures in here so callers see one combined list.
+  failures.push(...releasePublicationSafetyFailures(read));
 
   check(
     verifierJob.includes("needs: [prepare-candidate, sign-updaters]") &&

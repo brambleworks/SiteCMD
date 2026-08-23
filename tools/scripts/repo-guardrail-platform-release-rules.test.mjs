@@ -200,6 +200,24 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
   });
 
+  it("catches a verifier that stopped binding the updater bundle to the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace('verify_listed "$dir/$filename"\n', "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a verifier that stopped binding the DMG to the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace('if [ -n "$dmg_name" ]; then verify_listed "$dir/$dmg_name"; fi\n', "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
   it("catches a publisher that drops the upload-plan cross-check", () => {
     const failures = run((file, source) =>
       file.includes("release.yml")
@@ -209,10 +227,69 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
   });
 
+  it("catches an upload-plan cross-check whose lookup is a no-op", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            'grep -Fq "$(printf \'\\tv%s/%s\\t%s\' "$VERSION" "$name" "$hash")" publication/upload-plan.tsv',
+            "true",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
   it("catches provenance attestation moved out of the publisher", () => {
     const failures = run((file, source) =>
       file.includes("release.yml") ? source.replace("      attestations: write\n", "") : source,
     );
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it("catches a deleted attestation subject", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace("            payload/SHA256SUMS\n", "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it("catches an attestation subject swapped for the unverified candidate manifest", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            "            payload/*/*.dmg\n",
+            "            release-candidate/manifest.json\n",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it("is not fooled by a decoy comment when the attest step moves ahead of the release", () => {
+    const attestStep = [
+      "      - name: Attest build provenance for the published artifacts",
+      "        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2",
+      "        with:",
+      "          subject-path: |",
+      "            payload/*/*.tar.gz",
+      "            payload/*/*.AppImage",
+      "            payload/*/*-setup.exe",
+      "            payload/*/*.zip",
+      "            payload/*/*.dmg",
+      "            payload/SHA256SUMS",
+    ].join("\n");
+    const publishHeader = "      - name: Publish the GitHub Release with notes and checksums";
+    const decoy = "      # gh release create already ran; nothing left to publish\n";
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const withoutAttest = source.replace(`\n\n${attestStep}\n`, "\n");
+      return withoutAttest.replace(
+        `${publishHeader}\n`,
+        `${decoy}\n${attestStep}\n\n${publishHeader}\n`,
+      );
+    });
     expect(failures.join("\n")).toContain("attest-build-provenance");
   });
 

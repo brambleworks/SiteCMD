@@ -58,11 +58,10 @@ to put the same findings inside an AI coding tool.
 
 ## Verify your download
 
-Releases published after 2026-08-22 also carry a build provenance attestation
-recorded by the release workflow; with the GitHub CLI installed,
-`gh attestation verify SiteCMD_1.0.1_universal.dmg --repo brambleworks/SiteCMD`
-confirms the file came from this repository's release workflow. Replace the
-filename with the one you downloaded.
+Releases published by the release workflow carry a Sigstore build-provenance
+attestation; verify one with
+`gh attestation verify <file> --repo brambleworks/SiteCMD`. Releases
+back-filled by hand before the workflow change carry none.
 
 ## Where your data lives
 
