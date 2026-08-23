@@ -83,6 +83,32 @@ impl Database {
         })?
     }
 
+    /// Whether a claimed scan is still in flight. Scans are serialized on this,
+    /// not on one pass of the queue, because a claim outlives the tick that won it.
+    pub fn has_running_scan(&self) -> Result<bool, DbError> {
+        self.execute(|conn| {
+            conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM agent_requests
+                     WHERE kind = 'run_scan' AND status = 'running')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|found| found == 1)
+            .map_err(DbError::from)
+        })?
+    }
+
+    /// Fail every claimed row through the normal failure path. A claim cannot
+    /// outlive the process that made it, so the watcher clears these at startup
+    /// and `running` afterwards means running in this process.
+    pub fn fail_running_agent_requests(&self, detail: &str, now_ms: i64) -> Result<usize, DbError> {
+        let running = self.list_agent_requests_in_status("running")?;
+        for request in &running {
+            self.fail_agent_request(request.id, detail, now_ms)?;
+        }
+        Ok(running.len())
+    }
+
     /// Move one requested row to running; false when another tick or an expiry won.
     pub fn claim_agent_request(&self, id: i64, now_ms: i64) -> Result<bool, DbError> {
         self.execute(move |conn| {

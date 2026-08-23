@@ -15,14 +15,31 @@ use crate::core::scan_execution::{ScanExecutionMode, ScanTrigger};
 use crate::core::scanner::ScanType;
 use crate::db::{normalize_env_url, AgentRequestRow, Database};
 
+/// Failure detail for a row whose claim did not survive the process restart.
+pub(crate) const ORPHANED_REQUEST_DETAIL: &str = "app_restarted";
+
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
 pub async fn run(db: Arc<Database>, app: AppHandle, scan_control: ScanControlState) {
+    reconcile_orphaned_requests(&db);
     loop {
         tick(&db, &app, &scan_control).await;
         tokio::time::sleep(AGENT_REQUEST_POLL_INTERVAL).await;
+    }
+}
+
+/// No claim outlives the process that made it, so a `running` row found at
+/// startup is abandoned work. Failing it here is what lets a later tick trust
+/// `running` as the in-flight scan gate.
+pub(crate) fn reconcile_orphaned_requests(db: &Database) {
+    match db.fail_running_agent_requests(ORPHANED_REQUEST_DETAIL, now_ms()) {
+        Ok(0) => {}
+        Ok(abandoned) => {
+            tracing::info!("agent request watcher: failed {abandoned} abandoned requests")
+        }
+        Err(error) => tracing::warn!("agent request watcher: reconcile: {error}"),
     }
 }
 
@@ -71,15 +88,20 @@ async fn tick(db: &Arc<Database>, app: &AppHandle, scan_control: &ScanControlSta
     }
 }
 
-/// Claim the rows this tick will fulfil. At most one scan is claimed per tick
-/// so a startup backlog does not launch every queued scan at once.
+/// Claim the rows this tick will fulfil. Scans are serialized on the queue
+/// itself: a scan claimed on an earlier tick is still `running`, so the table
+/// bounds concurrency over time and the per-tick cap is the second guard.
 pub(crate) fn claim_due_requests(
     db: &Database,
     requests: Vec<AgentRequestRow>,
     now: i64,
 ) -> Vec<AgentRequestRow> {
     let mut claimed = Vec::new();
-    let mut scan_running = false;
+    // Fail closed: never start a scan while the in-flight probe is unreadable.
+    let mut scan_running = db.has_running_scan().unwrap_or_else(|error| {
+        tracing::warn!("agent request watcher: running scan probe: {error}");
+        true
+    });
     for request in requests {
         if scan_running && request.kind == "run_scan" {
             continue;

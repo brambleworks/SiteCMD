@@ -307,3 +307,108 @@ fn an_unknown_agent_tool_fails_the_request_instead_of_briefing_claude_code() {
         "no attempt may be created for an unsupported agent"
     );
 }
+
+#[test]
+fn queued_scans_run_one_at_a_time_across_ticks() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    let queued: Vec<i64> = (0..3)
+        .map(|n| queue_scan(&db, project_id, 1_000 + n))
+        .collect();
+
+    for (index, expected) in queued.iter().enumerate() {
+        let now = 2_000 + (index as i64) * 100;
+        let requests = db.list_agent_requests_in_status("requested").expect("list");
+        let claimed = claim_due_requests(&db, requests, now);
+        assert_eq!(claimed.len(), 1, "tick {index} took more than one scan");
+        assert_eq!(claimed[0].id, *expected, "scans run oldest first");
+        assert_eq!(
+            db.list_agent_requests_in_status("requested")
+                .expect("requested")
+                .len(),
+            queued.len() - index - 1,
+            "the rest of the backlog stays queued"
+        );
+
+        let requests = db.list_agent_requests_in_status("requested").expect("list");
+        assert!(
+            claim_due_requests(&db, requests, now + 10).is_empty(),
+            "a scan still running from tick {index} must block the next tick"
+        );
+
+        settle(&db, *expected, Ok(r#"{"execution_id":1}"#.to_string()));
+        assert!(!db.has_running_scan().expect("probe"));
+    }
+
+    assert_eq!(
+        db.list_agent_requests_in_status("fulfilled")
+            .expect("fulfilled")
+            .len(),
+        3
+    );
+    assert!(db
+        .list_agent_requests_in_status("requested")
+        .expect("requested")
+        .is_empty());
+    assert!(db
+        .list_agent_requests_in_status("running")
+        .expect("running")
+        .is_empty());
+}
+
+#[test]
+fn a_restart_fails_the_requests_the_previous_process_had_claimed() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    let abandoned = queue_scan(&db, project_id, 1_000);
+    let waiting = queue_scan(&db, project_id, 1_001);
+    assert!(db.claim_agent_request(abandoned, 2_000).expect("claim"));
+    assert!(db.has_running_scan().expect("probe"));
+
+    reconcile_orphaned_requests(&db);
+
+    let failed = row(&db, "failed", abandoned).expect("failed row");
+    assert_eq!(
+        failed.failure_detail.as_deref(),
+        Some(ORPHANED_REQUEST_DETAIL)
+    );
+    assert!(
+        row(&db, "requested", waiting).is_some(),
+        "queued work the old process never claimed is untouched"
+    );
+    assert!(
+        !db.has_running_scan().expect("probe"),
+        "a fresh watcher starts with no scan in flight"
+    );
+
+    let requests = db.list_agent_requests_in_status("requested").expect("list");
+    let claimed = claim_due_requests(&db, requests, 3_000);
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, waiting);
+}
+
+#[test]
+fn a_running_fix_request_does_not_block_a_queued_scan() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    let fix = db
+        .insert_agent_request(
+            "start_fix",
+            project_id,
+            "https://example.com",
+            Some("security.csp"),
+            None,
+            "claude-code",
+            1_000,
+        )
+        .expect("queue fix");
+    let scan = queue_scan(&db, project_id, 1_001);
+    assert!(db.claim_agent_request(fix, 2_000).expect("claim"));
+    assert!(!db.has_running_scan().expect("probe"));
+
+    let requests = db.list_agent_requests_in_status("requested").expect("list");
+    let claimed = claim_due_requests(&db, requests, 2_100);
+
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, scan);
+}
