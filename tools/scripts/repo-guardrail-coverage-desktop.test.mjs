@@ -3,6 +3,7 @@ import {
   GUARDRAIL_TEST_TIMEOUT_MS,
   ROOT,
   expectGuardrailFailure,
+  guardrailFailuresFor,
   mustMutate,
   read,
   readFixtureFile,
@@ -168,6 +169,48 @@ describe.concurrent(
         },
         "Desktop raw palette classes regressed",
       );
+    });
+
+    it("rejects raw palette text classes left behind in colors.css", () => {
+      expectGuardrailFailure(
+        desktopStyleConsistencyFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/styles/colors.css",
+            `${readFixtureFile(fixtureRoot, "apps/desktop/src/styles/colors.css")}
+.text-cyan-300 {
+  color: var(--cyan-300);
+}
+`,
+          );
+        },
+        "Desktop raw palette text classes defined in colors.css",
+      );
+    });
+
+    it("points at token classes colors.css actually defines", () => {
+      const message = guardrailFailuresFor(desktopStyleConsistencyFailures, (fixtureRoot) => {
+        writeFixtureFile(
+          fixtureRoot,
+          "apps/desktop/src/components/dashboard/BrokenPalette.tsx",
+          'export function BrokenPalette() { return <p className="text-emerald-300">ok</p>; }\n',
+        );
+      });
+      const remediation = /Use ([^:]+) from styles\/colors\.css/.exec(message);
+      expect(remediation, `no remediation sentence in: ${message}`).not.toBeNull();
+      const colors = read("apps/desktop/src/styles/colors.css");
+      const named = remediation[1]
+        .split(/,|\bor\b/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      expect(named.length).toBeGreaterThan(2);
+      for (const className of named) {
+        // A prefix a person can grep for, so remediation that names a class shape
+        // the stylesheet never defines (text-category-*) fails here.
+        const selector = className.endsWith("*") ? `.${className.slice(0, -1)}` : `.${className} {`;
+        expect(colors, `${className} is not defined in colors.css`).toContain(selector);
+      }
     });
 
     it("rejects arbitrary pixel typography and spacing", () => {

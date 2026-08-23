@@ -114,7 +114,20 @@ export function desktopStyleConsistencyFailures(read, sourceFiles) {
   }
   if (rawPaletteHits.length > RAW_PALETTE_CLASS_BUDGET) {
     failures.push(
-      `Desktop raw palette classes regressed: ${rawPaletteHits.length} files (budget ${RAW_PALETTE_CLASS_BUDGET}). Use text-score-*, text-severity-*, text-category-*, or text-brand from styles/colors.css: ${rawPaletteHits.join(", ")}`,
+      `Desktop raw palette classes regressed: ${rawPaletteHits.length} files (budget ${RAW_PALETTE_CLASS_BUDGET}). Use text-score-*, text-severity-*, text-cat-*, text-destructive, or text-brand from styles/colors.css: ${rawPaletteHits.join(", ")}`,
+    );
+  }
+
+  // The rule above can only hold while the classes stop existing: a palette text
+  // class left in colors.css is dead weight nothing may reference, and the next
+  // person to need a red reaches for it instead of a token.
+  const paletteTextClassDefinitions =
+    read("apps/desktop/src/styles/colors.css").match(
+      /^\.text-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/gm,
+    ) ?? [];
+  if (paletteTextClassDefinitions.length > 0) {
+    failures.push(
+      `Desktop raw palette text classes defined in colors.css: ${paletteTextClassDefinitions.join(", ")}. JSX may not use them, so delete the rules and keep text-score-*, text-severity-*, text-cat-*, text-destructive, or text-brand`,
     );
   }
 

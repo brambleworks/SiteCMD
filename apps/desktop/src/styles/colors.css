@@ -103,10 +103,6 @@
 .text-current {
   color: currentColor;
 }
-/* palette shades used by name in JSX (status indicators, terminals) */
-.text-cyan-300 {
-  color: var(--cyan-300);
-}
 
 /* Background */
 .bg-background {

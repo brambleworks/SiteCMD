@@ -275,7 +275,7 @@ export function AccountSection() {
                 </Button>
               ) : (
                 <div className="danger-callout-row">
-                  <p className="text-body-muted text-severity-critical account-deactivate-warning">
+                  <p className="text-body-muted account-deactivate-warning">
                     This will unlink your license from this device. You can reactivate it anytime.
                   </p>
                   <Button
