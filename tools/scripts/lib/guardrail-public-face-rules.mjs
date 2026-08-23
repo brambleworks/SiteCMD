@@ -51,7 +51,10 @@ export function publicFaceFailures(read, exists, listFiles) {
     }
   }
 
-  if (exists(LOCALHOST_FIXTURES) && /https?:\/\/[a-z0-9.-]+\.ai\b/.test(read(LOCALHOST_FIXTURES))) {
+  if (
+    exists(LOCALHOST_FIXTURES) &&
+    /https?:\/\/[a-z0-9.-]+\.(?:ai|run)\b/.test(read(LOCALHOST_FIXTURES))
+  ) {
     failures.push(
       `${LOCALHOST_FIXTURES} names a real third-party domain as a test fixture; use a reserved example.com host.`,
     );

@@ -90,4 +90,12 @@ describe("publicFaceFailures", () => {
       }),
     ).toContain("real third-party domain");
   });
+
+  it("rejects a real tunnelling host the message already claimed to cover", () => {
+    expect(
+      run((files) => {
+        files[LOCALHOST_FIXTURES] += '("https://localhost.run", "production"),\n';
+      }),
+    ).toContain("real third-party domain");
+  });
 });
