@@ -128,7 +128,9 @@ export default defineConfig([
     files: ["apps/desktop/src/**/*.ts"],
     ignores: [
       "apps/desktop/src/**/*.d.ts",
-      "apps/desktop/src/**/use*.ts",
+      // Bare `use*` also matches non-hook files like `user-facing-error.ts`,
+      // so this exclusion targets the hook naming convention specifically.
+      "apps/desktop/src/**/use[A-Z]*.ts",
       `apps/desktop/src/**/${TEST_SUFFIXES}`,
     ],
     rules: {
@@ -142,13 +144,13 @@ export default defineConfig([
     },
   },
   {
-    files: ["apps/desktop/src/**/use*.{ts,tsx}"],
+    files: ["apps/desktop/src/**/use[A-Z]*.{ts,tsx}"],
     ignores: [`apps/desktop/src/**/${TEST_SUFFIXES}`],
     rules: {
       "check-file/filename-naming-convention": [
         "error",
         {
-          "**/use*.{ts,tsx}": "use[A-Z]*",
+          "**/use[A-Z]*.{ts,tsx}": "use[A-Z]*",
         },
         FILENAME_RULE_OPTIONS,
       ],
