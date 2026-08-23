@@ -387,3 +387,70 @@ fn sarif_carries_suppressed_findings_as_suppressed_results() {
         "Inert fixture."
     );
 }
+
+#[test]
+fn the_json_report_omits_the_generating_machines_checkout_path() {
+    let project = vulnerable_project();
+    let project_dir = project.path().to_string_lossy().into_owned();
+    let args = AuditArgs {
+        project_path: project.path().to_path_buf(),
+        format: CodeScanReportFormat::Json,
+        fail_on: None,
+        output: None,
+        inspect_local_databases: false,
+        baseline: None,
+    };
+
+    let active = run(&args).expect("audit completes");
+    let report: serde_json::Value =
+        serde_json::from_str(&active.rendered).expect("valid report json");
+    assert_eq!(report["issues"][0]["relativePath"], "src/keys.js");
+    assert!(
+        report["issues"][0].get("absolutePath").is_none(),
+        "{}",
+        active.rendered
+    );
+    assert!(
+        !active.rendered.contains(&project_dir),
+        "a committed baseline would publish {project_dir}"
+    );
+
+    let sitecmd_dir = project.path().join(".sitecmd");
+    std::fs::create_dir_all(&sitecmd_dir).expect("sitecmd config directory");
+    std::fs::write(
+        sitecmd_dir.join("config.json"),
+        r#"{
+  "version": 1,
+  "url": "https://example.com",
+  "name": "path disclosure fixture",
+  "code_scan": {
+    "suppressions": [
+      {
+        "match": {
+          "rule": "code_scan.hardcoded-secret",
+          "path": "src/keys.js"
+        },
+        "reason": "The credential-shaped value is an inert scanner fixture."
+      }
+    ]
+  }
+}"#,
+    )
+    .expect("suppression config");
+
+    let suppressed = run(&args).expect("suppressed audit completes");
+    let suppressed_report: serde_json::Value =
+        serde_json::from_str(&suppressed.rendered).expect("valid report json");
+    assert_eq!(suppressed_report["ignoredCount"], 1);
+    assert!(
+        suppressed_report["ignoredFindings"][0]
+            .get("absolutePath")
+            .is_none(),
+        "{}",
+        suppressed.rendered
+    );
+    assert!(
+        !suppressed.rendered.contains(&project_dir),
+        "a committed baseline would publish {project_dir}"
+    );
+}

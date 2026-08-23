@@ -317,6 +317,9 @@ fn format_audit_sarif(
         .map_err(|error| format!("Could not serialize SARIF report: {error}"))
 }
 
+/// The JSON report is a CI artifact a project can commit, so the generating machine's checkout path never ships in it.
+const LOCAL_CHECKOUT_PATH_FIELD: &str = "absolutePath";
+
 fn format_audit_json(
     audit: &SuppressedAudit,
     baseline: &std::collections::HashSet<String>,
@@ -334,6 +337,7 @@ fn format_audit_json(
     {
         for (value, issue) in issues.iter_mut().zip(&audit.report.issues) {
             if let Some(issue_object) = value.as_object_mut() {
+                issue_object.remove(LOCAL_CHECKOUT_PATH_FIELD);
                 let fingerprint = issue_fingerprint(issue);
                 let in_baseline = baseline.contains(&fingerprint);
                 if in_baseline {
@@ -379,6 +383,7 @@ fn ignored_finding_json(finding: &IgnoredFinding) -> Result<serde_json::Value, S
     let object = value
         .as_object_mut()
         .ok_or_else(|| "Could not serialize ignored Code Scan finding as an object".to_string())?;
+    object.remove(LOCAL_CHECKOUT_PATH_FIELD);
     object.insert(
         "fingerprint".into(),
         serde_json::Value::String(finding.fingerprint.clone()),
