@@ -35,10 +35,7 @@ export function TrafficSourcesModal({
   };
 
   return (
-    <Dialog
-      labelledBy="traffic-sources-title"
-      onClose={onClose}
-      className="modal-card modal-card--large">
+    <Dialog labelledBy="traffic-sources-title" onClose={onClose} className="fix-prompt-modal">
       <div className="fix-prompt-modal-header">
         <h3 id="traffic-sources-title" className="fix-prompt-modal-title">
           Traffic sources
