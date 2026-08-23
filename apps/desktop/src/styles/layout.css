@@ -1046,29 +1046,6 @@
     background-color: rgba(0, 0, 0, 0.6);
     padding: var(--space-card);
   }
-  .overlay-backdrop--soft {
-    background-color: rgba(0, 0, 0, 0.5);
-  }
-  .overlay-backdrop--scan {
-    /* Start below the fixed top bar and allow short windows to scroll. */
-    top: 3rem;
-    z-index: 80;
-    overflow-y: auto;
-    background-color: color-mix(in oklab, var(--background) 95%, transparent);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-  }
-  .overlay-backdrop--config {
-    background-color: rgba(0, 0, 0, 0.65);
-    padding: var(--space-section) var(--space-card);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-  }
-  .overlay-backdrop--add-project {
-    align-items: flex-start;
-    background-color: rgba(0, 0, 0, 0.5);
-    padding-top: 4rem;
-  }
   .overlay-backdrop--command {
     align-items: flex-start;
     padding-top: 15vh;
@@ -1094,6 +1071,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* A panel with no bounded height of its own (the scan overlay) must stay
+       scrollable in a short window; margin: auto on the panel itself, not
+       align-items alone, is what keeps the scrolled-to-top edge reachable. */
+    overflow-y: auto;
   }
   .dialog::backdrop {
     background-color: rgba(0, 0, 0, 0.6);

@@ -123,10 +123,6 @@
   .scan-schedule-desc {
     margin-top: var(--space-tight);
   }
-  .scan-schedule-backdrop {
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-  }
   .scan-schedule-dialog-head {
     display: flex;
     align-items: flex-start;

@@ -40,7 +40,7 @@ export function TelemetryConsentPrompt() {
       onClose={() => undefined}
       dismissOnBackdrop={false}
       closeOnEscape={false}
-      backdropClassName="dialog--blur telemetry-consent-backdrop"
+      backdropClassName="dialog--blur"
       className="modal-panel telemetry-consent-panel">
       <div className="telemetry-consent-header">
         <div className="icon-badge icon-badge--lg icon-badge--primary-strong">

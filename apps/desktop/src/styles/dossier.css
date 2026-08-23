@@ -594,18 +594,6 @@
     width: 100%;
   }
 
-  .fix-prompt-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: rgba(0, 0, 0, 0.7);
-    padding: var(--space-section) var(--space-card);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-    z-index: 75;
-  }
   .fix-prompt-modal {
     display: flex;
     max-height: 84vh;

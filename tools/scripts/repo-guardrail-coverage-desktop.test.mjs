@@ -351,6 +351,25 @@ describe.concurrent(
       );
     });
 
+    it("rejects a scan overlay that loses its short-window scroll fallback", () => {
+      expectGuardrailFailure(
+        desktopFrontendDisplayFailures,
+        (fixtureRoot) => {
+          const layoutPath = "apps/desktop/src/styles/layout.css";
+          const source = readFixtureFile(fixtureRoot, layoutPath);
+          writeFixtureFile(
+            fixtureRoot,
+            layoutPath,
+            source.replace(
+              "       align-items alone, is what keeps the scrolled-to-top edge reachable. */\n    overflow-y: auto;\n  }\n  .dialog::backdrop {",
+              "       align-items alone, is what keeps the scrolled-to-top edge reachable. */\n  }\n  .dialog::backdrop {",
+            ),
+          );
+        },
+        "Scan overlay must stay reachable in short windows",
+      );
+    });
+
     it("rejects duplicate URL identity normalizers in desktop UI", () => {
       expectGuardrailFailure(
         desktopUrlIdentityFailures,
@@ -1308,6 +1327,34 @@ fn category_str(category: &ScanCategory) -> &'static str {
             fixtureRoot,
             "apps/desktop/src/components/dashboard/BrokenModal.tsx",
             'export function BrokenModal() { return <div role="dialog" aria-modal="true" />; }\n',
+          );
+        },
+        'Hand-rolled role="dialog" count regressed',
+      );
+    });
+
+    it("rejects a new hand-rolled aria-modal without role=dialog", () => {
+      expectGuardrailFailure(
+        handRolledDialogFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenAriaModal.tsx",
+            'export function BrokenAriaModal() { return <div aria-modal="true" />; }\n',
+          );
+        },
+        'Hand-rolled role="dialog" count regressed',
+      );
+    });
+
+    it("rejects a raw <dialog> tag reached outside the Dialog primitive", () => {
+      expectGuardrailFailure(
+        handRolledDialogFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenRawDialog.tsx",
+            "export function BrokenRawDialog() { return <dialog open />; }\n",
           );
         },
         'Hand-rolled role="dialog" count regressed',

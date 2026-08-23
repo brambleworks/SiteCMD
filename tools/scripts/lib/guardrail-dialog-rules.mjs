@@ -2,6 +2,14 @@ const DIALOG_PRIMITIVE = "apps/desktop/src/components/ui/dialog.tsx";
 // Hand-rolled modals still waiting to move onto the Dialog primitive. Lower only.
 const HAND_ROLLED_DIALOG_BUDGET = 0;
 const ROLE_DIALOG_RE = /role="dialog"/g;
+// Also count aria-modal on its own (a shell can carry it without role="dialog")
+// and a raw <dialog> tag reached without the shared primitive.
+const ARIA_MODAL_RE = /aria-modal=/g;
+const RAW_DIALOG_TAG_RE = /<dialog\b/g;
+
+function countMatches(source, pattern) {
+  return (source.match(pattern) ?? []).length;
+}
 
 export function handRolledDialogFailures(read, sourceFiles) {
   const offenders = [];
@@ -9,7 +17,11 @@ export function handRolledDialogFailures(read, sourceFiles) {
   for (const file of sourceFiles) {
     if (!file.endsWith(".tsx") || /\.(test|spec)\.tsx$/.test(file)) continue;
     if (file === DIALOG_PRIMITIVE) continue;
-    const count = (read(file).match(ROLE_DIALOG_RE) ?? []).length;
+    const source = read(file);
+    const count =
+      countMatches(source, ROLE_DIALOG_RE) +
+      countMatches(source, ARIA_MODAL_RE) +
+      countMatches(source, RAW_DIALOG_TAG_RE);
     if (count === 0) continue;
     total += count;
     offenders.push(`${file} (${count})`);
