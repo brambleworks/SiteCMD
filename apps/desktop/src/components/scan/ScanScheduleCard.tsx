@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/useToast";
 import { getScanSchedule, saveScanSchedule } from "@/lib/commands";
 import type { ScheduledScanType } from "@/lib/types";
@@ -121,104 +122,99 @@ export function ScanScheduleCard({ projectId, environmentId, projectPath }: Scan
       </div>
 
       {schedOpen ? (
-        <div
-          className="overlay-backdrop scan-schedule-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Scheduled scans"
-          onClick={() => setSchedOpen(false)}>
-          <div className="scan-schedule-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="scan-schedule-dialog-head">
-              <div>
-                <h2 className="scan-schedule-dialog-title text-foreground">Scheduled scans</h2>
-                <p className="text-body-muted text-relaxed scan-schedule-desc">
-                  {codeInclusionNote}
-                </p>
-              </div>
-              <Button
-                unstyled
-                type="button"
-                onClick={() => setSchedOpen(false)}
-                className="icon-btn"
-                aria-label="Close schedule dialog">
-                <X className="icon-sm" />
-              </Button>
+        <Dialog
+          label="Scheduled scans"
+          onClose={() => setSchedOpen(false)}
+          backdropClassName="dialog--top"
+          className="scan-schedule-panel">
+          <div className="scan-schedule-dialog-head">
+            <div>
+              <h2 className="scan-schedule-dialog-title text-foreground">Scheduled scans</h2>
+              <p className="text-body-muted text-relaxed scan-schedule-desc">{codeInclusionNote}</p>
             </div>
+            <Button
+              unstyled
+              type="button"
+              onClick={() => setSchedOpen(false)}
+              className="icon-btn"
+              aria-label="Close schedule dialog">
+              <X className="icon-sm" />
+            </Button>
+          </div>
 
-            <div className="scan-schedule-form">
-              {schedLoaded ? (
-                <>
-                  <div className="scan-schedule-field">
-                    <span className="form-label text-foreground">Frequency</span>
-                    <div className="scan-schedule-freq">
-                      {(["off", "daily", "weekly"] as const).map((frequency) => (
+          <div className="scan-schedule-form">
+            {schedLoaded ? (
+              <>
+                <div className="scan-schedule-field">
+                  <span className="form-label text-foreground">Frequency</span>
+                  <div className="scan-schedule-freq">
+                    {(["off", "daily", "weekly"] as const).map((frequency) => (
+                      <Button
+                        key={frequency}
+                        size="sm"
+                        variant={schedFreq === frequency ? "default" : "outline"}
+                        onClick={() => setSchedFreq(frequency)}>
+                        {frequency === "off" ? "Off" : frequency === "daily" ? "Daily" : "Weekly"}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                {schedFreq !== "off" ? (
+                  <div className="scan-schedule-inline-field">
+                    <span className="form-label text-foreground scan-schedule-inline-label">
+                      Time
+                    </span>
+                    <input
+                      type="time"
+                      value={schedTime}
+                      onChange={(event) => setSchedTime(event.target.value)}
+                      className="field-control field-control--muted"
+                    />
+                  </div>
+                ) : null}
+
+                {schedFreq === "weekly" ? (
+                  <div className="scan-schedule-inline-field">
+                    <span className="form-label text-foreground scan-schedule-inline-label">
+                      Day
+                    </span>
+                    <div className="scan-schedule-days">
+                      {DAYS_OF_WEEK.map((dayLabel, index) => (
                         <Button
-                          key={frequency}
+                          key={dayLabel}
                           size="sm"
-                          variant={schedFreq === frequency ? "default" : "outline"}
-                          onClick={() => setSchedFreq(frequency)}>
-                          {frequency === "off" ? "Off" : frequency === "daily" ? "Daily" : "Weekly"}
+                          variant={schedDay === index ? "default" : "outline"}
+                          onClick={() => setSchedDay(index)}
+                          className="scan-schedule-day-btn">
+                          {dayLabel}
                         </Button>
                       ))}
                     </div>
                   </div>
+                ) : null}
 
-                  {schedFreq !== "off" ? (
-                    <div className="scan-schedule-inline-field">
-                      <span className="form-label text-foreground scan-schedule-inline-label">
-                        Time
-                      </span>
-                      <input
-                        type="time"
-                        value={schedTime}
-                        onChange={(event) => setSchedTime(event.target.value)}
-                        className="field-control field-control--muted"
-                      />
-                    </div>
-                  ) : null}
-
-                  {schedFreq === "weekly" ? (
-                    <div className="scan-schedule-inline-field">
-                      <span className="form-label text-foreground scan-schedule-inline-label">
-                        Day
-                      </span>
-                      <div className="scan-schedule-days">
-                        {DAYS_OF_WEEK.map((dayLabel, index) => (
-                          <Button
-                            key={dayLabel}
-                            size="sm"
-                            variant={schedDay === index ? "default" : "outline"}
-                            onClick={() => setSchedDay(index)}
-                            className="scan-schedule-day-btn">
-                            {dayLabel}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="scan-schedule-actions">
-                    <Button
-                      onClick={async () => {
-                        const saved = await saveSchedule();
-                        if (saved) {
-                          setSchedOpen(false);
-                        }
-                      }}
-                      disabled={schedSaving}>
-                      {schedSaving ? "Saving..." : "Save Schedule"}
-                    </Button>
-                    <Button variant="ghost" onClick={() => setSchedOpen(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <div className="surface-low-panel">Loading saved schedule settings...</div>
-              )}
-            </div>
+                <div className="scan-schedule-actions">
+                  <Button
+                    onClick={async () => {
+                      const saved = await saveSchedule();
+                      if (saved) {
+                        setSchedOpen(false);
+                      }
+                    }}
+                    disabled={schedSaving}>
+                    {schedSaving ? "Saving..." : "Save Schedule"}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setSchedOpen(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="surface-low-panel">Loading saved schedule settings...</div>
+            )}
           </div>
-        </div>
+        </Dialog>
       ) : null}
     </>
   );
