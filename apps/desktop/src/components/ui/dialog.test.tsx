@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -15,6 +16,17 @@ describe("Dialog", () => {
     const dialog = screen.getByRole("dialog", { name: "Scan configuration" });
     expect(dialog.tagName).toBe("DIALOG");
     expect(dialog).toHaveAttribute("open");
+  });
+
+  it("associates describedBy with the dialog", () => {
+    render(
+      <Dialog label="Scan configuration" describedBy="scan-config-desc" onClose={vi.fn()}>
+        <p id="scan-config-desc">Runs a full scan of the site.</p>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Scan configuration" });
+    expect(dialog).toHaveAttribute("aria-describedby", "scan-config-desc");
   });
 
   it("closes on Escape", async () => {
@@ -43,6 +55,57 @@ describe("Dialog", () => {
     await user.keyboard("{Escape}");
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("prevents the native cancel default even when closeOnEscape is false", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog label="Scan in progress" onClose={onClose} closeOnEscape={false}>
+        <button type="button">Cancel scan</button>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Scan in progress" });
+    const cancelEvent = new Event("cancel", { cancelable: true });
+    dialog.dispatchEvent(cancelEvent);
+
+    // The browser's own close request (Escape, Android back) must never be
+    // allowed to bypass React state, even for a dialog that ignores Escape.
+    expect(cancelEvent.defaultPrevented).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("keeps a nested Escape from closing the dialog underneath", async () => {
+    const user = userEvent.setup();
+    const onCloseOuter = vi.fn();
+    const onCloseInner = vi.fn();
+
+    function Nested() {
+      const [showInner, setShowInner] = useState(false);
+      return (
+        <Dialog label="Outer" onClose={onCloseOuter}>
+          <button type="button" onClick={() => setShowInner(true)}>
+            Open inner
+          </button>
+          {showInner ? (
+            <Dialog label="Inner" onClose={onCloseInner}>
+              <button type="button">Inner button</button>
+            </Dialog>
+          ) : null}
+        </Dialog>
+      );
+    }
+
+    render(<Nested />);
+    // React re-dispatches portal events through the React tree, so the outer
+    // Dialog is a logical ancestor of the inner one even though both portal
+    // to document.body as DOM siblings.
+    await user.click(screen.getByRole("button", { name: "Open inner" }));
+
+    await user.keyboard("{Escape}");
+
+    expect(onCloseInner).toHaveBeenCalledTimes(1);
+    expect(onCloseOuter).not.toHaveBeenCalled();
   });
 
   it("closes on a backdrop click unless the caller opts out", async () => {
@@ -82,5 +145,26 @@ describe("Dialog", () => {
 
     await waitFor(() => expect(opener).toHaveFocus());
     opener.remove();
+  });
+
+  it("restores focus to restoreFocusTo even when activeElement was body at open", async () => {
+    // WKWebView and WebKitGTK do not focus a button on click, so a mouse-opened
+    // dialog can find document.activeElement still at body; restoreFocusTo is
+    // how a caller with its own trigger ref recovers from that.
+    const trigger = document.createElement("button");
+    trigger.textContent = "Open guide";
+    document.body.append(trigger);
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    const { unmount } = render(
+      <Dialog label="Focus" onClose={vi.fn()} restoreFocusTo={{ current: trigger }}>
+        <button type="button">Inside</button>
+      </Dialog>,
+    );
+    unmount();
+
+    await waitFor(() => expect(trigger).toHaveFocus());
+    trigger.remove();
   });
 });

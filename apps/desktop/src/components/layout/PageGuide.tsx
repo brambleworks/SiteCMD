@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { CircleHelp, X } from "lucide-react";
 import type { NavPage } from "@/components/layout/NavSidebar";
 import { cn } from "@/lib/utils";
@@ -323,6 +331,7 @@ const PAGE_GUIDES: Record<PageGuideKey, PageGuideContent> = {
 export function PageGuideButton({ page, className }: { page: PageGuideKey; className?: string }) {
   const guide = PAGE_GUIDES[page];
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -332,6 +341,7 @@ export function PageGuideButton({ page, className }: { page: PageGuideKey; class
     <>
       <Button
         unstyled
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
         className={cn("page-guide-trigger", className)}
@@ -340,12 +350,20 @@ export function PageGuideButton({ page, className }: { page: PageGuideKey; class
         <CircleHelp className="icon-md" aria-hidden="true" />
         <span className="page-guide-trigger__label">Guide</span>
       </Button>
-      {open ? <PageGuidePanel guide={guide} onClose={handleClose} /> : null}
+      {open ? <PageGuidePanel guide={guide} onClose={handleClose} triggerRef={triggerRef} /> : null}
     </>
   );
 }
 
-function PageGuidePanel({ guide, onClose }: { guide: PageGuideContent; onClose: () => void }) {
+function PageGuidePanel({
+  guide,
+  onClose,
+  triggerRef,
+}: {
+  guide: PageGuideContent;
+  onClose: () => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
   const [visible, setVisible] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<number | null>(null);
@@ -382,6 +400,7 @@ function PageGuidePanel({ guide, onClose }: { guide: PageGuideContent; onClose: 
       labelledBy={titleId}
       describedBy={subtitleId}
       onClose={requestClose}
+      restoreFocusTo={triggerRef}
       className={cn(
         "page-guide-panel",
         visible ? "page-guide-panel-visible" : "page-guide-panel-hidden",
