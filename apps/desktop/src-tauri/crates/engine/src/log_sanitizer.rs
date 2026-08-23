@@ -91,9 +91,18 @@ pub fn evidence_safe_page_url(raw_url: &str) -> String {
 /// fix needs, while a foreign host may be a CDN carrying signed path tokens.
 pub fn evidence_safe_page_url_for_site(raw_url: &str, site_origin: Option<&str>) -> String {
     let same_origin = site_origin.is_some_and(|origin| {
-        url::Url::parse(raw_url)
-            .map(|parsed| parsed.origin().ascii_serialization() == origin)
-            .unwrap_or(false)
+        // Reparse `site_origin` too so a default port embedded in either side
+        // folds away the same way; an unparsable or opaque origin can never match.
+        let Ok(site_url) = url::Url::parse(origin) else {
+            return false;
+        };
+        let site_origin = site_url.origin();
+        site_origin.is_tuple()
+            && url::Url::parse(raw_url)
+                .map(|parsed| {
+                    parsed.origin().ascii_serialization() == site_origin.ascii_serialization()
+                })
+                .unwrap_or(false)
     });
     sanitize_page_url(raw_url, same_origin)
 }
@@ -465,27 +474,34 @@ mod tests {
             "https://cdn.sitecmd.com/a/b.js"
         );
 
-        // (b) An explicit default port on the URL folds away during parsing
-        // (url::Url never serializes a default port), so it still matches a
-        // site_origin with no port.
+        // (b) An explicit default port on either side folds away, because
+        // `site_origin` is reparsed and re-serialized the same way as the URL.
         let long_name = "https://sitecmd.com:443/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+        let bare_long_name =
+            "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
         assert_eq!(
             evidence_safe_page_url_for_site(long_name, site),
-            "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js"
+            bare_long_name
         );
-        // The reverse does not fold: `site_origin` is compared as a literal
-        // string, never reparsed, so an explicit default port embedded in it
-        // does not match a port-free parsed origin. Every real caller (see
-        // `AssetCollection.page_origin`) supplies `site_origin` already
-        // normalized via `Url::origin().ascii_serialization()`, which never
-        // includes a default port, so this asymmetry is not reachable in
-        // practice.
+        // The reverse also folds: an explicit default port embedded in
+        // `site_origin` itself normalizes away before the comparison.
         assert_eq!(
             evidence_safe_page_url_for_site(
-                "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js",
+                "https://sitecmd.com/assets/app.js",
                 Some("https://sitecmd.com:443"),
             ),
-            "https://sitecmd.com/assets/[redacted]"
+            "https://sitecmd.com/assets/app.js"
+        );
+        assert_eq!(
+            evidence_safe_page_url_for_site(bare_long_name, Some("https://sitecmd.com:443")),
+            bare_long_name
+        );
+
+        // An unparsable site_origin can never be same-origin, so it behaves
+        // exactly like passing None.
+        assert_eq!(
+            evidence_safe_page_url_for_site(bare_long_name, Some("not a url")),
+            evidence_safe_page_url_for_site(bare_long_name, None)
         );
 
         // (c) Userinfo, query, and fragment are stripped even for a
