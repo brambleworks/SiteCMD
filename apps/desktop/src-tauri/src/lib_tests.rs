@@ -1685,3 +1685,35 @@ fn legacy_local_origin_predicates_only_decrease() {
         "legacy local-origin predicate calls changed; set LEGACY_LOCAL_PREDICATE_BUDGET to {total} only if it went down"
     );
 }
+
+#[test]
+fn one_crypto_provider_and_one_root_store_remain() {
+    // webpki-roots is deliberately excluded here: it still reaches Cargo.lock
+    // through the accepted, off-by-default `browser` feature's build chain
+    // (headless_chrome -> auto_generate_cdp -> ureq), the same exception
+    // deny.toml already documents. This test only guards the crypto
+    // provider and the code we control (below).
+    let lock = include_str!("../Cargo.lock");
+    for crate_name in ["aws-lc-rs", "aws-lc-sys"] {
+        assert!(
+            !lock.contains(&format!("name = \"{crate_name}\"")),
+            "{crate_name} is back in Cargo.lock; reqwest must use rustls-no-provider and every rustls ClientConfig must use the platform verifier on ring"
+        );
+    }
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    // Excludes `_tests.rs` files (this file included) so the assertion's own
+    // string literal below cannot match itself.
+    for file in files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+    {
+        let source = std::fs::read_to_string(file).expect("read");
+        assert!(
+            !source.contains("webpki_roots::"),
+            "{} still uses webpki-roots",
+            file.display()
+        );
+    }
+}

@@ -54,7 +54,10 @@ fn a_web_run_states_the_transport_facts_a_verdict_can_depend_on() {
     let profile = execution_profile(ObservedSurface::Web, Some("health"), false, None);
     assert_eq!(profile.transport.as_deref(), Some("reqwest_rustls"));
     assert_eq!(profile.tls_client.as_deref(), Some("rustls"));
-    assert_eq!(profile.trust_authority.as_deref(), Some("webpki_roots"));
+    assert_eq!(
+        profile.trust_authority.as_deref(),
+        Some("platform_verifier")
+    );
     assert_eq!(profile.resolver.as_deref(), Some("system"));
     assert_eq!(profile.scan_profile.as_deref(), Some("health"));
 }

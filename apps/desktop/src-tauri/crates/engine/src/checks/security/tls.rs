@@ -24,7 +24,14 @@ pub const TLS_CHECK_IDS: &[&str] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustAuthority {
-    /// The bundled WebPKI root set (desktop `rustls`, wasm handshake).
+    /// Historically the bundled WebPKI root set. Desktop now validates
+    /// through `rustls-platform-verifier` (the operating system's own trust
+    /// program: Keychain on macOS, CryptoAPI on Windows, a bundled root set
+    /// on Linux) rather than webpki-roots, so this label no longer names one
+    /// verification program on desktop; a wasm handshake would still use the
+    /// bundled root set this variant originally described. Follow-up:
+    /// distinguish the platform-native programs so the "compare only within
+    /// an authority" invariant above holds for desktop again.
     Webpki,
     /// Chromium's validator, as reported by a Browser Run navigation.
     Chromium,

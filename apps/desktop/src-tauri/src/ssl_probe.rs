@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_rustls::rustls::pki_types::ServerName;
-use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::TlsConnector;
 use ts_rs::TS;
 
@@ -42,18 +42,20 @@ impl SslProbeResult {
     }
 }
 
-/// Build a webpki-rooted rustls config with an explicit ring provider.
+/// Build a rustls config on the explicit ring provider with the operating
+/// system's certificate store, the same verifier reqwest uses, so the
+/// dashboard probe and the scan agree on what a trusted chain is.
 ///
 /// Headless entry points do not install a process-default provider.
-pub(crate) fn webpki_roots_client_config() -> ClientConfig {
-    let mut root_store = RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+pub(crate) fn platform_verified_client_config() -> ClientConfig {
+    use rustls_platform_verifier::BuilderVerifierExt;
     ClientConfig::builder_with_provider(Arc::new(
         tokio_rustls::rustls::crypto::ring::default_provider(),
     ))
     .with_safe_default_protocol_versions()
     .expect("ring crypto provider supports the safe default TLS protocol versions")
-    .with_root_certificates(root_store)
+    .with_platform_verifier()
+    .expect("platform certificate verifier is available")
     .with_no_client_auth()
 }
 
@@ -115,7 +117,7 @@ pub(crate) async fn check_ssl_with(
     let Ok(server_name) = ServerName::try_from(host.clone()) else {
         return SslProbeResult::err("Invalid URL");
     };
-    let connector = TlsConnector::from(Arc::new(webpki_roots_client_config()));
+    let connector = TlsConnector::from(Arc::new(platform_verified_client_config()));
 
     let Ok(Ok(tcp)) = tokio::time::timeout(PROBE_TIMEOUT, connect(addr)).await else {
         return SslProbeResult::err(PROBE_UNAVAILABLE);
@@ -213,7 +215,7 @@ mod tests {
     #[test]
     fn client_config_binds_provider_without_process_default() {
         // Headless entry points may not install a process-default CryptoProvider.
-        let config = webpki_roots_client_config();
+        let config = platform_verified_client_config();
         assert!(
             !config.crypto_provider().cipher_suites.is_empty(),
             "ring provider must expose cipher suites",
