@@ -123,6 +123,45 @@ mod tests {
         );
     }
 
+    // The macOS analogue of the Windows AppData case above: a middle path
+    // segment contains a space ("Application Support"), but the final
+    // segment ("sitecmd.db") does not. Both phases of the match-then-trim
+    // must agree that the whole path is redacted and nothing after it (the
+    // colon and "denied") leaks a fragment of a swallowed segment.
+    #[test]
+    fn sanitize_error_redacts_a_spaced_macos_path_without_leaking_a_fragment() {
+        assert_eq!(
+            sanitize_error(
+                "Failed to open /Users/dev/Library/Application Support/SiteCMD/sitecmd.db: denied"
+            ),
+            "Failed to open [internal path]: denied"
+        );
+    }
+
+    // Prose that follows a path with no second slash must survive, even
+    // though the candidate regex is permissive enough to allow spaces
+    // inside a segment (the regression the earlier space-excluding class
+    // fixed must stay fixed).
+    #[test]
+    fn sanitize_error_keeps_prose_that_follows_a_path_with_no_trailing_slash() {
+        assert_eq!(
+            sanitize_error("error in /var/log/app then it failed"),
+            "error in [internal path] then it failed"
+        );
+    }
+
+    #[test]
+    fn sanitize_error_is_idempotent() {
+        let once = sanitize_error(
+            "Failed to open /Users/dev/Library/Application Support/SiteCMD/sitecmd.db: denied",
+        );
+        let twice = sanitize_error(&once);
+        assert_eq!(
+            once, twice,
+            "sanitizing already-sanitized output must be a no-op"
+        );
+    }
+
     #[test]
     fn command_error_serializes_as_the_sanitized_string() {
         let error = CommandError::new("open /Users/dev/x/y failed");

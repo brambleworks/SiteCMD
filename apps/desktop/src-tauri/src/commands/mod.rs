@@ -53,12 +53,29 @@ use std::sync::LazyLock;
 pub use error::{CommandError, CommandResult};
 pub use tokio::sync::Mutex as TokioMutex;
 
-/// Unix paths: two or more slash-separated segments. The class excludes
-/// whitespace so a path segment cannot absorb trailing prose (`"...failed"`
-/// must survive redacting the path before it).
+/// Unix paths: two or more slash-separated segments. A segment may contain
+/// spaces (`"Application Support"`), so this is deliberately permissive: it
+/// also over-matches into any trailing prose that happens to follow a path
+/// (`"...open /a/b/c then it failed"`). The regex crate has no lookaround,
+/// so a single pattern cannot both allow spaces inside a segment and stop
+/// exactly at the real path; `unix_path_trailing_prose` recovers the prose
+/// half after the match, in a second, non-regex pass.
 pub(crate) static PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?:/[\w.@-]+){2,}").expect("static Unix path regex") // allow-expect: compile-time literal regex
+    let pattern = r"(?:/[\w.@-]+(?: [\w.@-]+)*){2,}";
+    regex::Regex::new(pattern).expect("static Unix path regex") // allow-expect: compile-time literal regex
 });
+
+/// Split a `PATH_RE` match into the real final path segment and whatever
+/// prose follows it. The real path ends at the first space after the last
+/// `/`; a directory name with an embedded space (`"Application Support"`)
+/// survives because it is a middle segment, not the last one on the line
+/// that decides where the match ends here.
+fn unix_path_trailing_prose(candidate: &str) -> &str {
+    let last_slash = candidate.rfind('/').unwrap_or(0);
+    let after_slash = &candidate[last_slash..];
+    let cut = last_slash + after_slash.find(' ').unwrap_or(after_slash.len());
+    &candidate[cut..]
+}
 
 /// Windows drive paths (`C:\a\b`) and UNC paths (`\\server\share\a`).
 static WINDOWS_PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -82,7 +99,9 @@ pub(crate) fn sanitize_error(msg: impl std::fmt::Display) -> String {
         format!("\u{1}URL{}\u{1}", urls.len() - 1)
     });
     let stripped = WINDOWS_PATH_RE.replace_all(&held, "[internal path]");
-    let stripped = PATH_RE.replace_all(&stripped, "[internal path]");
+    let stripped = PATH_RE.replace_all(&stripped, |captures: &regex::Captures| {
+        format!("[internal path]{}", unix_path_trailing_prose(&captures[0]))
+    });
     let mut restored = stripped.into_owned();
     for (index, url) in urls.iter().enumerate() {
         restored = restored.replace(&format!("\u{1}URL{index}\u{1}"), url);
