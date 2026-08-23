@@ -387,7 +387,7 @@ When in doubt about where a new pattern goes: if it's _visual_ and likely reused
 
 **Banned**
 
-1. Inline `style={{ ... }}` attributes (the only escape hatch is `<ProgressBar>`'s runtime width).
+1. Inline `style={{ ... }}` attributes (the escape hatches are `progress-bar`'s runtime width, `score-ring`'s size-derived geometry, and the react-pdf `ReportPDFSections`).
 2. Rounded pill badges with background colors for severity / scope / status metadata. Use `.eyebrow` + a color class instead.
 3. New Tailwind utility classes with no backing CSS. Tailwind was removed root and branch; a utility only works if `styles/` hand-writes it (the color utilities plus a small set like `flex` / `min-w-0` do). Anything else - `mt-2`, `bg-muted/40`, `text-indigo-600` - is dead, and the Tailwind-removal guardrail fails CI on it. Add a semantic class instead.
 4. CVA (`class-variance-authority`). The Button refactor removed it; do not reintroduce.

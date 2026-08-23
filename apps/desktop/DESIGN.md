@@ -352,7 +352,7 @@ The instrument made literal. A circular SVG gauge with a `--muted` track and a f
 
 - **Don't** wrap severity, scope, or status metadata in a rounded pill with a background color. Use `.eyebrow` plus a color class.
 - **Don't** hardcode a hex or use `text-zinc-*`; resolve through `tokens.css` variables.
-- **Don't** use inline `style=` attributes. The one escape hatch is `<ProgressBar>`'s runtime width.
+- **Don't** use inline `style=` attributes. The escape hatches are `progress-bar`'s runtime width, `score-ring`'s size-derived geometry, and the react-pdf `ReportPDFSections`.
 - **Don't** put hover effects on non-clickable elements. A hover state means "this responds to a click."
 - **Don't** add a colored accent bar at the top of a card, hero, or panel.
 - **Don't** spend the brand blue or amber broadly; keep them on the primary action and the active location.

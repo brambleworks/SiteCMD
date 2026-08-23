@@ -102,8 +102,10 @@ Hard rules:
 1. Use `components/ui/button.tsx` for every clickable action. CVA is banned.
 2. Extract a named class when a `className` exceeds 100 characters or composes
    six or more classes.
-3. No inline `style` attributes. The shared progress bar's runtime width is the
-   only exception.
+3. No inline `style` attributes. The only exceptions, allowlisted in
+   `tools/scripts/lib/guardrail-style-rules.mjs`, are `progress-bar` (runtime
+   width), `score-ring` (geometry derived from its numeric `size` prop), and
+   `ReportPDFSections` (react-pdf has no stylesheet).
 4. No hardcoded hex colors or `text-zinc-*`. Use design tokens.
 5. Extract any repeated visual pattern with a role-based name.
 6. Empty states include a direct action button.
