@@ -127,3 +127,183 @@ fn stale_requests_expire_and_claimed_requests_cannot_be_claimed_twice() {
     assert!(!db.claim_agent_request(fresh, 60_002).expect("second claim"));
     assert!(!db.claim_agent_request(old, 60_003).expect("expired claim"));
 }
+
+fn queue_scan(db: &crate::db::Database, project_id: i64, now: i64) -> i64 {
+    db.insert_agent_request(
+        "run_scan",
+        project_id,
+        "https://example.com",
+        None,
+        Some("web"),
+        "codex",
+        now,
+    )
+    .expect("queue scan")
+}
+
+fn row(db: &crate::db::Database, status: &str, id: i64) -> Option<AgentRequestRow> {
+    db.list_agent_requests_in_status(status)
+        .expect("list")
+        .into_iter()
+        .find(|request| request.id == id)
+}
+
+#[test]
+fn only_one_queued_scan_is_claimed_per_tick() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    let queued: Vec<i64> = (0..3)
+        .map(|n| queue_scan(&db, project_id, 1_000 + n))
+        .collect();
+
+    let requests = db.list_agent_requests_in_status("requested").expect("list");
+    let claimed = claim_due_requests(&db, requests, 2_000);
+
+    assert_eq!(
+        claimed.len(),
+        1,
+        "a backlog must not start every scan at once"
+    );
+    assert_eq!(claimed[0].id, queued[0], "the oldest scan goes first");
+    assert_eq!(
+        db.list_agent_requests_in_status("running")
+            .expect("running")
+            .len(),
+        1
+    );
+    assert_eq!(
+        db.list_agent_requests_in_status("requested")
+            .expect("requested")
+            .len(),
+        2,
+        "the rest stay queued for later ticks"
+    );
+}
+
+#[test]
+fn the_one_scan_limit_does_not_hold_back_fix_requests() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    queue_scan(&db, project_id, 1_000);
+    queue_scan(&db, project_id, 1_001);
+    for now in [1_002, 1_003] {
+        db.insert_agent_request(
+            "start_fix",
+            project_id,
+            "https://example.com",
+            Some("security.csp"),
+            None,
+            "claude-code",
+            now,
+        )
+        .expect("queue fix");
+    }
+
+    let requests = db.list_agent_requests_in_status("requested").expect("list");
+    let claimed = claim_due_requests(&db, requests, 2_000);
+
+    assert_eq!(claimed.len(), 3);
+    assert_eq!(
+        claimed.iter().filter(|r| r.kind == "run_scan").count(),
+        1,
+        "one scan"
+    );
+    assert_eq!(
+        claimed.iter().filter(|r| r.kind == "start_fix").count(),
+        2,
+        "every fix request"
+    );
+}
+
+#[test]
+fn settling_writes_a_terminal_row_that_a_second_settle_cannot_rewrite() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    let fulfilled = queue_scan(&db, project_id, 1_000);
+    let failed = queue_scan(&db, project_id, 1_001);
+    assert!(db.claim_agent_request(fulfilled, 2_000).expect("claim"));
+    assert!(db.claim_agent_request(failed, 2_000).expect("claim"));
+
+    settle(&db, fulfilled, Ok(r#"{"execution_id":7}"#.to_string()));
+    settle(&db, failed, Err("scan_admission_refused".to_string()));
+
+    let settled = row(&db, "fulfilled", fulfilled).expect("fulfilled row");
+    assert_eq!(
+        settled.result_json.as_deref(),
+        Some(r#"{"execution_id":7}"#)
+    );
+    assert!(settled.failure_detail.is_none());
+    let broken = row(&db, "failed", failed).expect("failed row");
+    assert_eq!(
+        broken.failure_detail.as_deref(),
+        Some("scan_admission_refused")
+    );
+    assert!(broken.result_json.is_none());
+
+    settle(&db, fulfilled, Err("late failure".to_string()));
+    settle(&db, failed, Ok(r#"{"execution_id":9}"#.to_string()));
+    assert_eq!(
+        row(&db, "fulfilled", fulfilled)
+            .expect("still fulfilled")
+            .result_json
+            .as_deref(),
+        Some(r#"{"execution_id":7}"#)
+    );
+    assert_eq!(
+        row(&db, "failed", failed)
+            .expect("still failed")
+            .failure_detail
+            .as_deref(),
+        Some("scan_admission_refused")
+    );
+}
+
+#[test]
+fn a_failure_detail_is_sanitized_before_it_is_stored() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    let request_id = queue_scan(&db, project_id, 1_000);
+    assert!(db.claim_agent_request(request_id, 2_000).expect("claim"));
+
+    settle(
+        &db,
+        request_id,
+        Err("could not read /Users/dev/projects/site/astro.config.mjs".to_string()),
+    );
+
+    let detail = row(&db, "failed", request_id)
+        .expect("failed row")
+        .failure_detail
+        .expect("detail");
+    assert!(!detail.contains("/Users/dev"), "{detail}");
+    assert!(detail.contains("[internal path]"), "{detail}");
+}
+
+#[test]
+fn an_unknown_agent_tool_fails_the_request_instead_of_briefing_claude_code() {
+    let db = temp_db();
+    let project_id = project_with_issue(&db, "security.csp");
+    db.insert_agent_request(
+        "start_fix",
+        project_id,
+        "https://example.com",
+        Some("security.csp"),
+        None,
+        "emacs-agent",
+        1_000,
+    )
+    .expect("queue request");
+    let request = db
+        .list_agent_requests_in_status("requested")
+        .expect("list")
+        .remove(0);
+
+    let error = fulfil_start_fix(&db, &request, 2_000).expect_err("unsupported tool");
+    assert_eq!(error, "unknown_agent_tool");
+    assert!(
+        db.get_latest_fix_attempt(project_id, "https://example.com", "security.csp")
+            .expect("lookup")
+            .is_none(),
+        "no attempt may be created for an unsupported agent"
+    );
+}

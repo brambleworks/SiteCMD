@@ -6,14 +6,14 @@ use std::sync::Arc;
 use tauri::AppHandle;
 
 use crate::commands::scan::execution::{run_scan_execution_internal, RunScanExecutionRequest};
-use crate::commands::{create_fix_attempt_inner, emit_event, CreateFixAttemptArgs};
+use crate::commands::{create_fix_attempt_inner, emit_event, sanitize_error, CreateFixAttemptArgs};
 use crate::constants::{AGENT_REQUEST_EXPIRY_MS, AGENT_REQUEST_POLL_INTERVAL};
 use crate::core::agent_tools::AgentTool;
 use crate::core::fix_brief::BriefLocation;
 use crate::core::scan_control::ScanControlState;
 use crate::core::scan_execution::{ScanExecutionMode, ScanTrigger};
 use crate::core::scanner::ScanType;
-use crate::db::{AgentRequestRow, Database};
+use crate::db::{normalize_env_url, AgentRequestRow, Database};
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -40,35 +40,30 @@ async fn tick(db: &Arc<Database>, app: &AppHandle, scan_control: &ScanControlSta
             tracing::warn!("agent request watcher: list: {error}");
             Vec::new()
         });
-    for request in requests {
-        match db.claim_agent_request(request.id, now_ms()) {
-            Ok(true) => {}
-            Ok(false) => continue,
-            Err(error) => {
-                tracing::warn!("agent request watcher: claim {}: {error}", request.id);
-                continue;
-            }
-        }
+    for request in claim_due_requests(db, requests, now_ms()) {
         match request.kind.as_str() {
-            "start_fix" => settle(
-                db,
-                app,
-                request.id,
-                fulfil_start_fix(db, &request, now_ms()),
-            ),
+            "start_fix" => {
+                let outcome = fulfil_start_fix(db, &request, now_ms());
+                let created = outcome.is_ok();
+                settle(db, request.id, outcome);
+                if created {
+                    emit_event(app, "fix-attempt-updated", ());
+                }
+            }
             "run_scan" => {
-                // Scans take minutes; run each on its own task so the heartbeat keeps beating.
+                // Scans take minutes; run on its own task so the heartbeat keeps beating.
                 let db = db.clone();
                 let app = app.clone();
                 let scan_control = scan_control.clone();
                 tauri::async_runtime::spawn(async move {
+                    // run_scan_execution_internal emits scan-execution-completed
+                    // itself, so settling needs no second event.
                     let outcome = fulfil_run_scan(&db, &app, &scan_control, &request).await;
-                    settle(&db, &app, request.id, outcome);
+                    settle(&db, request.id, outcome);
                 });
             }
             other => settle(
                 db,
-                app,
                 request.id,
                 Err(format!("unknown agent request kind {other}")),
             ),
@@ -76,20 +71,48 @@ async fn tick(db: &Arc<Database>, app: &AppHandle, scan_control: &ScanControlSta
     }
 }
 
-fn settle(db: &Database, app: &AppHandle, request_id: i64, outcome: Result<String, String>) {
+/// Claim the rows this tick will fulfil. At most one scan is claimed per tick
+/// so a startup backlog does not launch every queued scan at once.
+pub(crate) fn claim_due_requests(
+    db: &Database,
+    requests: Vec<AgentRequestRow>,
+    now: i64,
+) -> Vec<AgentRequestRow> {
+    let mut claimed = Vec::new();
+    let mut scan_running = false;
+    for request in requests {
+        if scan_running && request.kind == "run_scan" {
+            continue;
+        }
+        match db.claim_agent_request(request.id, now) {
+            Ok(true) => {
+                scan_running |= request.kind == "run_scan";
+                claimed.push(request);
+            }
+            Ok(false) => {}
+            Err(error) => tracing::warn!("agent request watcher: claim {}: {error}", request.id),
+        }
+    }
+    claimed
+}
+
+/// Write the terminal row. A settled request is never rewritten because both
+/// statements are guarded on the requested/running statuses.
+pub(crate) fn settle(db: &Database, request_id: i64, outcome: Result<String, String>) {
     let written = match outcome {
         Ok(result_json) => db.fulfil_agent_request(request_id, &result_json, now_ms()),
-        Err(detail) => db.fail_agent_request(request_id, &detail, now_ms()),
+        Err(detail) => db.fail_agent_request(request_id, &sanitize_error(detail), now_ms()),
     };
     if let Err(error) = written {
         tracing::warn!("agent request watcher: settle {request_id}: {error}");
     }
-    emit_event(app, "fix-attempt-updated", ());
 }
 
-fn agent_tool_from_token(token: &str) -> AgentTool {
+/// A token outside the supported set is a caller error, not a reason to brief
+/// a different agent than the one that asked.
+fn agent_tool_from_token(token: &str) -> Result<AgentTool, String> {
     serde_json::from_value(serde_json::Value::String(token.to_string()))
-        .unwrap_or(AgentTool::ClaudeCode)
+        .map_err(|_| "unknown_agent_tool".to_string())
 }
 
 /// Create the attempt exactly as the desktop button does, from the stored issue.
@@ -98,18 +121,20 @@ pub(crate) fn fulfil_start_fix(
     request: &AgentRequestRow,
     now: i64,
 ) -> Result<String, String> {
+    let env_url = normalize_env_url(Some(&request.env_url));
     let check_id = request
         .check_id
         .clone()
         .ok_or_else(|| "start_fix needs a check_id".to_string())?;
+    let agent_tool = agent_tool_from_token(&request.agent_tool)?;
     let items = db
-        .get_active_work_items(request.project_id, Some(&request.env_url))
+        .get_active_work_items(request.project_id, Some(&env_url))
         .map_err(|error| error.to_string())?;
     let item = items
         .iter()
         .filter(|item| item.check_id == check_id)
         .min_by_key(|item| item.severity.sort_rank())
-        .ok_or_else(|| format!("no open issue {check_id} for {}", request.env_url))?;
+        .ok_or_else(|| format!("no open issue {check_id} for {env_url}"))?;
     let code_locations = item.metadata.relative_path.as_ref().map(|path| {
         vec![BriefLocation {
             label: match item.metadata.line {
@@ -122,22 +147,22 @@ pub(crate) fn fulfil_start_fix(
         }]
     });
     let previous_failure = db
-        .get_latest_fix_attempt(request.project_id, &request.env_url, &check_id)
+        .get_latest_fix_attempt(request.project_id, &env_url, &check_id)
         .map_err(|error| error.to_string())?
         .filter(|attempt| attempt.status == "verify_failed")
         .and_then(|attempt| attempt.failure_detail);
     let args = CreateFixAttemptArgs {
         project_id: request.project_id,
-        env_url: Some(request.env_url.clone()),
+        env_url: Some(env_url.clone()),
         check_id,
-        agent_tool: agent_tool_from_token(&request.agent_tool),
+        agent_tool,
         title: item.title.clone(),
         severity: item.severity,
         description: item.description.clone(),
         why_it_matters: item.why_it_matters.clone(),
         evidence: None,
         manual_fix: item.manual_fix.clone(),
-        url: request.env_url.clone(),
+        url: env_url,
         detected_stack: None,
         code_locations,
         previous_failure,
@@ -165,6 +190,7 @@ async fn fulfil_run_scan(
     scan_control: &ScanControlState,
     request: &AgentRequestRow,
 ) -> Result<String, String> {
+    let env_url = normalize_env_url(Some(&request.env_url));
     let (requested_mode, web_focus) =
         scan_plan_for_scope(request.scope.as_deref().unwrap_or("web"))?;
     let environment_id = db
@@ -173,21 +199,20 @@ async fn fulfil_run_scan(
         .into_iter()
         .find(|project| project.id == request.project_id)
         .and_then(|project| {
-            project.environments.into_iter().find(|environment| {
-                crate::db::normalize_env_url(Some(&environment.url)) == request.env_url
-            })
+            project
+                .environments
+                .into_iter()
+                .find(|environment| normalize_env_url(Some(&environment.url)) == env_url)
         })
         .map(|environment| environment.id);
     let execution_request = RunScanExecutionRequest {
         project_id: Some(request.project_id),
         environment_id,
-        environment_url: Some(request.env_url.clone()),
+        environment_url: Some(env_url.clone()),
         requested_mode,
         web_focus,
         urls: web_focus
-            .map(|_| {
-                crate::db::scan_scope_urls_for_project(db, request.project_id, &request.env_url)
-            })
+            .map(|_| crate::db::scan_scope_urls_for_project(db, request.project_id, &env_url))
             .unwrap_or_default(),
         enabled_categories: None,
         timeout_secs: None,

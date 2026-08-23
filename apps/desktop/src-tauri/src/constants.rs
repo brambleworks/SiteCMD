@@ -235,8 +235,8 @@ pub const AGENT_REQUEST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// the fix-attempt expiry window.
 pub const AGENT_REQUEST_EXPIRY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// A heartbeat older than this means the desktop app is not running. The MCP
-/// server pins the same value in apps/mcp-server/src/heartbeat.ts.
+/// A heartbeat older than this means the desktop app is not running. Any
+/// reader of the heartbeat file must apply the same staleness window.
 pub const DESKTOP_HEARTBEAT_STALE_MS: i64 = 30 * 1000;
 
 /// Hard cap on a `claude` CLI invocation (MCP registration). The CLI can hang
