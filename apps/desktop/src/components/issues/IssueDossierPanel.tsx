@@ -44,7 +44,6 @@ const BADGE_STYLES: Record<BadgeTone, string> = {
   info: "dossier-badge--info",
   muted: "text-muted-foreground",
 };
-const DOSSIER_SWITCH_SELECTOR = "[data-dossier-switch='true']";
 const DOSSIER_TONE_CLASS: Record<DossierSectionTone, string> = {
   neutral: "dossier-section-tone-neutral",
   attention: "dossier-section-tone-attention",
@@ -103,17 +102,23 @@ export function IssueDossierPanel({
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setVisible(true));
     // Dialog owns Escape and the top layer; this listener only replaces the
-    // native backdrop-click dismissal, which the dossier-switch rows below
-    // must be able to opt out of (dismissOnBackdrop is false on the Dialog).
+    // native backdrop-click dismissal (dismissOnBackdrop is false on the
+    // Dialog below, since a click anywhere outside the panel closes it, not
+    // only a click on this dialog's own backdrop).
     const onPointerDown = (event: PointerEvent) => {
       const targetNode = event.target instanceof Node ? event.target : null;
       const targetElement =
         event.target instanceof Element ? event.target : (targetNode?.parentElement ?? null);
-      if (targetElement?.closest(DOSSIER_SWITCH_SELECTOR)) {
+      if (!targetElement) return;
+      const nearestDialog = targetElement.closest("dialog");
+      if (nearestDialog && !nearestDialog.querySelector(".details-panel")) {
+        // The click landed on or inside a different native dialog (a handoff
+        // modal opened from within this dossier, for example). That dialog
+        // fills the viewport and sits on top; it is never an outside click.
         return;
       }
-      if (targetElement && !targetElement.closest(".details-panel")) {
-        // A click on the dialog's own backdrop, as opposed to some unrelated
+      if (!targetElement.closest(".details-panel")) {
+        // A click on this dossier's own backdrop, as opposed to some other
         // outside element: never let it reach the app shell underneath.
         if (targetElement instanceof HTMLDialogElement) {
           event.stopPropagation();
