@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Monitor, RefreshCw, Smartphone, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ExtLink } from "@/components/ui/external-link";
+import { userFacingError } from "@/lib/user-facing-error";
 import {
   fetchPageSpeedReport,
   isRateLimitError,
@@ -37,6 +38,7 @@ const RATING_LABEL: Record<VitalRating, string> = {
 interface MetricSpec {
   metric: VitalMetric;
   name: string;
+  plain: string;
   value: number | null;
   format: (v: number) => string;
   help: string;
@@ -45,21 +47,84 @@ interface MetricSpec {
 function labMetrics(report: PageSpeedReport): MetricSpec[] {
   const cls = (v: number) => v.toFixed(2);
   return [
-    { metric: "lcp", name: "LCP", value: report.lcpMs, format: formatMs, help: "≤ 2.5s" },
-    { metric: "cls", name: "CLS", value: report.cls, format: cls, help: "≤ 0.1" },
-    { metric: "tbt", name: "TBT", value: report.tbtMs, format: formatMs, help: "≤ 200ms" },
-    { metric: "fcp", name: "FCP", value: report.fcpMs, format: formatMs, help: "≤ 1.8s" },
-    { metric: "ttfb", name: "TTFB", value: report.ttfbMs, format: formatMs, help: "≤ 0.8s" },
-    { metric: "si", name: "Speed Index", value: report.siMs, format: formatMs, help: "≤ 3.4s" },
+    {
+      metric: "lcp",
+      name: "LCP",
+      plain: "Largest content load",
+      value: report.lcpMs,
+      format: formatMs,
+      help: "≤ 2.5s",
+    },
+    {
+      metric: "cls",
+      name: "CLS",
+      plain: "Layout shift",
+      value: report.cls,
+      format: cls,
+      help: "≤ 0.1",
+    },
+    {
+      metric: "tbt",
+      name: "TBT",
+      plain: "Main-thread blocking",
+      value: report.tbtMs,
+      format: formatMs,
+      help: "≤ 200ms",
+    },
+    {
+      metric: "fcp",
+      name: "FCP",
+      plain: "First content paint",
+      value: report.fcpMs,
+      format: formatMs,
+      help: "≤ 1.8s",
+    },
+    {
+      metric: "ttfb",
+      name: "TTFB",
+      plain: "Server response time",
+      value: report.ttfbMs,
+      format: formatMs,
+      help: "≤ 0.8s",
+    },
+    {
+      metric: "si",
+      name: "Speed Index",
+      plain: "Visual completeness",
+      value: report.siMs,
+      format: formatMs,
+      help: "≤ 3.4s",
+    },
   ];
 }
 
 function fieldMetrics(report: PageSpeedReport): MetricSpec[] {
   const cls = (v: number) => v.toFixed(2);
   return [
-    { metric: "lcp", name: "LCP", value: report.fieldLcpMs, format: formatMs, help: "≤ 2.5s" },
-    { metric: "cls", name: "CLS", value: report.fieldCls, format: cls, help: "≤ 0.1" },
-    { metric: "inp", name: "INP", value: report.fieldInpMs, format: formatMs, help: "≤ 200ms" },
+    {
+      metric: "lcp",
+      name: "LCP",
+      plain: "Largest content load",
+      value: report.fieldLcpMs,
+      format: formatMs,
+      help: "≤ 2.5s",
+    },
+    {
+      metric: "cls",
+      name: "CLS",
+      plain: "Layout shift",
+      value: report.fieldCls,
+      format: cls,
+      help: "≤ 0.1",
+    },
+    {
+      metric: "inp",
+      name: "INP",
+      plain: "Input response",
+      value: report.fieldInpMs,
+      format: formatMs,
+      help: "≤ 200ms",
+    },
   ];
 }
 
@@ -70,6 +135,7 @@ function MetricCell({ spec }: { spec: MetricSpec }) {
       <span className="tile__label">
         <span>{spec.name}</span>
       </span>
+      <span className="text-meta vitals-metric-plain">{spec.plain}</span>
       <span className={`vitals-metric-value ${ratingColorClass(rating)}`}>
         {spec.value !== null ? spec.format(spec.value) : "--"}
       </span>
@@ -184,13 +250,7 @@ export function WebVitalsDetailModal({ url, hostname, onClose }: Props) {
         setReport(await fetchPageSpeedReport(url, target));
       } catch (err) {
         setReport(null);
-        setError(
-          typeof err === "string"
-            ? err
-            : err instanceof Error
-              ? err.message
-              : "PageSpeed request failed",
-        );
+        setError(userFacingError(err, "PageSpeed Insights could not run for this page."));
       } finally {
         setLoading(false);
       }
@@ -208,7 +268,7 @@ export function WebVitalsDetailModal({ url, hostname, onClose }: Props) {
       setKeyInput("");
       await load(strategy);
     } catch (err) {
-      setError(typeof err === "string" ? err : "Could not save the API key");
+      setError(userFacingError(err, "Could not save the API key."));
     } finally {
       setSavingKey(false);
     }

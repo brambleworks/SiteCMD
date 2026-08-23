@@ -123,10 +123,10 @@ export function ScanConfigOverlay({
                   <div className="min-w-0">
                     <p className="text-body-muted text-strong">Inspect local database schemas</p>
                     <p className="text-meta text-relaxed">
-                      Optional for this run. Reads local dotenv values only to discover a target,
-                      then reads schema and migration metadata, never application table rows. SQLite
-                      files must be inside the linked project; every PostgreSQL host must be
-                      loopback or a local Unix socket.
+                      Optional for this run. Reads local dotenv values only to find a database, then
+                      reads schema and migration metadata, never application table rows. SQLite
+                      files must be inside the linked project, and PostgreSQL must be on this
+                      computer (localhost or a local socket).
                     </p>
                   </div>
                 </div>

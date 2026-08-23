@@ -28,6 +28,7 @@ import {
   UpdatesPage,
 } from "@/app/lazy-pages";
 import { ShellPageHeader, ShellPageLoading } from "@/app/ShellHeader";
+import { SurfaceState } from "@/components/ui/surface-state";
 
 interface AppRoutesProps {
   page: NavPage;
@@ -291,7 +292,7 @@ function LiveScanOverlay(props: {
   return <ScanOverlay progress={progress} multiProgress={multiProgress} {...props} />;
 }
 
-function InactiveProjectRoutes({
+export function InactiveProjectRoutes({
   page,
   activeProjectId,
   onOpenOverviewProject,
@@ -319,8 +320,12 @@ function InactiveProjectRoutes({
   }
 
   return (
-    <div className="inactive-route-empty">
-      <p className="body-muted">Select a project to get started.</p>
-    </div>
+    <SurfaceState
+      kind="empty"
+      className="inactive-route-empty"
+      title="Select a project to get started"
+      description="Pick a project from the top bar, or add a new site or folder now."
+      primaryAction={{ label: "Add Project", onClick: openAddProject }}
+    />
   );
 }
