@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  Bot,
   Check,
   LayoutDashboard,
   ListChecks,
@@ -11,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { NavPage } from "@/components/layout/NavSidebar";
+import type { NavPage, NavTarget } from "@/components/layout/NavSidebar";
 import { cn } from "@/lib/utils";
 
 type WalkthroughPage = Extract<
@@ -27,13 +28,15 @@ interface WalkthroughStep {
   body: string;
   cue: string;
   Icon: typeof LayoutDashboard;
+  /** A direct jump for steps whose subject sits behind a tab or deep link. */
+  action?: { label: string; target: NavTarget };
 }
 
 interface FirstRunWalkthroughProps {
   currentPage: NavPage;
   projectName: string;
   onClose: () => void;
-  onNavigate: (page: WalkthroughPage) => void;
+  onNavigate: (target: NavTarget) => void;
 }
 
 export function FirstRunWalkthrough({
@@ -47,6 +50,7 @@ export function FirstRunWalkthrough({
   const currentStep = steps[stepIndex] ?? steps[0]!;
   const isFirstStep = stepIndex === 0;
   const isLastStep = stepIndex === steps.length - 1;
+  const action = currentStep.action;
 
   // Move to the tour's first page once so its panel always matches the screen.
   const openedRef = useRef(false);
@@ -103,6 +107,17 @@ export function FirstRunWalkthrough({
         <div className="walkthrough-cue ghost-border">
           <p className="walkthrough-cue-text">{currentStep.cue}</p>
         </div>
+        {action ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="walkthrough-action"
+            onClick={() => onNavigate(action.target)}>
+            {action.label}
+            <ArrowRight className="icon-sm" aria-hidden="true" />
+          </Button>
+        ) : null}
 
         <div className="walkthrough-progress">
           {steps.map((step, index) => (
@@ -181,6 +196,16 @@ function buildWalkthroughSteps(): WalkthroughStep[] {
       body: "Alerts collects regressions, failed scans, security updates, and signals from connected services in one place, so change finds you instead of the other way around.",
       cue: "Empty right now is a good thing. Check back after scheduled scans run or when the sidebar badge lights up.",
       Icon: Bell,
+    },
+    {
+      id: "ai-editor",
+      page: "integrations",
+      label: "AI editor",
+      title: "Connect your AI editor",
+      body: "Claude Code, Cursor, Codex, and Windsurf can pull an issue, fix it in your code, and report back so SiteCMD can verify the fix. The connection is one small config entry that SiteCMD writes for you, or that you paste yourself.",
+      cue: "Under Agent tools, connect the editor you already use. No editor detected? Open Manual setup and copy the config block.",
+      Icon: Bot,
+      action: { label: "Open agent tools", target: "settings:integrations" },
     },
     {
       id: "integrations",

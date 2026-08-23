@@ -68,9 +68,7 @@ interface FixWithAgentActionProps {
 function readRememberedAgentTool(): AgentTool | null {
   try {
     const value = window.localStorage.getItem(AGENT_TOOL_STORAGE_KEY);
-    return value !== null && value in { "claude-code": 1, codex: 1, cursor: 1 }
-      ? (value as AgentTool)
-      : null;
+    return value !== null && value in AGENT_TOOL_LABELS ? (value as AgentTool) : null;
   } catch {
     return null;
   }

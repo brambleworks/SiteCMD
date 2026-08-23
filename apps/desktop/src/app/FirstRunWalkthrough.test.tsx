@@ -35,7 +35,7 @@ describe("FirstRunWalkthrough", () => {
       />,
     );
 
-    expect(screen.getByText("Step 1 of 5")).toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 6")).toBeInTheDocument();
     expect(screen.getByText("Start with what the scan found")).toBeInTheDocument();
     // Already on Issues: opening the tour must not move the user anywhere.
     expect(onNavigate).not.toHaveBeenCalled();
@@ -53,7 +53,7 @@ describe("FirstRunWalkthrough", () => {
       />,
     );
 
-    expect(screen.getByText("Step 1 of 5")).toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 6")).toBeInTheDocument();
     expect(onNavigate).toHaveBeenCalledWith("issues");
   });
 
@@ -76,8 +76,15 @@ describe("FirstRunWalkthrough", () => {
     expect(onNavigate).toHaveBeenLastCalledWith("alerts");
     expect(screen.getByText("See what changed while you were away")).toBeInTheDocument();
 
-    // Integrations is an always-present Manage page and the action that makes
-    // the progressive Monitor section appear at all.
+    // The AI editor step lives on Integrations, where Agent tools are.
+    fireEvent.click(screen.getByRole("button", { name: /Next: AI editor/i }));
+    expect(onNavigate).toHaveBeenLastCalledWith("integrations");
+    expect(screen.getByText("Connect your AI editor")).toBeInTheDocument();
+    expect(screen.getByText(/Manual setup/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open agent tools" }));
+    expect(onNavigate).toHaveBeenLastCalledWith("settings:integrations");
+
     fireEvent.click(screen.getByRole("button", { name: /Next: Integrations/i }));
     expect(onNavigate).toHaveBeenLastCalledWith("integrations");
     expect(screen.getByText("Connect your services")).toBeInTheDocument();
@@ -99,7 +106,7 @@ describe("FirstRunWalkthrough", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Open walkthrough step 5: Dashboard/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Open walkthrough step 6: Dashboard/i }));
     fireEvent.click(screen.getByRole("button", { name: "Finish" }));
 
     expect(onClose).toHaveBeenCalledTimes(1);
