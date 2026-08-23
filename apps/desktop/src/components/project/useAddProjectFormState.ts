@@ -11,6 +11,7 @@ import {
   type ProjectEnvironment,
 } from "@/lib/project-environments";
 import { recordWorkflowHealthEvent } from "@/lib/observability";
+import { userFacingError } from "@/lib/user-facing-error";
 
 import { buildInitialUrls, type UrlRow } from "./add-project-form-model";
 
@@ -81,11 +82,10 @@ export function useAddProjectFormState({ onCreated }: UseAddProjectFormStateOpti
       setPrimaryEnvironmentTouched(false);
       setScanning(false);
     } catch (error) {
-      const message =
-        typeof error === "string"
-          ? error
-          : (error as Error)?.message ||
-            "We couldn't inspect that folder. You can still continue by entering your site URLs manually.";
+      const message = userFacingError(
+        error,
+        "We couldn't inspect that folder. You can still continue by entering your site URLs manually.",
+      );
       setFolderError(message);
       setScanning(false);
     }
@@ -180,7 +180,6 @@ export function useAddProjectFormState({ onCreated }: UseAddProjectFormStateOpti
         onCreated(projectId);
       }
     } catch (err) {
-      const msg = typeof err === "string" ? err : (err as Error)?.message || "";
       recordWorkflowHealthEvent("add_site", "failed", {
         mode: folder ? "folder" : "url",
         errorType: "submit",
@@ -188,13 +187,18 @@ export function useAddProjectFormState({ onCreated }: UseAddProjectFormStateOpti
       });
       if (folder) {
         setFolderError(
-          msg ||
+          userFacingError(
+            err,
             "We couldn't finish inspecting that folder. You can still review the linked folder and URLs, then try again.",
+          ),
         );
       } else {
         // Surface URL-mode failures instead of leaving the dialog silently open.
         setSubmitError(
-          msg || "We couldn't finish creating that project. Check the URLs and try again.",
+          userFacingError(
+            err,
+            "We couldn't finish creating that project. Check the URLs and try again.",
+          ),
         );
       }
       // Return partially created projects so retries cannot create duplicates.

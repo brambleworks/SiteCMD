@@ -131,7 +131,7 @@ describe("useLicenseActivateDeepLink", () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     const [, body] = toastError.mock.calls.at(-1) ?? [];
-    expect(body).toContain("not allowed by scope");
+    expect(body).toContain("Not allowed by scope");
     expect(body).toContain("Settings");
     expect(activateLicense).not.toHaveBeenCalled();
   });

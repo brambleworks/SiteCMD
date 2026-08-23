@@ -15,6 +15,7 @@ import {
   activationFailureAction,
   formatLicenseActivationError,
 } from "@/lib/license-activation-error";
+import { userFacingError } from "@/lib/user-facing-error";
 
 /** Deduplicate cold-start URLs that also arrive through the runtime event. */
 const SAME_KEY_DEDUPE_WINDOW_MS = 5_000;
@@ -64,7 +65,7 @@ export function useLicenseActivateDeepLink() {
       } catch (e) {
         error(
           "Couldn't activate license",
-          `${e instanceof Error ? e.message : String(e)}. You can still activate it in Settings, then Account.`,
+          `${userFacingError(e, "Try again in a moment.")} You can still activate it in Settings, then Account.`,
         );
         return;
       }

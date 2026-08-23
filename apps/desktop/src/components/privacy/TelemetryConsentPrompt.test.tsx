@@ -99,9 +99,8 @@ describe("TelemetryConsentPrompt", () => {
       fireEvent.click(screen.getByRole("button", { name: "Keep Off" }));
 
       const errorMessage = await screen.findByRole("alert");
-      expect(errorMessage).toHaveTextContent(/Couldn't save telemetry choice/i);
+      expect(errorMessage).toHaveTextContent(/Couldn't save your telemetry choice/i);
       expect(errorMessage).toHaveTextContent(/storage quota exceeded/i);
-      expect(errorMessage).toHaveTextContent(/Try again/i);
       // Modal stays open so the user can retry; saving spinner is cleared.
       expect(screen.getByText("Help improve SiteCMD")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Keep Off" })).not.toBeDisabled();

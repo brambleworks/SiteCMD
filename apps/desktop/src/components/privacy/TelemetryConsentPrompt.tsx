@@ -2,7 +2,7 @@ import { useState } from "react";
 import { BarChart3, Bug, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buildTelemetryPreview, setTelemetryConsent, useTelemetryConsent } from "@/lib/telemetry";
-import { errorMessage } from "@/lib/error-message";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export function TelemetryConsentPrompt() {
   const consent = useTelemetryConsent();
@@ -21,8 +21,8 @@ export function TelemetryConsentPrompt() {
     try {
       await setTelemetryConsent({ ...next, promptStatus: "saved" });
     } catch (error) {
-      const message = errorMessage(error) || "Unknown error";
-      setSaveError(`Couldn't save telemetry choice: ${message}. Try again.`);
+      const message = userFacingError(error, "Your choice was not saved. Try again.");
+      setSaveError(`Couldn't save your telemetry choice. ${message}`);
     } finally {
       setSaving(false);
     }

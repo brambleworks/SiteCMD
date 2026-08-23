@@ -181,8 +181,9 @@ export default defineConfig([
     },
   },
   {
-    // Interactive controls must use Button or a native button for keyboard behavior.
-    files: ["apps/desktop/src/**/*.tsx"],
+    // Interactive controls must use Button or a native button for keyboard
+    // behavior, and people never see a raw String(error).
+    files: ["apps/desktop/src/**/*.{ts,tsx}"],
     ignores: [`apps/desktop/src/**/${TEST_SUFFIXES}`],
     rules: {
       "no-restricted-syntax": [
@@ -192,6 +193,12 @@ export default defineConfig([
             'JSXOpeningElement[name.name="span"] > JSXAttribute[name.name="role"][value.value="button"]',
           message:
             'Use `<Button unstyled>` or a native <button> instead of `<span role="button">` - a span reimplements keyboard activation by hand and drops Space-key support (audit F32).',
+        },
+        {
+          selector:
+            ':matches(JSXExpressionContainer, Property, TemplateLiteral, CallExpression[callee.type="MemberExpression"][callee.property.name=/^(error|warning|info|success|toast)$/], CallExpression[callee.type="Identifier"][callee.name=/^(error|showError|toastError|set[A-Z]\\w*Error)$/]) > CallExpression[callee.name="String"][arguments.0.type="Identifier"][arguments.0.name=/^(e|err|error)$/]',
+          message:
+            "Do not show String(error) to people. Pass the rejection through userFacingError(error, fallback) from @/lib/user-facing-error so the message is a sentence with a next step.",
         },
       ],
     },

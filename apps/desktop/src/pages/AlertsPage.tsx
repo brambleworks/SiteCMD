@@ -31,6 +31,7 @@ import type { AlertFilter, AlertRow } from "@/lib/types";
 import type { NavTarget } from "@/components/layout/nav-page";
 import { useIntegrationsQuery } from "@/hooks/useIntegrationsQuery";
 import { CONNECTED_ALERT_UNAVAILABLE, CONNECTED_LINK_UNKNOWN } from "@/lib/deep-links";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface AlertsPageProps {
   projectId: number;
@@ -153,7 +154,7 @@ export function AlertsPage({
       if (!isUnread) return;
 
       void Promise.resolve(markViewed(alert.id)).catch((err) => {
-        setSourceError(String(err));
+        setSourceError(userFacingError(err, "Your change was not saved. Try again."));
         setSelectedAlert((current) => (current?.id === alert.id ? alert : current));
       });
     },
@@ -190,7 +191,7 @@ export function AlertsPage({
         current?.id === alert.id ? { ...current, viewedAt } : current,
       );
       void Promise.resolve(markViewed(alert.id)).catch((err) => {
-        setSourceError(String(err));
+        setSourceError(userFacingError(err, "Your change was not saved. Try again."));
         setSelectedAlert((current) =>
           current?.id === alert.id ? { ...current, viewedAt: alert.viewedAt } : current,
         );
@@ -205,7 +206,7 @@ export function AlertsPage({
         current?.id === alert.id ? { ...current, viewedAt: null } : current,
       );
       void Promise.resolve(markUnread(alert.id)).catch((err) => {
-        setSourceError(String(err));
+        setSourceError(userFacingError(err, "Your change was not saved. Try again."));
         setSelectedAlert((current) =>
           current?.id === alert.id ? { ...current, viewedAt: alert.viewedAt } : current,
         );
@@ -221,7 +222,7 @@ export function AlertsPage({
         current?.id === alert.id ? { ...current, dismissedAt } : current,
       );
       void Promise.resolve(dismiss(alert.id)).catch((err) => {
-        setSourceError(String(err));
+        setSourceError(userFacingError(err, "Your change was not saved. Try again."));
         setSelectedAlert((current) =>
           current?.id === alert.id ? { ...current, dismissedAt: alert.dismissedAt } : current,
         );
@@ -241,7 +242,7 @@ export function AlertsPage({
       // Polling can add timeline rows without a Rust event, so invalidate Activity.
       publishEventsRecorded(projectId);
     } catch (err) {
-      setSourceError(String(err));
+      setSourceError(userFacingError(err, "Try again in a moment."));
     } finally {
       setCheckingSources(false);
     }

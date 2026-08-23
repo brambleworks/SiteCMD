@@ -9,6 +9,7 @@ import {
   setSiteSitemapUrl,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface PageRecord {
   id: number;
@@ -80,7 +81,7 @@ export function useSitemap(
       }
     } catch (error) {
       setState("error");
-      setActionError(String(error));
+      setActionError(userFacingError(error, "Try again in a moment."));
     }
   }, [reloadPages, resolvedSiteId, siteUrl]);
 
@@ -103,7 +104,7 @@ export function useSitemap(
         }
       } catch (error) {
         setState("error");
-        setActionError(String(error));
+        setActionError(userFacingError(error, "Try again in a moment."));
       }
     },
     [reloadPages, resolvedSiteId],
