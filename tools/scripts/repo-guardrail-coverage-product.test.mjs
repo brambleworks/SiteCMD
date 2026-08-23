@@ -1095,7 +1095,7 @@ describe.concurrent(
           writeFixtureFile(
             fixtureRoot,
             mcpIndexPath,
-            source.replace("**Scan artifact score:**", "**Score:**"),
+            source.replace("Get the latest scan artifact score", "Get the latest SiteCMD Score"),
           );
         },
         "sitecmd-mcp must label historical scan row scores as scan artifact scores, not the current SiteCMD Score.",
