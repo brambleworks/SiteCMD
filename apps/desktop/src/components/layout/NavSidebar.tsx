@@ -156,6 +156,7 @@ export function NavSidebar({
               unstyled
               onClick={() => onNavigate("sites")}
               className={`nav-item ${activePage === "sites" ? "nav-item-active" : "nav-item-inactive"}`}
+              aria-current={activePage === "sites" ? "page" : undefined}
               title={collapsed ? "Overview" : undefined}>
               <Layers className="nav-icon nav-icon-overview" />
               {!collapsed && "Overview"}
@@ -194,6 +195,7 @@ export function NavSidebar({
                     className={`nav-item ${
                       activePage === page ? "nav-item-active" : "nav-item-inactive"
                     }`}
+                    aria-current={activePage === page ? "page" : undefined}
                     title={collapsed ? label : undefined}>
                     <Icon className="nav-icon" />
                     {!collapsed && label}
@@ -328,7 +330,8 @@ function SidebarUtilityButton({
       onFocus={() => onLabelShow(label)}
       onBlur={onLabelHide}
       className={`nav-utility-button ${active ? "nav-utility-button-active" : ""}`}
-      aria-label={label}>
+      aria-label={label}
+      aria-current={active ? "page" : undefined}>
       {children}
     </Button>
   );
