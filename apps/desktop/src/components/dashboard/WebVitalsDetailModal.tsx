@@ -268,7 +268,7 @@ export function WebVitalsDetailModal({ url, hostname, onClose }: Props) {
       setKeyInput("");
       await load(strategy);
     } catch (err) {
-      setError(userFacingError(err, "Could not save the API key."));
+      setError(userFacingError(err, "Your change was not saved. Try again."));
     } finally {
       setSavingKey(false);
     }
