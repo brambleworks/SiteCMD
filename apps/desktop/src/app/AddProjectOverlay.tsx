@@ -1,5 +1,5 @@
-import { useEffect } from "react";
 import { AddProjectForm } from "@/app/lazy-pages";
+import { Dialog } from "@/components/ui/dialog";
 import type { NavTarget } from "@/components/layout/nav-page";
 
 /** Modal overlay wrapper for AddProjectForm. */
@@ -12,31 +12,13 @@ export function AddProjectOverlay({
   onCancel: () => void;
   onNavigate?: (page: NavTarget) => void;
 }) {
-  useEscapeKey(onCancel);
   return (
-    <div
-      className="overlay-backdrop overlay-backdrop--add-project"
-      onClick={onCancel}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Add project">
-      <div className="add-project-panel" onClick={(e) => e.stopPropagation()}>
-        <AddProjectForm onCreated={onCreated} onCancel={onCancel} onNavigate={onNavigate} />
-      </div>
-    </div>
+    <Dialog
+      label="Add project"
+      onClose={onCancel}
+      backdropClassName="dialog--top"
+      className="add-project-panel">
+      <AddProjectForm onCreated={onCreated} onCancel={onCancel} onNavigate={onNavigate} />
+    </Dialog>
   );
-}
-
-/** Close a modal on Escape key. Attaches/detaches a keydown listener. */
-function useEscapeKey(onClose: () => void) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
 }
