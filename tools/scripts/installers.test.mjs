@@ -146,7 +146,9 @@ exit 92
   });
 
   return {
+    bin,
     binary,
+    environment,
     installDir,
     runPublic(overrides = {}) {
       return spawnSync("sh", [PUBLIC_INSTALLER], {
@@ -266,6 +268,7 @@ describe("CLI installers", () => {
 
   it.each([
     ["public", { FAKE_UNAME_SYSTEM: "FreeBSD" }, "unsupported platform: FreeBSD"],
+    ["public", { FAKE_UNAME_ARCH: "aarch64" }, "no prebuilt CLI for Linux/aarch64"],
     ["setup", { FAKE_UNAME_SYSTEM: "Darwin" }, "supports Linux x86_64 runners only"],
   ])("rejects an unsupported platform in the %s installer", (kind, overrides, message) => {
     const fixture = createInstallerFixture();
@@ -289,4 +292,59 @@ describe("CLI installers", () => {
       expect(fs.readdirSync(fixture.installDir)).toEqual(["sitecmd"]);
     },
   );
+
+  it("executes nothing when the public installer is truncated mid-stream", () => {
+    const fixture = createInstallerFixture();
+    const installed = seedInstalledCli(fixture);
+    const source = fs.readFileSync(PUBLIC_INSTALLER, "utf8");
+
+    const result = spawnSync("sh", [], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: fixture.environment({}),
+      input: source.slice(0, source.length - 120),
+    });
+
+    expect(result.stdout).not.toContain("Downloading");
+    expectPreserved(result, installed);
+  });
+
+  it("refuses a latest-version answer older than the installed CLI", () => {
+    const fixture = createInstallerFixture();
+    const installed = path.join(fixture.installDir, "sitecmd");
+    writeExecutable(installed, "#!/bin/sh\nprintf 'sitecmd 1.6.0\\n'\n");
+
+    const result = fixture.runPublic({ SITECMD_VERSION: "" });
+
+    expect(result.stderr).toContain("refusing to downgrade");
+    expect(result.status).not.toBe(0);
+    expect(fs.readFileSync(installed, "utf8")).toContain("1.6.0");
+  });
+
+  it("installs an explicitly pinned version that is older than the installed CLI", () => {
+    const fixture = createInstallerFixture();
+    writeExecutable(
+      path.join(fixture.installDir, "sitecmd"),
+      "#!/bin/sh\nprintf 'sitecmd 1.6.0\\n'\n",
+    );
+
+    const result = fixture.runPublic();
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Installed sitecmd 1.5.4");
+  });
+
+  it("names the package-manager command when minisign is missing", () => {
+    const fixture = createInstallerFixture();
+    fs.unlinkSync(path.join(fixture.bin, "minisign"));
+
+    const result = fixture.runPublic({
+      FAKE_UNAME_SYSTEM: "Darwin",
+      PATH: `${fixture.bin}:/usr/bin:/bin`,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("minisign is required");
+    expect(result.stderr).toContain("brew install minisign");
+  });
 });
