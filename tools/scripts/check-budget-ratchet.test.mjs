@@ -259,6 +259,29 @@ export function rustLineBudgetFailures() {}
     expect(result.stderr).toMatch(/const:RUST_FILE_LINE_LIMIT.*800 -> 1200/);
   });
 
+  it("covers Rust budget constants in lib_tests.rs: refused without the token, passes with it", () => {
+    const rustPath = "apps/desktop/src-tauri/src/lib_tests.rs";
+    const rustFile = `const STRING_RESULT_COMMAND_BUDGET: usize = 100;\n`;
+    write(repo, rustPath, rustFile);
+    commit(repo, "initial rust ratchet");
+
+    write(repo, rustPath, rustFile.replace("usize = 100", "usize = 150"));
+    stageOnly(repo, rustPath);
+    setCommitMessage(repo, "wip\n");
+    const refused = runScript(repo);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/refusing to raise guardrail thresholds/);
+    expect(refused.stderr).toMatch(/const:STRING_RESULT_COMMAND_BUDGET.*100 -> 150/);
+
+    setCommitMessage(
+      repo,
+      "Widen the migration ratchet\n\n[budget-raised: measured count moved during a rebase (#11)]\n",
+    );
+    const authorized = runScript(repo);
+    expect(authorized.status).toBe(0);
+    expect(authorized.stderr).toMatch(/authorized via \[budget-raised:\]/);
+  });
+
   it("supports a --range mode for CI hard-gate checks", () => {
     const tipPath = "tools/scripts/lib/guardrail-script-budgets.mjs";
     write(
