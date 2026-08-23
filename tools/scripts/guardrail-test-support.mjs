@@ -26,6 +26,7 @@ import { eventFabricFailures } from "./lib/guardrail-event-fabric-rules.mjs";
 import { fixGuideCspGuidanceFailures } from "./lib/guardrail-fix-guide-csp-rules.mjs";
 import { desktopFrontendDisplayFailures } from "./lib/guardrail-frontend-display-rules.mjs";
 import { desktopFrontendJsonSafetyFailures } from "./lib/guardrail-frontend-json-rules.mjs";
+import { frontendMaintainabilityFailures } from "./lib/guardrail-frontend-maintainability-rules.mjs";
 import { desktopFrontendStateFailures } from "./lib/guardrail-frontend-rules.mjs";
 import { integrationUrlSecretFailures } from "./lib/guardrail-integration-url-secrets.mjs";
 import { desktopIssueStatusFailures } from "./lib/guardrail-issue-rules.mjs";
@@ -239,6 +240,10 @@ const RULE_ARGUMENTS = new Map([
   [engineVocabFailures, (io) => [io.read]],
   [eventFabricFailures, (io) => [io.read, desktopSourceFiles(io)]],
   [fixGuideCspGuidanceFailures, (io) => [io.read, io.listFiles]],
+  [
+    frontendMaintainabilityFailures,
+    (io) => [io.read, io.listFiles, desktopSourceFiles(io), new Map()],
+  ],
   [integrationUrlSecretFailures, (io) => [io.read, io.exists, io.listFiles]],
   [issueStateSafetyFailures, (io) => [io.read, io.exists, desktopSourceFiles(io)]],
   [licenseCodeUnionFailures, (io) => [io.read]],
@@ -341,6 +346,7 @@ export const rules = Object.freeze({
   engineVocabFailures,
   eventFabricFailures,
   fixGuideCspGuidanceFailures,
+  frontendMaintainabilityFailures,
   guardrailScriptLineBudgets,
   integrationUrlSecretFailures,
   issueStateSafetyFailures,
