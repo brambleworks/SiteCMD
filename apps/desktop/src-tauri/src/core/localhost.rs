@@ -154,7 +154,7 @@ mod tests {
             ("https://preview-my-app.vercel.app", "staging"),
             ("https://qa.example.com", "staging"),
             ("https://localhost.run", "production"),
-            ("https://upstage.ai", "production"),
+            ("https://upstage.example.com", "production"),
             ("https://example.com", "production"),
             ("not-a-url", "production"),
         ];
@@ -203,7 +203,7 @@ mod tests {
                 "staging",
             ),
             ("https://localhost.run", Some("local"), "production"),
-            ("https://upstage.ai", Some("staging"), "staging"),
+            ("https://upstage.example.com", Some("staging"), "staging"),
             ("https://example.com", Some("prod"), "production"),
             ("https://example.com", Some("staging"), "staging"),
             ("https://example.com", Some("custom"), "production"),

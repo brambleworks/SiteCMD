@@ -15,7 +15,7 @@ This repository is everything that runs on a user's machine: the desktop app, th
 Two things are deliberately elsewhere and are not accepted here:
 
 - **The maintained intelligence catalog.** Fix-guide content is separately licensed commercial content and is authored in the SiteCMD-Web repository, not in this one. Baseline remediation content that ships inside the app does live here.
-- **Connected-service internals.** The hosted scanner, the connected API, and the delivery workers run on SiteCMD infrastructure and live in SiteCMD-Web. The payload builder that decides what a connected client sends belongs on this side of the line on purpose, so what leaves the machine stays reviewable.
+- **Connected-service internals.** The hosted scanner, the connected API, and the delivery workers run on SiteCMD infrastructure and their code lives in SiteCMD-Web. Their implementation specifications are public in `docs/engineering/connected-service/` so the wire contract a client speaks can be reviewed; the service code that fulfills them is not accepted here. The payload builder that decides what a connected client sends belongs on this side of the line on purpose, so what leaves the machine stays reviewable.
 
 The source-publication decision record, maintained privately alongside the connected-service internals, owns that boundary and why it falls where it does.
 

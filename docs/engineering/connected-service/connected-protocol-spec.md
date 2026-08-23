@@ -12,8 +12,8 @@ wire contract: issue identity, the sync payload, credentials, the
 lifecycle-state protocol, the concurrency invariants, and custody of the
 project fingerprint key. It does not own hosted-scan execution, parity, or
 the network-security boundary (hosted scanner spec), notification content or
-redemption (alert and report delivery spec), or quantities and pricing
-(commercial terms spec).
+redemption (alert and report delivery spec), or quantities and pricing,
+which are set outside this specification.
 
 **Audience:** Engineers implementing the sync client in the desktop and CLI,
 and the connected-service workers in SiteCMD-Web.
@@ -37,7 +37,7 @@ deployment-record ordering, retention, recovery, and deletion.
 Out of scope, with owners: how the hosted scanner executes and proves
 comparability (hosted scanner spec); what alert emails contain and how the
 redemption nonce works (alert and report delivery spec); allowances, caps,
-and overage (commercial terms spec); the rewrite of the governing documents
+and overage (set outside this specification); the rewrite of the governing documents
 (maintained-surface matrix).
 
 Normative artifacts: this document is the semantics authority. The exact
@@ -80,9 +80,8 @@ Site and environment: in v1 a connected site binds exactly one
 environment, `production`, with one canonical production URL. The
 `environment` discriminator appears on the wire for forward compatibility;
 environment resources, preview scanning, and per-environment lifecycle
-arrive with the preview opt-in described in the RFC's economics section
-and are out of scope for v1. The billable unit (commercial terms spec) is
-the connected production site.
+arrive with a later preview opt-in and are out of scope for v1. The
+billable unit is the connected production site.
 
 ## Issue identity contract, version 1
 
@@ -1216,7 +1215,7 @@ watching nothing.
 
 The wire limit of 5,000 routes bounds the resource; the **effective
 scannable scope** is bounded by the entitlement's connected-scope cap
-(commercial terms spec; the hosted scanner's v1 ceiling is 100). **The environment's entry URL counts toward the effective cap**
+(a plan value set outside this specification; the hosted scanner's v1 ceiling is 100). **The environment's entry URL counts toward the effective cap**
 (deduplicated when it is also listed, exactly as the scanner spec
 counts it as a route), so a maximal scope is 100 routes including
 the entry - never a 101-route scan against a 100-route budget. A
@@ -1693,8 +1692,7 @@ later sections depend on them too:
   mints one through the same exchange as the catalog credential: same
   nonce replay, same fingerprint binding on that replay, same refusal
   to mint without a subscription id, same entitled gate. It carries no
-  seat cap, because the commercial terms spec retires device caps as
-  the sold quantity. Suspension, restoration, retier, and the
+  seat cap, because device caps are not the sold quantity. Suspension, restoration, retier, and the
   six-hourly sweep reach it without a line of new machinery, which is
   the whole reason the credential lives in that store; the activation
   worker's suite executes each of those four paths and asserts both
@@ -3198,7 +3196,7 @@ contract:
 
 ## Allowance transitions
 
-The commercial spec's allowance is enforced with states, not
+The plan allowance is enforced with states, not
 adjectives:
 
 - **Slot leases.** Connecting a site consumes an allowance slot.
