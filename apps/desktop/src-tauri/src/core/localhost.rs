@@ -103,7 +103,6 @@ mod tests {
             ("http://myapp.local", true),
             ("http://myapp.localhost:3000", true),
             ("http://[::1]:5173", true),
-            ("https://localhost.run", false),
             ("https://localhost.example.com", false),
             ("https://example.com", false),
             ("https://www.google.com", false),

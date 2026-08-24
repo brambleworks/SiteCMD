@@ -301,7 +301,7 @@ export function FixWithAgentModal({
       onClose={onClose}
       dismissOnBackdrop={false}
       className="fix-prompt-modal">
-      {/* Clicks inside this modal land in its own <dialog>, and the dossier's
+      {/* Clicks inside this modal land in its own dialog element, and the dossier's
             outside-click handler ignores clicks inside any open dialog, so they
             never read as outside clicks for a dossier layered underneath. */}
       <div className="fix-prompt-modal-header" data-dossier-switch="true">

@@ -3,6 +3,7 @@
 
 use crate::core::agent_tools::{self, AgentTool, AgentToolStatus, McpManualConfig};
 
+use super::error::CommandError;
 use super::run_blocking;
 
 #[tauri::command]
@@ -68,7 +69,7 @@ pub async fn launch_agent_handoff(
 pub async fn get_agent_tool_manual_config(
     app: tauri::AppHandle,
     tool: AgentTool,
-) -> Result<McpManualConfig, String> {
+) -> Result<McpManualConfig, CommandError> {
     run_blocking(move || agent_tools::manual_config(&app, tool)).await?
 }
 
