@@ -26,7 +26,7 @@ import type {
 import type { InvokeResponses } from "./tauri-stub";
 
 const SCAN_TIMESTAMP = "2026-04-15T12:00:00Z";
-export const SEEDED_URL = "https://example.com";
+const SEEDED_URL = "https://example.com";
 export const SEEDED_SCORE = 71;
 export const SEEDED_ISSUE_TITLE = "Missing HSTS header";
 
@@ -50,7 +50,7 @@ export const seededProject: ProjectRecord = {
   environments: [environment],
 };
 
-export const seededIssue: CheckResult = {
+const seededIssue: CheckResult = {
   checkId: "security.headers.hsts",
   category: "security",
   title: SEEDED_ISSUE_TITLE,
@@ -63,7 +63,7 @@ export const seededIssue: CheckResult = {
   confidence: "high",
 };
 
-export const seededScanSummary: ScanSummary = {
+const seededScanSummary: ScanSummary = {
   id: 100,
   url: SEEDED_URL,
   mode: "live",
@@ -167,7 +167,7 @@ export function runScanExecutionResult(webResult: ScanResult): RunScanExecutionR
   };
 }
 
-export const seededExecutionSummary: ScanExecutionSummary = {
+const seededExecutionSummary: ScanExecutionSummary = {
   id: 500,
   projectId: seededProject.id,
   environmentId: environment.id,
@@ -304,7 +304,7 @@ const signals: ProjectSignalSnapshot = {
   workSummary: emptyWorkSummary,
 };
 
-export const seededSnapshot: DashboardSnapshot = {
+const seededSnapshot: DashboardSnapshot = {
   projectId: seededProject.id,
   environmentUrl: SEEDED_URL,
   trend: [trendPoint],
@@ -321,7 +321,7 @@ export const seededSnapshot: DashboardSnapshot = {
   workQueue: { resumeNow: [], verifyNow: [], fixNext: [], maintenance: [] },
 };
 
-export const seededScore: ScoreSnapshot = {
+const seededScore: ScoreSnapshot = {
   overall: SEEDED_SCORE,
   perCategory: { security: 62 },
   criticalCount: 0,
