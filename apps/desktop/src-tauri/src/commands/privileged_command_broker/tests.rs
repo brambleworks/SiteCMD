@@ -2,8 +2,8 @@ use super::token_state::TokenStore;
 use super::{
     arg_i64, arg_string, privileged_action_argument_summary, privileged_action_sentence,
     privileged_token_issue_requires_user_intent, BrokerScope, PrivilegedCommandRequest,
-    PrivilegedCommandTokenState, DATA_ADMIN_COMMANDS, FILESYSTEM_EXPORT_COMMANDS,
-    PROJECT_EXECUTION_COMMANDS, SCOPES, SENSITIVE_CONNECTOR_COMMANDS,
+    PrivilegedCommandTokenState, DATA_ADMIN_COMMANDS, FILESYSTEM_ACCESS_COMMANDS,
+    FILESYSTEM_EXPORT_COMMANDS, PROJECT_EXECUTION_COMMANDS, SCOPES, SENSITIVE_CONNECTOR_COMMANDS,
     SENSITIVE_FILESYSTEM_ACCESS_COMMANDS,
 };
 use serde_json::{json, Value};
@@ -90,6 +90,56 @@ fn every_run_entry_point_admits_through_the_scope_table() {
         assert!(
             !production.contains("Unsupported {SCOPE_LABEL} command."),
             "{file} must not format its own refusal"
+        );
+    }
+}
+
+/// The four flat-match dispatchers (external_connectors.rs nests its own
+/// sub-dispatchers and is covered separately by
+/// `public_allowlist_matches_domain_dispatchers`) end their match on
+/// `unreachable!()` because `BrokerScope::admit` already checked the command
+/// against the same allowlist. That is only sound while every allowlisted
+/// command has a matching dispatch arm and vice versa; if the two drift, an
+/// allowlisted command with no arm panics the async command in production
+/// instead of returning an error. This proves they cannot drift silently.
+#[test]
+fn every_dispatch_arm_matches_its_scope_allowlist() {
+    let arm_pattern =
+        regex::Regex::new(r#"(?m)^ {8}"([a-z_]+)" => \{"#).expect("dispatch arm pattern");
+    for (file, source, allowlist) in [
+        (
+            "data_admin.rs",
+            include_str!("data_admin.rs"),
+            DATA_ADMIN_COMMANDS,
+        ),
+        (
+            "filesystem_access.rs",
+            include_str!("filesystem_access.rs"),
+            FILESYSTEM_ACCESS_COMMANDS,
+        ),
+        (
+            "filesystem_export.rs",
+            include_str!("filesystem_export.rs"),
+            FILESYSTEM_EXPORT_COMMANDS,
+        ),
+        (
+            "project_execution.rs",
+            include_str!("project_execution.rs"),
+            PROJECT_EXECUTION_COMMANDS,
+        ),
+    ] {
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        let mut dispatched: Vec<&str> = arm_pattern
+            .captures_iter(production)
+            .map(|caps| caps.get(1).expect("captured command name").as_str())
+            .collect();
+        let mut allowed: Vec<&str> = allowlist.to_vec();
+        dispatched.sort_unstable();
+        dispatched.dedup();
+        allowed.sort_unstable();
+        assert_eq!(
+            dispatched, allowed,
+            "{file}: dispatch arms and the allowlist must match exactly, or a drifted command hits the dispatcher's unreachable!()"
         );
     }
 }
