@@ -65,10 +65,13 @@ The source-publication decision record, maintained privately, owns the boundary.
 `,
     "SECURITY.md": `# Security Policy
 
+Use [private vulnerability reporting](https://github.com/brambleworks/SiteCMD/security/advisories/new), or email security@sitecmd.com.
+
 The connected service is in scope: its API, hosted scanner, and delivery paths.
 
 Boundaries live at [trust](https://sitecmd.com/trust) and [privacy](https://sitecmd.com/privacy).
 `,
+    ".github/security-contact-key.asc": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n",
     "AGENTS.md": `# Agent guidance
 
 Free/Core redaction is applied in Rust before payloads reach the frontend.
@@ -299,5 +302,32 @@ describe("the security policy", () => {
         files["SECURITY.md"] = files["SECURITY.md"].replace("https://sitecmd.com/trust", "#");
       }),
     ).toContain("sitecmd.com/trust");
+  });
+});
+
+describe("the security intake", () => {
+  it("fails when SECURITY.md hedges about private vulnerability reporting", () => {
+    expect(
+      failures((files) => {
+        files["SECURITY.md"] +=
+          "\nUse GitHub reporting when it is available for this repository.\n";
+      }),
+    ).toContain("must not hedge");
+  });
+
+  it("fails when the contact key is not committed", () => {
+    expect(
+      failures((files) => {
+        delete files[".github/security-contact-key.asc"];
+      }),
+    ).toContain("security@sitecmd.com and the committed OpenPGP key");
+  });
+
+  it("fails when the advisories link is gone", () => {
+    expect(
+      failures((files) => {
+        files["SECURITY.md"] = files["SECURITY.md"].replace("/security/advisories/new", "/issues");
+      }),
+    ).toContain("first channel");
   });
 });

@@ -4,6 +4,7 @@ const README = "README.md";
 const CONTRIBUTING = "CONTRIBUTING.md";
 const SECURITY = "SECURITY.md";
 const CONNECTED_SPEC_DIRECTORY = "docs/engineering/connected-service";
+const SECURITY_CONTACT_KEY = ".github/security-contact-key.asc";
 
 const RETIRED_LOCAL_CONTRACT =
   /Tier::has_feature|Feature::IssueRichDetail|detailsUnlocked|locked on this tier|unlock details|unlock this finding|Code Scan (?:requires (?:Core or Pro|a paid license)|is a paid Core feature)|paid features are off|Cached features are still active|features will downgrade to Free/i;
@@ -239,6 +240,21 @@ export function publicationRecordFailures(read, exists, listFiles) {
       if (!security.includes(page)) {
         failures.push(`${SECURITY} must point at ${page}, where the boundaries it protects live.`);
       }
+    }
+    if (!security.includes("https://github.com/brambleworks/SiteCMD/security/advisories/new")) {
+      failures.push(
+        `${SECURITY} must link GitHub private vulnerability reporting as the first channel; protection:check:live proves it is enabled.`,
+      );
+    }
+    if (!security.includes("security@sitecmd.com") || !exists(SECURITY_CONTACT_KEY)) {
+      failures.push(
+        `${SECURITY} must name security@sitecmd.com and the committed OpenPGP key at ${SECURITY_CONTACT_KEY} for reports that cannot use GitHub.`,
+      );
+    }
+    if (/when it is available for this repository/.test(security)) {
+      failures.push(
+        `${SECURITY} must not hedge about private vulnerability reporting; it is enabled, and a reporter who reads "when available" assumes it is not.`,
+      );
     }
   }
 

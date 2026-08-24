@@ -15,7 +15,10 @@ The connected service has no versions to support: it runs one deployed version, 
 
 Please do not open a public issue for a suspected vulnerability.
 
-Use GitHub's private vulnerability reporting feature when it is available for this repository. Otherwise, email `support@sitecmd.com` with `SECURITY` in the subject line.
+1. Preferred: [open a private vulnerability report on GitHub](https://github.com/brambleworks/SiteCMD/security/advisories/new). Private vulnerability reporting is enabled for this repository, and the report stays between you and the maintainers until a fix is coordinated.
+2. Otherwise: email `security@sitecmd.com` with `SECURITY` in the subject line. Encrypt anything sensitive to the OpenPGP key committed at [`.github/security-contact-key.asc`](.github/security-contact-key.asc).
+
+Fingerprint: `16608F9F6D2C5BDA357311C75209E4BCF71B88E0`
 
 Include:
 
@@ -25,9 +28,9 @@ Include:
 - the practical impact
 - any suggested mitigation
 
-Do not include credentials, customer data, private source code, or unrelated scan findings. If sensitive supporting material is necessary, ask for a secure transfer method first.
+Do not include credentials, customer data, private source code, or unrelated scan findings. If sensitive supporting material is necessary, encrypt it to the key above or ask for a secure transfer method first.
 
-We will acknowledge the report, assess severity and scope, coordinate a fix when appropriate, and credit the reporter if requested. Please allow time for remediation before public disclosure.
+We acknowledge reports within three business days, assess severity and scope, coordinate a fix when appropriate, and credit the reporter if requested. Please allow time for remediation before public disclosure.
 
 ## Scope
 
