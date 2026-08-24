@@ -296,7 +296,7 @@ export function repoGuardrailFailures({ root, read, readJson, exists, listFiles 
     "Client-side feature gating is retired with the free complete workbench: no history cap keys on a tier, and the Feature enum, has_feature, and FeatureGate must stay deleted - the paid boundary is the connected service, enforced server-side.",
   );
   const mcpWorkspaceSource = read("apps/mcp-server/src/workspace.ts");
-  const mcpIndexSource = read("apps/mcp-server/src/index.ts");
+  const mcpIndexSource = read("apps/mcp-server/src/server.ts");
   check(
     mcpWorkspaceSource.includes("parseWorkspaceScanResult") &&
       mcpWorkspaceSource.includes("parseWorkspaceIssue") &&

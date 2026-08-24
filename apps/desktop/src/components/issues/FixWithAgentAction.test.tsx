@@ -324,6 +324,30 @@ describe("one-click handoff with a remembered tool", () => {
     });
   });
 
+  it("copies the prompt instead of failing when the editor has no deep link", async () => {
+    mockInvoke({
+      tools: [toolStatus("windsurf", true)],
+      launch: () =>
+        Promise.reject(
+          new Error(
+            "Windsurf has no prompt deep link. The kickoff prompt is on your clipboard; paste it into the agent.",
+          ),
+        ),
+    });
+    render(<FixWithAgentAction {...baseProps} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Fix with Windsurf" }));
+
+    await waitFor(() => expect(createCalls()).toHaveLength(1));
+    expect(
+      await screen.findByText("Fix prompt copied - paste it into Windsurf and send it"),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("KICKOFF PROMPT BODY")).toBeInTheDocument();
+    expect(screen.queryByText(/Could not open Windsurf/)).not.toBeInTheDocument();
+    expect(launchCalls()).toHaveLength(0);
+    expect(copyToClipboardMock).toHaveBeenCalledWith("KICKOFF PROMPT BODY");
+  });
+
   it("advances the progress steps as the attempt moves through the loop", async () => {
     window.localStorage.setItem("sitecmd:agent-tool", "claude-code");
     let latest: FixAttempt = attempt;

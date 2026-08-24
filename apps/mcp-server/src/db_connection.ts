@@ -64,6 +64,7 @@ export function getDb(): DatabaseSync {
   }
 
   _db = new DatabaseSync(dbPath, { readOnly: true });
+  _db.exec("PRAGMA busy_timeout = 5000");
   _dbReadOnly = true;
   return _db;
 }
@@ -82,6 +83,33 @@ export function getDbWrite(): DatabaseSync {
   _dbWrite = new DatabaseSync(dbPath);
   _dbWrite.exec("PRAGMA busy_timeout = 5000");
   return _dbWrite;
+}
+
+const SQLITE_BUSY = 5;
+const SQLITE_LOCKED = 6;
+const BUSY_RETRY_DELAY_MS = 100;
+
+function isBusyError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const errcode = (error as { errcode?: unknown }).errcode;
+  return errcode === SQLITE_BUSY || errcode === SQLITE_LOCKED;
+}
+
+/** busy_timeout covers writer contention; one retry covers WAL recovery, which returns BUSY immediately. */
+export function withBusyRetry<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (!isBusyError(error)) throw error;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, BUSY_RETRY_DELAY_MS);
+    return run();
+  }
+}
+
+/** Test seam: the busy timeout the shared read connection declared. */
+export function __test_readBusyTimeout(): number {
+  const row = getDb().prepare("PRAGMA busy_timeout").get() as { timeout?: number } | undefined;
+  return Number(row?.timeout ?? 0);
 }
 
 /** Test seam confirming the shared read connection remains readonly. */

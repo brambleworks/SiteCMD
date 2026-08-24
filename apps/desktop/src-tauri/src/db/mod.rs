@@ -3,6 +3,7 @@
 //! Executions store intent, runs and findings store immutable evidence, and work
 //! items plus issue states store the mutable projection.
 
+mod agent_requests;
 pub mod alerts;
 mod code_scan_summaries;
 mod code_scans;
@@ -67,6 +68,7 @@ mod work_item_groups;
 mod work_item_types;
 pub mod work_items;
 
+pub use agent_requests::AgentRequestRow;
 pub use correlation::CausalLinkObservationInput;
 pub use error::DbError;
 pub use fix_attempts::FixAttemptRow;

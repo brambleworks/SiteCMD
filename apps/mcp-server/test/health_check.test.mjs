@@ -70,3 +70,19 @@ test("health-check mode rejects a readable non-SiteCMD SQLite database", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("health-check mode refuses a database newer than the supported schema range", () => {
+  const newer = openSchemaFixtureDb("sitecmd-mcp-health-newer-");
+  newer.prepare("INSERT INTO _schema_version (version) VALUES (999)").run();
+  const result = spawnSync(
+    process.execPath,
+    ["--disable-warning=ExperimentalWarning", entrypoint, "--sitecmd-health-check"],
+    {
+      encoding: "utf8",
+      env: { ...process.env, SITECMD_DB_PATH: newer.name },
+      timeout: 10_000,
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /schema version 999 is newer than this MCP server supports/);
+});

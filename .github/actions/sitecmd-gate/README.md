@@ -22,7 +22,7 @@ jobs:
           connection-export: ${{ secrets.SITECMD_CONNECTION_EXPORT }}
           passphrase: ${{ secrets.SITECMD_CONNECTION_PASSPHRASE }}
           ci-token: ${{ secrets.SITECMD_CI_TOKEN }}
-          threshold: high
+          fail-on: high
 ```
 
 Use the full commit behind the signed SiteCMD release tag, not `main` or a
@@ -66,8 +66,9 @@ change to what the site is known to be.
 
 ## Thresholds and the two warnings
 
-`threshold` names the least severe NEW finding that fails the build, and
+`fail-on` names the least severe NEW finding that fails the build, and
 defaults to `high`. Findings below it are still reported, just not fatal.
+`threshold` still works as a deprecated alias.
 
 Two conditions warn instead of failing, and both are deliberate:
 

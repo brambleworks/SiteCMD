@@ -385,7 +385,7 @@ test("getEffectiveTier rejects future validation timestamps", () => {
   assert.equal(getEffectiveTier(), "free");
 });
 
-test("getIssuesForProject keeps severity filtering exact for issue lists", () => {
+test("getIssuesForProject treats severity as a minimum threshold", () => {
   const projectId = 506;
   addWorkItem({
     projectId,
@@ -404,11 +404,11 @@ test("getIssuesForProject keeps severity filtering exact for issue lists", () =>
     title: "High list issue",
   });
 
-  const issues = getIssuesForProject(projectId, "https://example.com", { severity: "high" });
+  const issues = getIssuesForProject(projectId, "https://example.com", { min_severity: "high" });
 
   assert.deepEqual(
     issues.map((issue) => issue.check_id),
-    ["code.security.high-list"],
+    ["security.critical-list", "code.security.high-list"],
   );
 });
 
@@ -498,7 +498,9 @@ test("getFixPromptsForProject treats severity as a minimum threshold", () => {
     fixPrompt: "Fix the medium issue.",
   });
 
-  const prompts = getFixPromptsForProject(projectId, "https://example.com", { severity: "high" });
+  const prompts = getFixPromptsForProject(projectId, "https://example.com", {
+    min_severity: "high",
+  });
 
   assert.deepEqual(prompts.map((prompt) => prompt.check_id).sort(), [
     "code.security.high",

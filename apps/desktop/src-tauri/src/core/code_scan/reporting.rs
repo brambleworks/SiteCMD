@@ -20,6 +20,7 @@ pub fn format_report(
         CodeScanReportFormat::Markdown => Ok(format_report_markdown(report, project_path)),
         CodeScanReportFormat::Review => Ok(format_report_review(report, project_path)),
         CodeScanReportFormat::Github => Ok(format_report_github(report)),
+        CodeScanReportFormat::Sarif => format_report_sarif(report),
     }
 }
 
@@ -29,6 +30,77 @@ pub fn has_issue_at_or_above(report: &CodeScanReport, minimum: Severity) -> bool
         .issues
         .iter()
         .any(|issue| issue.severity.sort_rank() <= minimum.sort_rank())
+}
+
+fn sarif_level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Critical | Severity::High => "error",
+        Severity::Medium => "warning",
+        Severity::Low => "note",
+    }
+}
+
+/// SARIF 2.1.0 with one rule per check id and one result per occurrence.
+/// The CLI adds fingerprints, baseline state, and suppressions on top.
+fn format_report_sarif(report: &CodeScanReport) -> Result<String, String> {
+    let mut rules: Vec<serde_json::Value> = Vec::new();
+    let mut rule_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for issue in &report.issues {
+        let index = match rule_index.get(&issue.check_id) {
+            Some(index) => *index,
+            None => {
+                rules.push(serde_json::json!({
+                    "id": issue.check_id,
+                    "name": issue.title,
+                    "shortDescription": { "text": issue.title },
+                    "fullDescription": { "text": issue.description },
+                    "defaultConfiguration": { "level": sarif_level(issue.severity) },
+                    "properties": {
+                        "category": category_label(&issue.category),
+                        "domain": code_scan_domain_label(code_issue_domain(issue)),
+                    },
+                }));
+                rule_index.insert(issue.check_id.clone(), rules.len() - 1);
+                rules.len() - 1
+            }
+        };
+        let mut message = issue.description.clone();
+        if let Some(likely_fix) = &issue.likely_fix {
+            message.push_str(" Best first fix: ");
+            message.push_str(likely_fix);
+        }
+        results.push(serde_json::json!({
+            "ruleId": issue.check_id,
+            "ruleIndex": index,
+            "level": sarif_level(issue.severity),
+            "message": { "text": message },
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": { "uri": issue.relative_path.replace('\\', "/"), "uriBaseId": "%SRCROOT%" },
+                    "region": { "startLine": issue.line.unwrap_or(1) }
+                }
+            }],
+            "properties": {
+                "severity": issue.severity.as_str(),
+                "confidence": serde_json::to_value(issue.confidence).unwrap_or(serde_json::Value::Null),
+            },
+        }));
+    }
+    serde_json::to_string_pretty(&serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": { "driver": {
+                "name": "SiteCMD Code Scan",
+                "version": env!("CARGO_PKG_VERSION"),
+                "informationUri": "https://sitecmd.com",
+                "rules": rules,
+            } },
+            "results": results,
+        }],
+    }))
+    .map_err(|error| format!("Could not serialize SARIF report: {error}"))
 }
 
 fn scan_report_labels() -> (&'static str, &'static str, &'static str, &'static str) {

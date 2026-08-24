@@ -408,10 +408,10 @@ describe.concurrent(
       expectGuardrailFailure(
         repoGuardrailFailures,
         (fixtureRoot) => {
-          const index = readFixtureFile(fixtureRoot, "apps/mcp-server/src/index.ts");
+          const index = readFixtureFile(fixtureRoot, "apps/mcp-server/src/server.ts");
           writeFixtureFile(
             fixtureRoot,
-            "apps/mcp-server/src/index.ts",
+            "apps/mcp-server/src/server.ts",
             index.replace(
               'issues: getWorkspaceIssues(url, { ...opts, status: "fail" }),',
               'issues: getWorkspaceIssues(url, { ...opts, status: "fail" }) as unknown as Issue[],',
@@ -500,6 +500,25 @@ describe.concurrent(
       );
     });
 
+    it("fails when one MCP literal hides an agent_requests update behind its insert", () => {
+      expectGuardrailFailure(
+        mcpSchemaParityFailures,
+        (fixtureRoot) => {
+          const requestsPath = "apps/mcp-server/src/db_agent_requests.ts";
+          const source = readFixtureFile(fixtureRoot, requestsPath);
+          writeFixtureFile(
+            fixtureRoot,
+            requestsPath,
+            source.replace(
+              "VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?)`",
+              "VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?);\n       UPDATE agent_requests SET status = 'fulfilled'`",
+            ),
+          );
+        },
+        'apps/mcp-server/src/db_agent_requests.ts mutates "agent_requests"',
+      );
+    });
+
     it("fails when an MCP read module imports the write-capable connection", () => {
       expectGuardrailFailure(
         mcpSchemaParityFailures,
@@ -515,7 +534,7 @@ describe.concurrent(
             ),
           );
         },
-        "only apps/mcp-server/src/db_fix_attempts.ts may use it",
+        "imports or exposes the write-capable MCP connection",
       );
     });
 

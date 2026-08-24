@@ -31,6 +31,7 @@ pub(crate) fn print_scan_help() {
             "  --diff                  Compare with last scan and show changes\n",
             "  --env <NAME>            Use a named environment URL from config\n",
             "  --fail-under <N>        Exit 1 if score < N (quality gate)\n",
+            "  --fail-on <SEV>         Exit 1 if a failing issue is at or above SEV (critical, high, medium, low)\n",
             "  --json                  Output JSON to stdout (skips file export)\n",
             "  --output json           Alias for --json (legacy compat)\n",
             "  --timeout <SECS>        HTTP timeout per request (default: 30)\n",
@@ -41,7 +42,7 @@ pub(crate) fn print_scan_help() {
             "  --help, -h              Show this help\n\n",
             "Exit codes:\n",
             "  0  Scan passed (or no threshold set)\n",
-            "  1  Score below --fail-under, or a new critical issue in --diff mode\n",
+            "  1  Score below --fail-under, a failing issue at or above --fail-on, or a new critical issue in --diff mode\n",
             "  2  Scan error (network, invalid URL)\n\n",
             "Examples:\n",
             "  sitecmd scan\n",
@@ -97,7 +98,7 @@ Usage:\n  sitecmd check [options]\n\n\
 Options:\n  \
   --install               Install as a git pre-push hook\n  \
   --strict                Also fail on any new issue vs the last scan (always scans fresh)\n  \
-  --threshold <N>         Minimum score to pass (default: from config)\n  \
+  --fail-under <N>        Minimum score to pass (default: from config); --threshold is a deprecated alias\n  \
   --help, -h              Show this help"
     );
 }
@@ -187,7 +188,7 @@ Options:\n  \
   --connection-export <PATH>\n                          Encrypted, credential-free connection export\n  \
   --passphrase-env <NAME> Read the export passphrase from this environment\n                          variable (default: SITECMD_CONNECTION_PASSPHRASE)\n  \
   --token-env <NAME>      Read the CI token from this environment variable\n                          (default: SITECMD_CI_TOKEN)\n  \
-  --threshold <LEVEL>     Fail on new findings at or above this severity:\n                          critical, high (default), medium, low\n  \
+  --fail-on <LEVEL>       Fail on new findings at or above this severity:\n                          critical, high (default), medium, low (--threshold is a deprecated alias)\n  \
   --strict                Also fail on findings the service cannot rule out\n                          as a detector or corpus change\n  \
   --path <PATH>           Project root to audit (default: working directory)\n  \
   --db <PATH>             Desktop database (or SITECMD_DB_PATH/default path)\n  \

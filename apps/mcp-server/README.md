@@ -6,10 +6,11 @@ MCP server for [SiteCMD](https://sitecmd.com) - lets AI coding tools read scan r
 
 This MCP server gives your AI coding tool (Cursor, Claude Code, Windsurf, etc.) direct access to your SiteCMD scan results. Your AI can:
 
-- See your latest scan artifact score and category breakdown
-- List all failing issues with severity and descriptions
-- Get ready-to-use fix prompts for each issue
-- Track scan artifact score history over time
+- See the SiteCMD Score and open-issue counts
+- List open issues with ids, locations, and confidence
+- Read one issue with evidence and its fix prompt
+- Get ready-to-use fix prompts
+- Track web scan history
 
 ## Setup
 
@@ -56,8 +57,9 @@ putting it in JSON; agent configuration files do not expand those placeholders.
 
 SiteCMD requires a maintenance release whose built-in `node:sqlite` runtime
 passes the server's full test suite. Its automatic connection flow verifies the
-Node version and SQLite support before writing agent configuration. The app does
-not need to be running after setup.
+Node version and SQLite support before writing agent configuration. Reads work
+while the app is closed. `start_fix`, `run_scan`, and verification need the app
+running; each of those tools says so when it is not.
 
 The bundled MCP server follows the desktop and CLI release version. Its package
 is private and is released only as a desktop resource, so the MCP handshake,
@@ -65,19 +67,28 @@ package metadata, and SiteCMD release are bumped together.
 
 ## Tools
 
-| Tool                   | Description                                                       |
-| ---------------------- | ----------------------------------------------------------------- |
-| `get_projects`         | List all projects tracked by SiteCMD                              |
-| `get_scan_score`       | Get latest scan artifact score and category breakdown             |
-| `get_issues`           | Get failing issues, filterable by severity/category               |
-| `get_fix_prompts`      | Get AI-ready fix prompts for each issue                           |
-| `get_scan_history`     | Get scan artifact score history over time                         |
-| `get_dismissed_issues` | List issues dismissed or marked not applicable                    |
-| `compare_scans`        | Compare two scans for fixed, new, and still-open issues           |
-| `request_scan`         | Return guidance for running a scan manually and comparing results |
-| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria     |
-| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify  |
-| `list_fix_attempts`    | List currently open fix attempts                                  |
+| Tool                   | Description                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `get_projects`         | List projects with ids, URLs, frameworks, and linked folders                                              |
+| `get_scan_score`       | SiteCMD Score, open issue counts, and the latest web scan breakdown                                       |
+| `get_issues`           | Open issues with id, check id, confidence, and location; filter by min_severity, category, min_confidence |
+| `get_issue`            | One check with evidence, occurrences, fix prompt, causes, and attempt                                     |
+| `get_fix_prompts`      | Fix prompts (default 5, max 20), or one by check_id                                                       |
+| `get_scan_history`     | Get scan artifact score history over time                                                                 |
+| `get_dismissed_issues` | List issues dismissed in SiteCMD or suppressed by .sitecmd/config.json                                    |
+| `compare_scans`        | Compare two web scans by id (default: the two most recent)                                                |
+| `how_to_rescan`        | Explain the CLI and desktop steps that produce a fresh scan; does not queue one                           |
+| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria                                             |
+| `start_fix`            | Ask SiteCMD to open a fix attempt for one check; requires the app to be running                           |
+| `get_fix_status`       | Read a fix attempt's status, verify timing, and failure detail                                            |
+| `run_scan`             | Queue a SiteCMD scan for a project; requires the app to be running                                        |
+| `get_scan_status`      | Read a queued scan request's status and, once fulfilled, its execution id                                 |
+| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify                                          |
+| `list_fix_attempts`    | List open fix attempts (include_settled for verified and failed ones)                                     |
+
+`request_scan` is a deprecated alias of `how_to_rescan`; it will be removed in the next major release.
+
+`get_issues` no longer accepts `severity` (exact match) or `status`; use `min_severity`.
 
 ### Correlation tools
 
@@ -91,6 +102,8 @@ These read v3-enriched correlation data and are all read-only.
 | `get_causal_graph`        | Active causal graph as a node-link payload for visualization         |
 | `preview_deploy_risk`     | Predict which active issues may regress from a set of changed files  |
 | `whatif_resolve`          | Downstream effects of hypothetically resolving a set of issues       |
+
+Every correlation tool accepts `project_id` or `url`.
 
 ## Example usage
 
@@ -117,12 +130,15 @@ the resolved path with the `SITECMD_DB_PATH` environment variable if needed.
 
 ## Recovery
 
-The MCP server is read-mostly. Its only writes are bounded updates to existing
-fix-attempt rows: `get_fix_brief` records the first time a brief is fetched, and
-`request_verification` records the agent summary and asks SiteCMD to verify the
-attempt. Neither operation can create rows or touch another table. If the
-database needs backup or restore during an incident, follow the recovery
-runbook (`apps/mcp-server/recovery-runbook.md` in the SiteCMD repository).
+The MCP server is read-mostly. Its writes are bounded updates to existing
+fix-attempt rows and inserts into the `agent_requests` queue the desktop
+fulfils. `get_fix_brief` records the first time a brief is fetched,
+`request_verification` records the agent summary and asks SiteCMD to verify
+the attempt, and `start_fix`/`run_scan` insert one queued request each; the
+desktop's own watcher claims and fulfils that row. None of these can touch
+another table. If the database needs backup or restore during an incident,
+follow the recovery runbook (`apps/mcp-server/recovery-runbook.md` in the
+SiteCMD repository).
 
 ## License
 

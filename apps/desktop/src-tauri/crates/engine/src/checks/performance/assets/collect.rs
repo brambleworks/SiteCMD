@@ -63,6 +63,9 @@ pub struct AssetCollection {
     /// (blob:, javascript:, unparseable, or refused by the runtime's
     /// network policy).
     pub skipped_unsupported: usize,
+    /// The scanned page's `scheme://host[:port]`, used to keep same-origin
+    /// asset paths unredacted in evidence.
+    pub page_origin: Option<String>,
 }
 
 /// Collect, validate, dedup, prioritize, and cap asset URLs from page markup.
@@ -107,7 +110,10 @@ pub fn collect_assets(
         }
     }
 
-    let mut collection = AssetCollection::default();
+    let mut collection = AssetCollection {
+        page_origin: Some(page_url.origin().ascii_serialization()),
+        ..AssetCollection::default()
+    };
     let mut index_by_url: HashMap<String, usize> = HashMap::new();
     let mut fetchable: Vec<CollectedAsset> = Vec::new();
 

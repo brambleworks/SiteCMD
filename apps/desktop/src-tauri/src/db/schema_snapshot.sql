@@ -7,6 +7,22 @@ CREATE TABLE _schema_version (
             applied_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+CREATE TABLE agent_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('start_fix', 'run_scan')),
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    env_url TEXT NOT NULL,
+    check_id TEXT,
+    scope TEXT CHECK (scope IS NULL OR scope IN ('web', 'code', 'full')),
+    agent_tool TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'requested'
+        CHECK (status IN ('requested', 'running', 'fulfilled', 'failed', 'expired')),
+    result_json TEXT,
+    failure_detail TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -653,6 +669,8 @@ CREATE TABLE work_items (
     CHECK (check_status IS NULL OR check_status IN ('pass', 'fail', 'warn', 'skipped')), confidence_reason TEXT, producer_check_id TEXT, producer_fix_prompt TEXT, producer_category TEXT
     CHECK (producer_category IS NULL OR producer_category IN
            ('security', 'performance', 'seo', 'accessibility', 'compliance', 'config', 'polish')), first_seen_scan_ref INTEGER, resolved_scan_ref INTEGER);
+
+CREATE INDEX idx_agent_requests_status ON agent_requests (status, id);
 
 CREATE INDEX idx_alerts_unread
     ON alerts(project_id, viewed_at, dismissed_at, occurred_at DESC);

@@ -27,6 +27,11 @@ pub(crate) fn parse_positive_seconds(value: &str, option: &str) -> Result<u64, S
     Ok(seconds)
 }
 
+/// Old spellings keep working for one release; the warning names the replacement.
+pub(crate) fn warn_deprecated_flag(old: &str, new: &str) {
+    eprintln!("warning: {old} is deprecated; use {new}");
+}
+
 pub(crate) fn parse_categories(value: &str) -> Result<Vec<String>, String> {
     let mut categories = Vec::new();
     for raw in value.split(',') {

@@ -72,11 +72,12 @@ pub fn evaluate_asset_sample(
     collection: &AssetCollection,
     measured: &[MeasuredAsset],
 ) -> Vec<CheckResult> {
+    let page_origin = collection.page_origin.as_deref();
     vec![
         results::asset_weight_result(html_bytes, collection, measured),
-        results::broken_images_result(measured),
-        results::heavy_images_result(measured),
-        results::asset_caching_result(measured),
+        results::broken_images_result(measured, page_origin),
+        results::heavy_images_result(measured, page_origin),
+        results::asset_caching_result(measured, page_origin),
     ]
 }
 

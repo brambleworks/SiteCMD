@@ -3,11 +3,14 @@
 import { getDb, isSiteCmdDatabaseNotFoundError } from "./db_connection.js";
 import { OFFLINE_GRACE_PERIOD_SECS } from "./db_manifests.js";
 import { severitiesAtOrAbove } from "./severity.js";
+import { applyRepoSuppressions, type SuppressedView } from "./suppressions.js";
 
 export {
   __test_isReadDbReadonly,
+  __test_readBusyTimeout,
   isSiteCmdDatabaseNotFoundError,
   resolveDbPath,
+  withBusyRetry,
 } from "./db_connection.js";
 export {
   __test_impactScoreGrid,
@@ -18,6 +21,7 @@ export {
 } from "./db_manifests.js";
 export * from "./db_correlation.js";
 export * from "./db_fix_attempts.js";
+export * from "./db_agent_requests.js";
 
 export type Tier = "free" | "core" | "pro";
 
@@ -33,12 +37,6 @@ function addMinimumSeverityFilter(sql: string, params: unknown[], severity?: str
   const severities = severitiesAtOrAbove(severity);
   params.push(...severities);
   return `${sql} AND severity IN (${severities.map(() => "?").join(", ")})`;
-}
-
-function addExactSeverityFilter(sql: string, params: unknown[], severity?: string): string {
-  if (!severity) return sql;
-  params.push(severity);
-  return `${sql} AND severity = ?`;
 }
 
 function parseIsoDate(value: string | null | undefined): Date | null {
@@ -246,6 +244,8 @@ export function getLatestScan(url: string): ScanScore | null {
 }
 
 export interface Issue {
+  id?: number;
+  source?: string;
   category: string;
   check_id: string;
   severity: string;
@@ -253,6 +253,10 @@ export interface Issue {
   description: string;
   fix_prompt: string | null;
   page_url: string | null;
+  relative_path?: string | null;
+  line?: number | null;
+  confidence?: string | null;
+  detail_json?: string | null;
 }
 
 function excludeDismissedCheckIds<T extends { check_id: string }>(
@@ -265,12 +269,62 @@ function excludeDismissedCheckIds<T extends { check_id: string }>(
   return rows.filter((row) => !dismissed.has(row.check_id));
 }
 
+function getProjectPathById(projectId: number): string | null {
+  const row = getDb().prepare(`SELECT path FROM projects WHERE id = ?`).get(projectId) as
+    { path: string } | undefined;
+  return row?.path ? row.path : null;
+}
+
+function loadOpenIssueRows(
+  projectId: number,
+  envUrl: string,
+  opts?: { min_severity?: string; category?: string; requireFixPrompt?: boolean },
+): SuppressedView<Issue> {
+  const db = getDb();
+  const [noSlash, withSlash] = envUrlVariants(envUrl);
+  let sql = `SELECT id, source, category, check_id, severity, title, description, fix_prompt, page_url,
+                    relative_path, line, confidence, detail_json
+             FROM work_items
+             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
+               AND source IN ('web_scan', 'code_scan')`;
+  const params: unknown[] = [projectId, noSlash, withSlash];
+  if (opts?.requireFixPrompt) sql += ` AND fix_prompt IS NOT NULL AND fix_prompt != ''`;
+  sql = addMinimumSeverityFilter(sql, params, opts?.min_severity);
+  if (opts?.category) {
+    sql += ` AND category = ?`;
+    params.push(opts.category);
+  }
+  sql += ` ORDER BY CASE severity
+    WHEN 'critical' THEN 0
+    WHEN 'high' THEN 1
+    WHEN 'medium' THEN 2
+    WHEN 'low' THEN 3
+    ELSE 4 END, title, id`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = db.prepare(sql).all(...(params as any[])) as unknown as Issue[];
+  return applyRepoSuppressions(
+    getProjectPathById(projectId),
+    excludeDismissedCheckIds(projectId, envUrl, rows),
+    new Date(),
+  );
+}
+
+export function getRepoSuppressedIssues(
+  projectId: number,
+  envUrl: string,
+): Array<{ issue: Issue; reason: string }> {
+  return loadOpenIssueRows(projectId, envUrl).ignored.map(({ row, reason }) => ({
+    issue: row,
+    reason,
+  }));
+}
+
 export function getIssuesForProject(
   projectId: number,
   envUrl: string,
   opts?: {
     status?: string;
-    severity?: string;
+    min_severity?: string;
     category?: string;
   },
 ): Issue[] {
@@ -278,30 +332,45 @@ export function getIssuesForProject(
     return [];
   }
 
-  const db = getDb();
+  return loadOpenIssueRows(projectId, envUrl, {
+    min_severity: opts?.min_severity,
+    category: opts?.category,
+  }).kept;
+}
+
+export type IssueOccurrence = Issue & {
+  manual_fix: string | null;
+  why_it_matters: string | null;
+  confidence_reason: string | null;
+};
+
+/** Every open occurrence of one check, most severe first; code findings may occur in many files. */
+export function getIssueOccurrences(
+  projectId: number,
+  envUrl: string,
+  checkId: string,
+): IssueOccurrence[] {
   const [noSlash, withSlash] = envUrlVariants(envUrl);
-  let sql = `SELECT category, check_id, severity, title, description, fix_prompt, page_url
-             FROM work_items
-             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
-               AND source IN ('web_scan', 'code_scan')`;
-  const params: unknown[] = [projectId, noSlash, withSlash];
-
-  sql = addExactSeverityFilter(sql, params, opts?.severity);
-  if (opts?.category) {
-    sql += ` AND category = ?`;
-    params.push(opts.category);
-  }
-
-  sql += ` ORDER BY CASE severity
-    WHEN 'critical' THEN 0
-    WHEN 'high' THEN 1
-    WHEN 'medium' THEN 2
-    WHEN 'low' THEN 3
-    ELSE 4 END, title`;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = db.prepare(sql).all(...(params as any[])) as unknown as Issue[];
-  return excludeDismissedCheckIds(projectId, envUrl, rows);
+  const rows = getDb()
+    .prepare(
+      `SELECT id, source, category, check_id, severity, title, description, fix_prompt, page_url,
+              relative_path, line, confidence, detail_json, manual_fix, why_it_matters, confidence_reason
+       FROM work_items
+       WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
+         AND source IN ('web_scan', 'code_scan') AND check_id = ?
+       ORDER BY CASE severity
+         WHEN 'critical' THEN 0
+         WHEN 'high' THEN 1
+         WHEN 'medium' THEN 2
+         WHEN 'low' THEN 3
+         ELSE 4 END, relative_path, line, id`,
+    )
+    .all(projectId, noSlash, withSlash, checkId) as unknown as IssueOccurrence[];
+  return applyRepoSuppressions(
+    getProjectPathById(projectId),
+    excludeDismissedCheckIds(projectId, envUrl, rows),
+    new Date(),
+  ).kept;
 }
 
 export interface FixPromptRow {
@@ -316,35 +385,19 @@ export function getFixPromptsForProject(
   projectId: number,
   envUrl: string,
   opts?: {
-    severity?: string;
+    min_severity?: string;
     category?: string;
   },
 ): FixPromptRow[] {
-  const db = getDb();
-  const [noSlash, withSlash] = envUrlVariants(envUrl);
-  let sql = `SELECT title, severity, category, check_id, fix_prompt
-             FROM work_items
-             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
-               AND source IN ('web_scan', 'code_scan')
-               AND fix_prompt IS NOT NULL AND fix_prompt != ''`;
-  const params: unknown[] = [projectId, noSlash, withSlash];
-
-  sql = addMinimumSeverityFilter(sql, params, opts?.severity);
-  if (opts?.category) {
-    sql += ` AND category = ?`;
-    params.push(opts.category);
-  }
-
-  sql += ` ORDER BY CASE severity
-    WHEN 'critical' THEN 0
-    WHEN 'high' THEN 1
-    WHEN 'medium' THEN 2
-    WHEN 'low' THEN 3
-    ELSE 4 END`;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = db.prepare(sql).all(...(params as any[])) as unknown as FixPromptRow[];
-  return excludeDismissedCheckIds(projectId, envUrl, rows);
+  return loadOpenIssueRows(projectId, envUrl, { ...opts, requireFixPrompt: true }).kept.map(
+    ({ title, severity, category, check_id, fix_prompt }) => ({
+      title,
+      severity,
+      category,
+      check_id,
+      fix_prompt: fix_prompt ?? "",
+    }),
+  );
 }
 
 interface IssueComparisonRow extends Issue {
@@ -559,6 +612,15 @@ export function getProjectByUrl(url: string): Project | null {
   return row ?? null;
 }
 
+/** Every environment URL a project owns, so a caller cannot aim a project's scan at another host. */
+export function getProjectEnvironmentUrls(projectId: number): string[] {
+  const db = getDb();
+  const rows = db
+    .prepare(`SELECT url FROM environments WHERE project_id = ? ORDER BY url`)
+    .all(projectId) as { url: string }[];
+  return rows.map((row) => row.url);
+}
+
 export function getScanHistory(url: string, limit = 10): ScanScore[] {
   const db = getDb();
   const [noSlash, withSlash] = envUrlVariants(url);
@@ -610,4 +672,9 @@ export function getScanHistory(url: string, limit = 10): ScanScore[] {
   `,
     )
     .all(noSlash, withSlash, limit) as unknown as ScanScore[];
+}
+
+/** Scan ids come from get_scan_history; the workspace cache has no ids (scan_id 0). */
+export function getScanById(url: string, scanId: number): ScanScore | null {
+  return getScanHistory(url, 100).find((scan) => scan.scan_id === scanId) ?? null;
 }

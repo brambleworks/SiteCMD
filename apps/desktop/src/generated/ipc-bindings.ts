@@ -3,7 +3,7 @@
 // Types live wherever they are defined (search: #[ts(export_to = "ipc-bindings.ts")]).
 
 export type ActionableDesktopNotificationRequest = { id: string | null, title: string, body: string, clickTarget: DesktopNotificationTarget | null, actions: Array<DesktopNotificationAction>, };
-export type AgentTool = "claude-code" | "codex" | "cursor";
+export type AgentTool = "claude-code" | "codex" | "cursor" | "windsurf";
 
 export type AgentToolStatus = { tool: AgentTool, installed: boolean,
 /**
@@ -344,6 +344,21 @@ customerPortalUrl: string,
 validationWarning: ValidationWarning, };
 
 export type LikelyCause = { checkId: string, confidence: Confidence, };
+
+/**
+ * What a user pastes when SiteCMD cannot write the editor config itself.
+ */
+export type McpManualConfig = { tool: AgentTool, configPath: string, spec: McpServerSpec,
+/**
+ * The exact file fragment: JSON for mcpServers-style configs, TOML for Codex.
+ */
+snippet: string,
+/**
+ * Claude Code registers through its CLI; other editors have no command.
+ */
+cliCommand: string | null, };
+
+export type McpServerSpec = { command: string, args: Array<string>, env: { [key in string]: string }, };
 
 /**
  * Multi-page scan session result.

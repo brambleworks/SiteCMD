@@ -83,6 +83,31 @@ pub fn log_safe_url_target(raw_url: &str) -> String {
 
 /// Preserve a safe path hint for issue evidence; remove credentials and tokens.
 pub fn evidence_safe_page_url(raw_url: &str) -> String {
+    sanitize_page_url(raw_url, false)
+}
+
+/// Same policy, except long letter-and-digit segments are kept when the URL
+/// is on the scanned site's own origin: those are its asset names, which the
+/// fix needs, while a foreign host may be a CDN carrying signed path tokens.
+pub fn evidence_safe_page_url_for_site(raw_url: &str, site_origin: Option<&str>) -> String {
+    let same_origin = site_origin.is_some_and(|origin| {
+        // Reparse `site_origin` too so a default port embedded in either side
+        // folds away the same way; an unparsable or opaque origin can never match.
+        let Ok(site_url) = url::Url::parse(origin) else {
+            return false;
+        };
+        let site_origin = site_url.origin();
+        site_origin.is_tuple()
+            && url::Url::parse(raw_url)
+                .map(|parsed| {
+                    parsed.origin().ascii_serialization() == site_origin.ascii_serialization()
+                })
+                .unwrap_or(false)
+    });
+    sanitize_page_url(raw_url, same_origin)
+}
+
+fn sanitize_page_url(raw_url: &str, keep_long_segments: bool) -> String {
     let Ok(parsed) = url::Url::parse(raw_url) else {
         return "[invalid-url]".to_string();
     };
@@ -125,7 +150,8 @@ pub fn evidence_safe_page_url(raw_url: &str) -> String {
             );
             let has_letters = segment.bytes().any(|byte| byte.is_ascii_alphabetic());
             let has_digits = segment.bytes().any(|byte| byte.is_ascii_digit());
-            let token_like = segment.len() >= 32 && has_letters && has_digits;
+            let token_like =
+                !keep_long_segments && segment.len() >= 32 && has_letters && has_digits;
             let retina_asset = segment
                 .rsplit_once('@')
                 .and_then(|(_, suffix)| suffix.split_once('.'))
@@ -276,8 +302,8 @@ fn bounded_evidence(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        bounded_issue_evidence, evidence_safe_page_url, evidence_safe_url_reference,
-        log_safe_url_target, redact_issue_evidence,
+        bounded_issue_evidence, evidence_safe_page_url, evidence_safe_page_url_for_site,
+        evidence_safe_url_reference, log_safe_url_target, redact_issue_evidence,
     };
 
     #[test]
@@ -405,6 +431,95 @@ mod tests {
             assert!(!safe.contains(secret), "secret leaked in: {safe}");
         }
         assert!(safe.contains("https://example.com/reset/[redacted]"));
+    }
+
+    #[test]
+    fn same_origin_asset_names_survive_but_sensitive_routes_and_foreign_tokens_do_not() {
+        let site = Some("https://sitecmd.com");
+        let own_asset = "https://sitecmd.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png";
+        assert_eq!(evidence_safe_page_url_for_site(own_asset, site), own_asset);
+
+        let own_reset = "https://sitecmd.com/account/reset/abcdefghijklmnopqrstuvwxyz0123456789";
+        assert_eq!(
+            evidence_safe_page_url_for_site(own_reset, site),
+            "https://sitecmd.com/account/reset/[redacted]"
+        );
+
+        let foreign = "https://cdn.example.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png";
+        assert_eq!(
+            evidence_safe_page_url_for_site(foreign, site),
+            "https://cdn.example.com/images/screenshots/problem/[redacted]"
+        );
+        assert_eq!(
+            evidence_safe_page_url_for_site(own_asset, None),
+            "https://sitecmd.com/images/screenshots/problem/[redacted]"
+        );
+    }
+
+    #[test]
+    fn evidence_safe_page_url_for_site_handles_origin_edge_cases() {
+        let site = Some("https://sitecmd.com");
+
+        // (a) A different subdomain is never the scanned site's origin, so it
+        // gets exactly the treatment the non-site-aware sanitizer already gave
+        // it (nothing here is long enough to redact either way).
+        let subdomain_url = "https://cdn.sitecmd.com/a/b.js";
+        assert_eq!(
+            evidence_safe_page_url_for_site(subdomain_url, site),
+            evidence_safe_page_url(subdomain_url),
+            "a different subdomain must not receive the same-origin exemption"
+        );
+        assert_eq!(
+            evidence_safe_page_url_for_site(subdomain_url, site),
+            "https://cdn.sitecmd.com/a/b.js"
+        );
+
+        // (b) An explicit default port on either side folds away, because
+        // `site_origin` is reparsed and re-serialized the same way as the URL.
+        let long_name = "https://sitecmd.com:443/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+        let bare_long_name =
+            "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+        assert_eq!(
+            evidence_safe_page_url_for_site(long_name, site),
+            bare_long_name
+        );
+        // The reverse also folds: an explicit default port embedded in
+        // `site_origin` itself normalizes away before the comparison.
+        assert_eq!(
+            evidence_safe_page_url_for_site(
+                "https://sitecmd.com/assets/app.js",
+                Some("https://sitecmd.com:443"),
+            ),
+            "https://sitecmd.com/assets/app.js"
+        );
+        assert_eq!(
+            evidence_safe_page_url_for_site(bare_long_name, Some("https://sitecmd.com:443")),
+            bare_long_name
+        );
+
+        // An unparsable site_origin can never be same-origin, so it behaves
+        // exactly like passing None.
+        assert_eq!(
+            evidence_safe_page_url_for_site(bare_long_name, Some("not a url")),
+            evidence_safe_page_url_for_site(bare_long_name, None)
+        );
+
+        // (c) Userinfo, query, and fragment are stripped even for a
+        // same-origin URL; only the path survives.
+        assert_eq!(
+            evidence_safe_page_url_for_site(
+                "https://user:pw@sitecmd.com/assets/app.js?token=abc#frag",
+                site,
+            ),
+            "https://sitecmd.com/assets/app.js"
+        );
+
+        // (d) Scheme and host compare case-insensitively (URL parsing
+        // lowercases both), but the retained path keeps its original case.
+        assert_eq!(
+            evidence_safe_page_url_for_site("HTTPS://SITECMD.COM/Assets/App.js", site),
+            "https://sitecmd.com/Assets/App.js"
+        );
     }
 
     #[test]

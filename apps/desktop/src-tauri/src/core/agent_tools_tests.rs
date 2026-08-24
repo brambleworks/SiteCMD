@@ -373,7 +373,12 @@ fn unregister_via_config_is_a_noop_for_missing_file() {
 
 #[test]
 fn agent_tool_as_str_matches_serde_tokens() {
-    for tool in [AgentTool::ClaudeCode, AgentTool::Codex, AgentTool::Cursor] {
+    for tool in [
+        AgentTool::ClaudeCode,
+        AgentTool::Codex,
+        AgentTool::Cursor,
+        AgentTool::Windsurf,
+    ] {
         assert_eq!(
             serde_json::to_string(&tool).expect("serialize tool"),
             format!("\"{}\"", tool.as_str()),
@@ -395,7 +400,8 @@ fn claude_handoff_link_encodes_prompt_and_folder() {
             AgentTool::ClaudeCode,
             HANDOFF_PROMPT,
             Some("/Users/dev/My Site"),
-        ),
+        )
+        .expect("deep link"),
         format!("claude://code/new?q={ENCODED_PROMPT}&folder=%2FUsers%2Fdev%2FMy%20Site")
     );
 }
@@ -404,16 +410,16 @@ fn claude_handoff_link_encodes_prompt_and_folder() {
 fn claude_handoff_link_omits_folder_when_path_is_missing_or_empty() {
     let expected = format!("claude://code/new?q={ENCODED_PROMPT}");
     assert_eq!(
-        handoff_deep_link(AgentTool::ClaudeCode, HANDOFF_PROMPT, None),
+        handoff_deep_link(AgentTool::ClaudeCode, HANDOFF_PROMPT, None).expect("deep link"),
         expected
     );
     assert_eq!(
-        handoff_deep_link(AgentTool::ClaudeCode, HANDOFF_PROMPT, Some("")),
+        handoff_deep_link(AgentTool::ClaudeCode, HANDOFF_PROMPT, Some("")).expect("deep link"),
         expected,
         "an empty project path must not emit a dangling folder param"
     );
     assert_eq!(
-        handoff_deep_link(AgentTool::ClaudeCode, HANDOFF_PROMPT, Some("   ")),
+        handoff_deep_link(AgentTool::ClaudeCode, HANDOFF_PROMPT, Some("   ")).expect("deep link"),
         expected,
         "a whitespace-only project path must not emit a folder param"
     );
@@ -423,7 +429,7 @@ fn claude_handoff_link_omits_folder_when_path_is_missing_or_empty() {
 fn cursor_handoff_link_encodes_prompt_and_has_no_folder_param() {
     let expected = format!("cursor://anysphere.cursor-deeplink/prompt?text={ENCODED_PROMPT}");
     assert_eq!(
-        handoff_deep_link(AgentTool::Cursor, HANDOFF_PROMPT, None),
+        handoff_deep_link(AgentTool::Cursor, HANDOFF_PROMPT, None).expect("deep link"),
         expected
     );
     assert_eq!(
@@ -431,7 +437,8 @@ fn cursor_handoff_link_encodes_prompt_and_has_no_folder_param() {
             AgentTool::Cursor,
             HANDOFF_PROMPT,
             Some("/Users/dev/My Site")
-        ),
+        )
+        .expect("deep link"),
         expected,
         "Cursor's prompt deep link documents no workspace param; the path must be dropped"
     );
@@ -440,11 +447,12 @@ fn cursor_handoff_link_encodes_prompt_and_has_no_folder_param() {
 #[test]
 fn codex_handoff_link_encodes_prompt_and_path() {
     assert_eq!(
-        handoff_deep_link(AgentTool::Codex, HANDOFF_PROMPT, Some("/Users/dev/My Site")),
+        handoff_deep_link(AgentTool::Codex, HANDOFF_PROMPT, Some("/Users/dev/My Site"))
+            .expect("deep link"),
         format!("codex://threads/new?prompt={ENCODED_PROMPT}&path=%2FUsers%2Fdev%2FMy%20Site")
     );
     assert_eq!(
-        handoff_deep_link(AgentTool::Codex, HANDOFF_PROMPT, None),
+        handoff_deep_link(AgentTool::Codex, HANDOFF_PROMPT, None).expect("deep link"),
         format!("codex://threads/new?prompt={ENCODED_PROMPT}")
     );
 }
@@ -580,5 +588,111 @@ fn fallback_dirs_without_home_keep_system_dirs() {
             PathBuf::from("/opt/homebrew/bin"),
             PathBuf::from("/usr/local/bin"),
         ]
+    );
+}
+
+#[test]
+fn windsurf_token_and_config_path_follow_the_cursor_shape() {
+    assert_eq!(AgentTool::Windsurf.as_str(), "windsurf");
+    assert_eq!(agent_tool_display_name("windsurf"), "Windsurf");
+    let path = windsurf_config_path().expect("home dir");
+    assert!(path.ends_with(
+        Path::new(".codeium")
+            .join("windsurf")
+            .join("mcp_config.json")
+    ));
+    assert_eq!(handoff_deep_link(AgentTool::Windsurf, "prompt", None), None);
+}
+
+#[test]
+fn manual_config_snippets_are_the_exact_editor_fragments() {
+    let spec = test_spec();
+    for tool in [
+        AgentTool::Cursor,
+        AgentTool::Windsurf,
+        AgentTool::ClaudeCode,
+    ] {
+        let snippet = manual_config_snippet(tool, &spec).expect("json snippet");
+        let parsed: serde_json::Value = serde_json::from_str(&snippet).expect("valid json");
+        assert_eq!(parsed["mcpServers"]["sitecmd"]["command"], "/usr/bin/node");
+        assert_eq!(
+            parsed["mcpServers"]["sitecmd"]["env"]["SITECMD_DB_PATH"],
+            "/home/tester/.local/share/com.sitecmd.app/sitecmd.db"
+        );
+    }
+    let codex = manual_config_snippet(AgentTool::Codex, &spec).expect("toml snippet");
+    assert!(codex.contains("[mcp_servers.sitecmd]"));
+    assert!(codex.contains("SITECMD_DB_PATH"));
+    let claude = manual_config_cli_command(AgentTool::ClaudeCode, &spec).expect("claude cli");
+    assert!(claude.starts_with("claude mcp add --scope user sitecmd --env SITECMD_DB_PATH="));
+    assert!(claude.ends_with("-- /usr/bin/node --disable-warning=ExperimentalWarning /home/tester/.local/share/com.sitecmd.app/sitecmd-mcp/sitecmd-mcp.mjs"));
+    assert_eq!(manual_config_cli_command(AgentTool::Cursor, &spec), None);
+}
+
+// Minimal POSIX word splitter covering the unquoted, single-quoted, and
+// backslash-escaped forms the registration command is allowed to emit.
+fn split_shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut started = false;
+    let mut chars = command.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' => {
+                in_quotes = !in_quotes;
+                started = true;
+            }
+            '\\' if !in_quotes => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                    started = true;
+                }
+            }
+            ' ' if !in_quotes => {
+                if started {
+                    words.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            _ => {
+                current.push(ch);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(current);
+    }
+    words
+}
+
+#[test]
+fn claude_cli_command_survives_paths_with_spaces_and_quotes() {
+    let bundle = "/Users/tester/Library/Application Support/com.o'neill.sitecmd";
+    let spec = build_server_spec(
+        Path::new("/usr/bin/node"),
+        Path::new(&format!("{bundle}/sitecmd-mcp/sitecmd-mcp.mjs")),
+        Path::new(&format!("{bundle}/sitecmd.db")),
+    );
+    let command = manual_config_cli_command(AgentTool::ClaudeCode, &spec).expect("claude cli");
+
+    assert_eq!(
+        split_shell_words(&command),
+        vec![
+            "claude".to_string(),
+            "mcp".into(),
+            "add".into(),
+            "--scope".into(),
+            "user".into(),
+            "sitecmd".into(),
+            "--env".into(),
+            format!("SITECMD_DB_PATH={bundle}/sitecmd.db"),
+            "--".into(),
+            "/usr/bin/node".into(),
+            "--disable-warning=ExperimentalWarning".into(),
+            format!("{bundle}/sitecmd-mcp/sitecmd-mcp.mjs"),
+        ],
+        "the pasted command must split back into the exact argv"
     );
 }

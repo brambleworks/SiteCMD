@@ -13,7 +13,7 @@ export function scoreArtifactLabelingFailures(read) {
   const codeScanCommandSource = read("apps/desktop/src-tauri/src/commands/scan/code_scan.rs");
   const scanSchedulerSource = read("apps/desktop/src-tauri/src/background/scan_scheduler.rs");
   const executionSource = read("apps/desktop/src-tauri/src/commands/scan/execution.rs");
-  const mcpIndexSource = read("apps/mcp-server/src/index.ts");
+  const mcpIndexSource = read("apps/mcp-server/src/server.ts");
   const mcpReadmeSource = read("apps/mcp-server/README.md");
 
   check(
@@ -30,8 +30,7 @@ export function scoreArtifactLabelingFailures(read) {
     "Raw scan artifact scores must stay out of primary UI chrome and be labelled as diagnostics in scan artifact surfaces.",
   );
   check(
-    mcpIndexSource.includes("formatScanArtifactScore") &&
-      mcpIndexSource.includes("Get the latest scan artifact score") &&
+    mcpIndexSource.includes("Get the latest scan artifact score") &&
       mcpIndexSource.includes("Get scan artifact score history") &&
       !mcpIndexSource.includes("**Score:**") &&
       !mcpIndexSource.includes("| Date | Score |") &&

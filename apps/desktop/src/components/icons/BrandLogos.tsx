@@ -103,3 +103,11 @@ export function CursorLogo({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function WindsurfLogo({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M3 15.5c4.5-1.5 8.2-5.5 9.6-10.5.3 4.6 3.3 8.3 8.4 10.5-5.7.1-11.3 1.3-16.9 3.5Z" />
+    </svg>
+  );
+}

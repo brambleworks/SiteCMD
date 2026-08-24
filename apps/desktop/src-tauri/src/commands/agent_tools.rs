@@ -1,7 +1,7 @@
 //! Commands for detecting, registering, and launching supported MCP clients.
 //! Registration only modifies each client config's `sitecmd` entry.
 
-use crate::core::agent_tools::{self, AgentTool, AgentToolStatus};
+use crate::core::agent_tools::{self, AgentTool, AgentToolStatus, McpManualConfig};
 
 use super::run_blocking;
 
@@ -53,8 +53,23 @@ pub async fn launch_agent_handoff(
     kickoff_prompt: String,
     project_path: Option<String>,
 ) -> Result<(), String> {
-    let url = agent_tools::handoff_deep_link(tool, &kickoff_prompt, project_path.as_deref());
+    let Some(url) = agent_tools::handoff_deep_link(tool, &kickoff_prompt, project_path.as_deref())
+    else {
+        return Err(format!(
+            "{} has no prompt deep link. The kickoff prompt is on your clipboard; paste it into the agent.",
+            tool.display_name()
+        ));
+    };
     run_blocking(move || open_deep_link(tool, &url)).await?
+}
+
+#[tauri::command]
+#[tracing::instrument(skip(app))]
+pub async fn get_agent_tool_manual_config(
+    app: tauri::AppHandle,
+    tool: AgentTool,
+) -> Result<McpManualConfig, String> {
+    run_blocking(move || agent_tools::manual_config(&app, tool)).await?
 }
 
 /// Open the handoff URL and surface missing protocol handlers to the caller.

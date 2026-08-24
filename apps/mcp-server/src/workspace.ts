@@ -361,8 +361,7 @@ export function getWorkspaceIssues(
   url: string,
   opts?: {
     status?: string;
-    severity?: string;
-    severityMode?: "exact" | "minimum";
+    min_severity?: string;
     category?: string;
   },
 ): WorkspaceIssue[] {
@@ -374,13 +373,9 @@ export function getWorkspaceIssues(
   if (!score) return [];
   return scan.issues
     .filter((issue) => !opts?.status || issue.status === opts.status)
-    .filter((issue) => {
-      if (!opts?.severity) return true;
-      if (opts.severityMode === "minimum") {
-        return severityMatchesMinimum(issue.severity, opts.severity);
-      }
-      return issue.severity === opts.severity;
-    })
+    .filter(
+      (issue) => !opts?.min_severity || severityMatchesMinimum(issue.severity, opts.min_severity),
+    )
     .filter((issue) => !opts?.category || issue.category === opts.category)
     .sort((a, b) => {
       return severityRank(a.severity) - severityRank(b.severity) || a.title.localeCompare(b.title);

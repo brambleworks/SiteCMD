@@ -3,8 +3,8 @@
 use super::{format_bytes, AssetCollection, AssetKind, MeasuredAsset};
 use crate::checks::{CheckResult, CheckStatus, IssueConfidence, ScanCategory, Severity};
 
-fn evidence_url(raw_url: &str) -> String {
-    crate::log_sanitizer::evidence_safe_page_url(raw_url)
+fn evidence_url(raw_url: &str, page_origin: Option<&str>) -> String {
+    crate::log_sanitizer::evidence_safe_page_url_for_site(raw_url, page_origin)
 }
 
 /// A sampled image larger than this is called out individually.
@@ -72,7 +72,10 @@ fn cache_is_durable(cache_control: Option<&str>) -> bool {
     cache_max_age(&lower).is_some_and(|secs| secs >= IMMUTABLE_CACHE_MIN_SECS)
 }
 
-pub(super) fn asset_caching_result(measured: &[MeasuredAsset]) -> CheckResult {
+pub(super) fn asset_caching_result(
+    measured: &[MeasuredAsset],
+    page_origin: Option<&str>,
+) -> CheckResult {
     // Only successfully fetched assets whose filename has a hash-like token
     // are in scope. That token is a build-pattern heuristic, not proof that
     // the URL changes whenever the bytes change.
@@ -101,7 +104,7 @@ pub(super) fn asset_caching_result(measured: &[MeasuredAsset]) -> CheckResult {
         .map(|asset| {
             format!(
                 "{} ({})",
-                evidence_url(&asset.url),
+                evidence_url(&asset.url, page_origin),
                 asset
                     .cache_control
                     .as_deref()
@@ -156,7 +159,7 @@ pub(super) fn asset_caching_result(measured: &[MeasuredAsset]) -> CheckResult {
             "weak": weak
                 .iter()
                 .map(|asset| serde_json::json!({
-                    "url": evidence_url(&asset.url),
+                    "url": evidence_url(&asset.url, page_origin),
                     "cache_control": asset.cache_control,
                 }))
                 .collect::<Vec<_>>(),
@@ -197,6 +200,7 @@ pub(super) fn asset_weight_result(
     collection: &AssetCollection,
     measured: &[MeasuredAsset],
 ) -> CheckResult {
+    let page_origin = collection.page_origin.as_deref();
     // Count the largest measured candidate per responsive-image group because a
     // browser downloads one candidate, not every srcset option.
     let mut measured_count = 0usize;
@@ -271,7 +275,7 @@ pub(super) fn asset_weight_result(
         .iter()
         .map(|asset| {
             serde_json::json!({
-                "url": evidence_url(&asset.url),
+                "url": evidence_url(&asset.url, page_origin),
                 "kind": asset.kind.as_str(),
                 "status_code": asset.status_code,
                 "bytes": asset.bytes,
@@ -339,7 +343,10 @@ pub(super) fn asset_weight_result(
     }
 }
 
-pub(super) fn broken_images_result(measured: &[MeasuredAsset]) -> CheckResult {
+pub(super) fn broken_images_result(
+    measured: &[MeasuredAsset],
+    page_origin: Option<&str>,
+) -> CheckResult {
     let images: Vec<&MeasuredAsset> = measured
         .iter()
         .filter(|asset| asset.kind == AssetKind::Image)
@@ -388,7 +395,13 @@ pub(super) fn broken_images_result(measured: &[MeasuredAsset]) -> CheckResult {
     let listed_errors: Vec<String> = http_errors
         .iter()
         .take(MAX_LISTED_URLS)
-        .map(|asset| format!("{} ({})", evidence_url(&asset.url), asset.status_code))
+        .map(|asset| {
+            format!(
+                "{} ({})",
+                evidence_url(&asset.url, page_origin),
+                asset.status_code
+            )
+        })
         .collect();
     let listed_types: Vec<String> = non_image_types
         .iter()
@@ -396,7 +409,7 @@ pub(super) fn broken_images_result(measured: &[MeasuredAsset]) -> CheckResult {
         .map(|asset| {
             format!(
                 "{} (HTTP {}; {})",
-                evidence_url(&asset.url),
+                evidence_url(&asset.url, page_origin),
                 asset.status_code,
                 asset
                     .content_type
@@ -454,7 +467,7 @@ pub(super) fn broken_images_result(measured: &[MeasuredAsset]) -> CheckResult {
         .iter()
         .map(|asset| {
             serde_json::json!({
-                "url": evidence_url(&asset.url),
+                "url": evidence_url(&asset.url, page_origin),
                 "status_code": asset.status_code,
                 "srcset_candidate": asset.has_srcset,
             })
@@ -464,7 +477,7 @@ pub(super) fn broken_images_result(measured: &[MeasuredAsset]) -> CheckResult {
         .iter()
         .map(|asset| {
             serde_json::json!({
-                "url": evidence_url(&asset.url),
+                "url": evidence_url(&asset.url, page_origin),
                 "status_code": asset.status_code,
                 "content_type": asset.content_type,
                 "srcset_candidate": asset.has_srcset,
@@ -521,7 +534,10 @@ pub(super) fn broken_images_result(measured: &[MeasuredAsset]) -> CheckResult {
     }
 }
 
-pub(super) fn heavy_images_result(measured: &[MeasuredAsset]) -> CheckResult {
+pub(super) fn heavy_images_result(
+    measured: &[MeasuredAsset],
+    page_origin: Option<&str>,
+) -> CheckResult {
     let images_sampled = measured
         .iter()
         .filter(|asset| asset.kind == AssetKind::Image)
@@ -560,7 +576,7 @@ pub(super) fn heavy_images_result(measured: &[MeasuredAsset]) -> CheckResult {
             let size = asset.bytes.unwrap_or(0);
             format!(
                 "{} ({}{}{}{})",
-                evidence_url(&asset.url),
+                evidence_url(&asset.url, page_origin),
                 if asset.measured_floor {
                     "at least "
                 } else {
@@ -616,7 +632,7 @@ pub(super) fn heavy_images_result(measured: &[MeasuredAsset]) -> CheckResult {
         .iter()
         .map(|asset| {
             serde_json::json!({
-                "url": evidence_url(&asset.url),
+                "url": evidence_url(&asset.url, page_origin),
                 "bytes": asset.bytes,
                 "measured_floor": asset.measured_floor,
                 "has_srcset": asset.has_srcset,

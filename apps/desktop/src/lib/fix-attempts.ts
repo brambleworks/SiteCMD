@@ -10,7 +10,7 @@ import {
 import type { CreateFixAttemptArgs } from "@/generated/ipc-bindings";
 
 // Must match the AgentTool serde enum in src-tauri/src/core/agent_tools.rs
-export type AgentTool = "claude-code" | "codex" | "cursor";
+export type AgentTool = "claude-code" | "codex" | "cursor" | "windsurf";
 
 // Must match ALL_FIX_ATTEMPT_STATUSES in src-tauri/src/db/fix_attempts.rs
 export type FixAttemptStatus =
@@ -82,7 +82,16 @@ export const AGENT_TOOL_LABELS: Record<AgentTool, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   cursor: "Cursor",
+  windsurf: "Windsurf",
 };
+
+// Must match handoff_deep_link in src-tauri/src/core/agent_tools.rs.
+const AGENT_TOOLS_WITHOUT_PROMPT_DEEP_LINK: readonly AgentTool[] = ["windsurf"];
+
+/** False when the editor publishes no prompt deep link, so the clipboard copy is the whole handoff. */
+export function hasPromptDeepLink(tool: AgentTool): boolean {
+  return !AGENT_TOOLS_WITHOUT_PROMPT_DEEP_LINK.includes(tool);
+}
 
 export function isAttemptActive(status: FixAttemptStatus): boolean {
   return ACTIVE_ATTEMPT_STATUSES.includes(status);

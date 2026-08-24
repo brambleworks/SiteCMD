@@ -412,6 +412,16 @@ mod tests {
     }
 
     #[test]
+    fn fingerprint_vector_is_pinned_for_mcp_parity() {
+        // apps/mcp-server/test/suppressions.test.mjs asserts the same digest.
+        let finding = issue("src/config.ts", 10, "const secret = 'fixture';");
+        assert_eq!(
+            issue_fingerprint(&finding),
+            "sha256:4522c6c0147aa43bbd24ea42bb759ad735e2dcddea6d2b83ed75de0fa5bfb1a6"
+        );
+    }
+
+    #[test]
     fn path_globs_and_rules_are_combined() {
         let project = tempfile::tempdir().expect("project");
         write_config(

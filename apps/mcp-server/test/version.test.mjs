@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { MCP_SERVER_VERSION } from "../dist/version.js";
+import { MCP_SERVER_VERSION, SUPPORTED_SCHEMA_VERSIONS } from "../dist/version.js";
+import { latestMigrationVersion } from "./helpers/schema-fixture.mjs";
 
 test("the bundled MCP handshake follows the SiteCMD release version", async () => {
   const packageJson = JSON.parse(
@@ -16,4 +17,9 @@ test("the bundled MCP handshake follows the SiteCMD release version", async () =
 
   assert.equal(packageJson.version, desktopVersion);
   assert.equal(MCP_SERVER_VERSION, desktopVersion);
+});
+
+test("the supported schema range tops out at the desktop's latest migration", () => {
+  assert.equal(SUPPORTED_SCHEMA_VERSIONS.max, latestMigrationVersion());
+  assert.ok(SUPPORTED_SCHEMA_VERSIONS.min <= SUPPORTED_SCHEMA_VERSIONS.max);
 });

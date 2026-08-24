@@ -21,6 +21,27 @@ const SCHEMA_SNAPSHOT_PATH = join(
   "schema_snapshot.sql",
 );
 
+const MIGRATIONS_PATH = join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "desktop",
+  "src-tauri",
+  "src",
+  "db",
+  "migrations.rs",
+);
+
+/** Highest `(N, include_str!("migrations/...sql"))` entry in the desktop migration table. */
+export function latestMigrationVersion() {
+  const source = readFileSync(MIGRATIONS_PATH, "utf8");
+  const versions = [...source.matchAll(/\(\s*(\d+),\s*include_str!\("migrations\//g)].map((match) =>
+    Number(match[1]),
+  );
+  return Math.max(...versions);
+}
+
 export function openSchemaFixtureDb(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   const dbPath = join(dir, "sitecmd.db");
@@ -31,6 +52,10 @@ export function openSchemaFixtureDb(prefix) {
   // honest so seeds that would violate real FK constraints fail here too.
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(readFileSync(SCHEMA_SNAPSHOT_PATH, "utf8"));
+
+  const insertVersion = db.prepare("INSERT INTO _schema_version (version) VALUES (?)");
+  for (let version = 1; version <= latestMigrationVersion(); version += 1)
+    insertVersion.run(version);
 
   process.on("exit", () => {
     db.close();
@@ -59,11 +84,11 @@ export function makeSeeders(db) {
     INSERT INTO work_items (
       project_id, env_url, source, signal_id, check_id, category, severity,
       title, description, scan_ref, first_seen_at, last_seen_at,
-      resolved_at, page_url, fix_prompt
+      resolved_at, page_url, fix_prompt, relative_path, line, confidence, detail_json
     ) VALUES (
       @projectId, @envUrl, @source, @signalId, @checkId, @category, @severity,
       @title, @description, @scanRef, @firstSeenAt, @lastSeenAt,
-      @resolvedAt, @pageUrl, @fixPrompt
+      @resolvedAt, @pageUrl, @fixPrompt, @relativePath, @line, @confidence, @detailJson
     )
   `);
 
@@ -86,6 +111,10 @@ export function makeSeeders(db) {
       resolvedAt: overrides.resolvedAt ?? null,
       pageUrl: overrides.pageUrl ?? null,
       fixPrompt: overrides.fixPrompt ?? null,
+      relativePath: overrides.relativePath ?? null,
+      line: overrides.line ?? null,
+      confidence: overrides.confidence ?? null,
+      detailJson: overrides.detailJson ?? null,
     });
   }
 

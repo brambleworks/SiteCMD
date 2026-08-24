@@ -94,7 +94,7 @@ function buildSteps(
     {
       label:
         phase === "manual"
-          ? "Fix prompt copied - paste it into your agent and send it"
+          ? `Fix prompt copied - paste it into ${toolLabel} and send it`
           : `${toolLabel} opened with the fix prompt staged`,
       state: launchDone
         ? "done"

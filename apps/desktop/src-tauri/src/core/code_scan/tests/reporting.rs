@@ -51,6 +51,40 @@ fn github_format_emits_annotations() {
 }
 
 #[test]
+fn sarif_format_emits_a_rule_and_result_per_finding() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "app/api/webhook/route.ts",
+        r#"
+                export async function POST(request: Request) {
+                  const body = await request.text();
+                  return new Response(body);
+                }
+            "#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let rendered = format_report(&report, temp.path(), CodeScanReportFormat::Sarif).unwrap();
+    let sarif: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+    assert_eq!(sarif["version"], "2.1.0");
+    let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+        .as_array()
+        .expect("rules array");
+    assert!(!rules.is_empty());
+    let results = sarif["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
+    assert!(!results.is_empty());
+    assert!(results[0]["ruleId"].as_str().is_some());
+    assert!(
+        results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            .as_str()
+            .is_some()
+    );
+}
+
+#[test]
 fn summary_format_keeps_code_scan_labels_for_ai_safety_findings() {
     let temp = TempDir::new().unwrap();
     write_file(

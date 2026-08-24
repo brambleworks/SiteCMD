@@ -303,6 +303,33 @@ pub fn run() {
                     )
                     .await;
                 });
+                // The agent-request watcher fulfils MCP start_fix and run_scan
+                // rows, so it joins the same cancellation registry.
+                let db_arc = app.state::<Arc<db::Database>>().inner().clone();
+                let scan_control = app
+                    .state::<crate::core::scan_control::ScanControlState>()
+                    .inner()
+                    .clone();
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::core::supervised_loop::supervised_loop_async(
+                        "agent_request_watcher",
+                        move || {
+                            let db_arc = db_arc.clone();
+                            let app_handle = app_handle.clone();
+                            let scan_control = scan_control.clone();
+                            async move {
+                                crate::background::agent_request_watcher::run(
+                                    db_arc,
+                                    app_handle,
+                                    scan_control,
+                                )
+                                .await;
+                            }
+                        },
+                    )
+                    .await;
+                });
             }
 
             // Spawn the fix-attempt watcher: settles agent fix attempts by
@@ -538,6 +565,7 @@ pub fn run() {
             commands::get_fix_attempt_for_issue,
             commands::cancel_fix_attempt,
             commands::detect_agent_tools,
+            commands::get_agent_tool_manual_config,
             licensing::commands::get_license_status,
             commands::get_pages_with_issues,
             commands::get_issues_for_page,
