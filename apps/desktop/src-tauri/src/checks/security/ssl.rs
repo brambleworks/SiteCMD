@@ -91,7 +91,7 @@ fn rejected_chain_facts(detail: String, observed_at: chrono::DateTime<chrono::Ut
         subject_names: Vec::new(),
         protocol: None,
         validation: TlsValidation::invalid(
-            TrustAuthority::Webpki,
+            TrustAuthority::PlatformVerifier,
             crate::log_sanitizer::bounded_issue_evidence(&detail),
         ),
         facts_observed_at: observed_at,
@@ -178,9 +178,8 @@ fn capture_tls_facts_with_config(
         protocol,
         // The handshake completed against the operating system's trust
         // program (rustls-platform-verifier), which is exactly what that
-        // authority accepting the chain means. `TrustAuthority::Webpki` is
-        // the closest existing label; see the type's doc comment.
-        validation: TlsValidation::valid(TrustAuthority::Webpki),
+        // authority accepting the chain means.
+        validation: TlsValidation::valid(TrustAuthority::PlatformVerifier),
         facts_observed_at: observed_at,
     })
 }

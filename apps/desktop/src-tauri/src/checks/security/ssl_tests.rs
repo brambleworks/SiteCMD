@@ -110,7 +110,7 @@ fn a_rejected_chain_records_the_rejection_without_inventing_certificate_facts() 
         "TLS handshake failed: invalid peer certificate: Expired".into(),
         observed_at,
     );
-    assert_eq!(facts.validation.authority, TrustAuthority::Webpki);
+    assert_eq!(facts.validation.authority, TrustAuthority::PlatformVerifier);
     assert_eq!(facts.validation.result, ValidationResult::Invalid);
     assert!(facts
         .validation
