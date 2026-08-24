@@ -46,6 +46,13 @@ pub enum LocalOrigin {
 }
 
 impl LocalOrigin {
+    /// Two deliberate widenings relative to the predicates this replaces:
+    /// every `127.0.0.0/8` literal classifies as `Loopback` (the old
+    /// `is_strict_localhost` accepted only `127.0.0.1`), and a trailing-dot
+    /// FQDN form (`localhost.`) normalizes the same way
+    /// `is_local_dev_domain` already normalizes it elsewhere in this file,
+    /// so it also classifies as `Loopback` even though `core::localhost`'s
+    /// predicates compare `host_str()` without trimming the trailing dot.
     pub fn classify(url: &url::Url) -> Self {
         match url.host() {
             Some(url::Host::Ipv4(ip)) if ip.is_loopback() => Self::Loopback,
@@ -436,6 +443,21 @@ mod tests {
         let wide = url::Url::parse("http://127.0.0.2:5173").unwrap();
         assert!(LocalOrigin::classify(&wide).is_strict_loopback());
         assert!(!is_strict_localhost(&wide));
+
+        // A second deliberate widening: a trailing-dot FQDN form of
+        // localhost normalizes the same way `is_local_dev_domain` (and
+        // therefore `scan_origin_allows_local_dev`) already normalizes it
+        // elsewhere in this file, so `LocalOrigin` treats "localhost." as
+        // loopback even though the two `core::localhost` predicates compare
+        // `host_str()` without trimming the trailing dot.
+        let trailing_dot = url::Url::parse("http://localhost./").unwrap();
+        let trailing_dot_origin = LocalOrigin::classify(&trailing_dot);
+        assert!(trailing_dot_origin.is_strict_loopback());
+        assert!(!is_strict_localhost(&trailing_dot));
+        assert!(trailing_dot_origin.is_local_environment());
+        assert!(!is_localhost(&trailing_dot));
+        assert!(trailing_dot_origin.allows_local_dev());
+        assert!(scan_origin_allows_local_dev(&trailing_dot));
     }
 
     #[test]
