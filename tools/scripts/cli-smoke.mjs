@@ -47,12 +47,12 @@ const HELP_SNAPSHOTS = [
   {
     label: "sitecmd audit --help",
     args: ["audit", "--help"],
-    sha256: "dc4469eb8dcfa027feca3deba967e43929cf794b991154358d6eb6bb84fb61a4",
+    sha256: "be89a099872b81eeb251b53c0440b2268d9fdc91f95b2370716b95fa1b2e715d",
   },
   {
     label: "sitecmd scan --help",
     args: ["scan", "--help"],
-    sha256: "a14b1b13e606e200ae50227c044c650f27ab808d24f0d176ed2152af7c849635",
+    sha256: "1cf31800e10e57346e43209b888e2327f3721df00c2cb304fb669a357f636d3d",
   },
   {
     label: "sitecmd fix --help",
@@ -67,7 +67,7 @@ const HELP_SNAPSHOTS = [
   {
     label: "sitecmd check --help",
     args: ["check", "--help"],
-    sha256: "f447e1c0f8246e98dd98b6d770c7fd2f32c01abb9fb9d6eeb727c848eb4fcae8",
+    sha256: "b2613d4835a6aa02b8c7733f863cbf8a436ba988fa6a0272688e7672cf8206a6",
   },
   {
     label: "sitecmd connected --help",
@@ -82,7 +82,7 @@ const HELP_SNAPSHOTS = [
   {
     label: "sitecmd gate --help",
     args: ["gate", "--help"],
-    sha256: "b2985408e84678724699504817df911514a921e59116b7528602f67df6c81eb1",
+    sha256: "770613872e83810d19f67463ca7d06cceb20001e2e0822ab8c2e0dd364cb35b1",
   },
 ];
 

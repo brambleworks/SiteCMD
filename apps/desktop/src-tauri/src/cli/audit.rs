@@ -16,7 +16,7 @@ pub const HELP: &str = concat!(
     "Reviewed findings can be suppressed through .sitecmd/config.json. JSON reports include occurrence fingerprints and suppression status.\n\n",
     "Options:\n",
     "  --format <FORMAT>      summary, json, markdown, review, github, or sarif (default: summary)\n",
-    "  --fail-on <SEVERITY>  Exit 1 when a critical, high, medium, or low finding meets the threshold\n",
+    "  --fail-on <SEVERITY>   Exit 1 when a critical, high, medium, or low finding meets the threshold\n",
     "  --output <PATH>        Write the report to a file instead of stdout\n",
     "  --baseline <PATH>      A previous --format json report; findings whose fingerprint it lists never trip --fail-on\n",
     "  --inspect-local-databases\n",
