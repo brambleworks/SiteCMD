@@ -45,6 +45,36 @@ async fn an_unreachable_host_is_a_transport_skip_not_a_certificate_finding() {
 }
 
 #[test]
+fn a_platform_verifier_build_failure_reports_transport_not_a_panic() {
+    // with_platform_verifier() eagerly builds the verifier and can fail
+    // (e.g. no native CA certificates load on some Linux configurations);
+    // this proves that failure reports a Transport outcome through the
+    // build_config seam instead of unwinding, the sync counterpart to
+    // ssl_probe's a_platform_verifier_build_failure_reports_unavailable_not_a_panic.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub listener");
+    let addr = listener.local_addr().expect("stub listener address");
+    let accepted = std::thread::spawn(move || {
+        // The handshake fails before any bytes are exchanged; just keep the
+        // accepted socket alive long enough for the connect to succeed.
+        let _ = listener.accept();
+    });
+
+    let result =
+        capture_tls_facts_with_config(&addr.to_string(), "example.com", chrono::Utc::now(), || {
+            Err("no native CA certificates loaded".to_string())
+        });
+
+    assert!(
+        matches!(
+            result,
+            Err(TlsUnavailable::Transport { ref detail }) if detail.contains("TLS configuration error")
+        ),
+        "expected a Transport outcome naming the configuration error, got {result:?}"
+    );
+    accepted.join().expect("stub listener thread");
+}
+
+#[test]
 fn certificate_errors_classify_as_chain_rejections() {
     for message in [
         "TLS handshake failed: invalid peer certificate: Expired",

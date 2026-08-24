@@ -105,6 +105,23 @@ fn capture_tls_facts(
     host: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<TlsFacts, TlsUnavailable> {
+    capture_tls_facts_with_config(
+        addr,
+        host,
+        observed_at,
+        crate::ssl_probe::platform_verified_client_config,
+    )
+}
+
+/// `capture_tls_facts` with the TLS config build behind a seam, so a test
+/// can prove a `platform_verified_client_config` failure (e.g. no native CA
+/// certificates load) reports a transport outcome instead of panicking.
+fn capture_tls_facts_with_config(
+    addr: &str,
+    host: &str,
+    observed_at: chrono::DateTime<chrono::Utc>,
+    build_config: impl Fn() -> Result<tokio_rustls::rustls::ClientConfig, String>,
+) -> Result<TlsFacts, TlsUnavailable> {
     let transport = |detail: String| TlsUnavailable::Transport {
         detail: crate::log_sanitizer::bounded_issue_evidence(&detail),
     };
@@ -120,7 +137,8 @@ fn capture_tls_facts(
 
     // Same crypto stack as the async ssl_probe, in sync mode: we only need
     // the handshake's outcome and the peer certificate, not a usable stream.
-    let config = crate::ssl_probe::platform_verified_client_config();
+    let config =
+        build_config().map_err(|e| transport(format!("TLS configuration error: {}", e)))?;
     let server_name = tokio_rustls::rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|e| transport(format!("Invalid SNI hostname: {}", e)))?;
     let mut conn = tokio_rustls::rustls::ClientConnection::new(Arc::new(config), server_name)

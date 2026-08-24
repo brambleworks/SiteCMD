@@ -47,16 +47,22 @@ impl SslProbeResult {
 /// dashboard probe and the scan agree on what a trusted chain is.
 ///
 /// Headless entry points do not install a process-default provider.
-pub(crate) fn platform_verified_client_config() -> ClientConfig {
+/// `with_platform_verifier()` eagerly builds the platform verifier and can
+/// fail - on non-Apple, non-Windows, non-Android targets it loads native CA
+/// certificates and errors if none load - so this returns a `Result` rather
+/// than panicking; callers report the error as an unavailable probe instead
+/// of crashing.
+pub(crate) fn platform_verified_client_config() -> Result<ClientConfig, String> {
     use rustls_platform_verifier::BuilderVerifierExt;
-    ClientConfig::builder_with_provider(Arc::new(
+    let builder = ClientConfig::builder_with_provider(Arc::new(
         tokio_rustls::rustls::crypto::ring::default_provider(),
     ))
     .with_safe_default_protocol_versions()
-    .expect("ring crypto provider supports the safe default TLS protocol versions")
-    .with_platform_verifier()
-    .expect("platform certificate verifier is available")
-    .with_no_client_auth()
+    .expect("ring crypto provider supports the safe default TLS protocol versions");
+    let verified = builder
+        .with_platform_verifier()
+        .map_err(|error| format!("platform certificate verifier unavailable: {error}"))?;
+    Ok(verified.with_no_client_auth())
 }
 
 pub(crate) fn host_from_url(url: &str) -> Option<String> {
@@ -92,6 +98,17 @@ pub(crate) async fn check_ssl_with(
     url: &str,
     connect: impl Fn(SocketAddr) -> ConnectFuture + Send + Sync,
 ) -> SslProbeResult {
+    check_ssl_with_config(url, connect, platform_verified_client_config).await
+}
+
+/// `check_ssl_with` with the TLS config build behind a seam too, so a test
+/// can prove a `platform_verified_client_config` failure (e.g. no native CA
+/// certificates load) reports `PROBE_UNAVAILABLE` instead of panicking.
+async fn check_ssl_with_config(
+    url: &str,
+    connect: impl Fn(SocketAddr) -> ConnectFuture + Send + Sync,
+    build_config: impl Fn() -> Result<ClientConfig, String>,
+) -> SslProbeResult {
     let Some(host) = host_from_url(url) else {
         return SslProbeResult::err("Invalid URL");
     };
@@ -117,7 +134,10 @@ pub(crate) async fn check_ssl_with(
     let Ok(server_name) = ServerName::try_from(host.clone()) else {
         return SslProbeResult::err("Invalid URL");
     };
-    let connector = TlsConnector::from(Arc::new(platform_verified_client_config()));
+    let Ok(config) = build_config() else {
+        return SslProbeResult::err(PROBE_UNAVAILABLE);
+    };
+    let connector = TlsConnector::from(Arc::new(config));
 
     let Ok(Ok(tcp)) = tokio::time::timeout(PROBE_TIMEOUT, connect(addr)).await else {
         return SslProbeResult::err(PROBE_UNAVAILABLE);
@@ -215,10 +235,32 @@ mod tests {
     #[test]
     fn client_config_binds_provider_without_process_default() {
         // Headless entry points may not install a process-default CryptoProvider.
-        let config = platform_verified_client_config();
+        let config = platform_verified_client_config()
+            .expect("this machine's native certificate store loads");
         assert!(
             !config.crypto_provider().cipher_suites.is_empty(),
             "ring provider must expose cipher suites",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_platform_verifier_build_failure_reports_unavailable_not_a_panic() {
+        // with_platform_verifier() eagerly builds the verifier and can fail
+        // (e.g. no native CA certificates load on some Linux configurations);
+        // this proves that failure reports PROBE_UNAVAILABLE through the
+        // build_config seam instead of unwinding.
+        let opened = Arc::new(AtomicBool::new(false));
+        let result = check_ssl_with_config(
+            "https://example.com",
+            refusing_connector(opened.clone()),
+            || Err("no native CA certificates loaded".to_string()),
+        )
+        .await;
+        assert_eq!(result.error.as_deref(), Some(PROBE_UNAVAILABLE));
+        assert_eq!(result.days_remaining, None);
+        assert!(
+            !opened.load(Ordering::SeqCst),
+            "a config-build failure must be reported before any connect attempt"
         );
     }
 
