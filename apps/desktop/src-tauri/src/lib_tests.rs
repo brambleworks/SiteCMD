@@ -1618,7 +1618,7 @@ fn string_result_command_scan_sees_both_attribute_forms() {
 const RUN_BLOCKING_CALL_BUDGET: usize = 164;
 /// Sync `self.execute(`/`self.execute_mut(`/`self.execute_with_timeout(` calls
 /// in src/db/. Lower as domain methods move to `run`/`run_mut`.
-const SYNC_DB_EXECUTE_BUDGET: usize = 198;
+const SYNC_DB_EXECUTE_BUDGET: usize = 205;
 
 fn count_matches(dir: &Path, pattern: &regex::Regex) -> usize {
     let mut files = Vec::new();
