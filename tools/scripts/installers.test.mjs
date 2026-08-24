@@ -366,10 +366,20 @@ describe("CLI installers", () => {
   it("falls back to the minisign docs URL on Linux without a known package manager", () => {
     const fixture = createInstallerFixture();
     fs.unlinkSync(path.join(fixture.bin, "minisign"));
+    // The stub-only PATH keeps the real OS out of the probe: on an Ubuntu
+    // runner /usr/bin holds apt-get (and /bin is a symlink to it), so any
+    // real directory on PATH turns this into the package-manager branch.
+    // grep and expr stubs satisfy the earlier prerequisite probes.
+    writeExecutable(path.join(fixture.bin, "grep"), "#!/bin/sh\nexit 0\n");
+    writeExecutable(path.join(fixture.bin, "expr"), "#!/bin/sh\nexit 0\n");
 
-    const result = fixture.runPublic({
-      FAKE_UNAME_SYSTEM: "Linux",
-      PATH: `${fixture.bin}:/usr/bin:/bin`,
+    const result = spawnSync("/bin/sh", [PUBLIC_INSTALLER], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: fixture.environment({
+        FAKE_UNAME_SYSTEM: "Linux",
+        PATH: fixture.bin,
+      }),
     });
 
     expect(result.status).not.toBe(0);
@@ -463,17 +473,19 @@ describe("CLI installers", () => {
     const installed = path.join(fixture.installDir, "sitecmd");
     writeExecutable(installed, "#!/bin/sh\nprintf 'sitecmd 1.5.4-rc.1\\n'\n");
 
-    // Invoke the /bin/sh binary directly: the PATH override below excludes
-    // /bin (where expr lives) for the script's own `command -v` lookups,
-    // but spawnSync also uses that PATH to locate "sh" itself, so a bare
-    // "sh" would fail to launch at all.
+    // Invoke the /bin/sh binary directly (a bare "sh" resolves through the
+    // overridden PATH and would fail to launch). The PATH is the stub bin
+    // ALONE: expr lives in /bin on macOS but /usr/bin on Linux, so excluding
+    // one real directory is not portable; the stub bin carries every probed
+    // prerequisite except expr itself.
+    writeExecutable(path.join(fixture.bin, "grep"), "#!/bin/sh\nexit 0\n");
     const result = spawnSync("/bin/sh", [PUBLIC_INSTALLER], {
       cwd: ROOT,
       encoding: "utf8",
       env: fixture.environment({
         SITECMD_VERSION: "",
         FAKE_LATEST_RESPONSE: '{"latest_version":"1.5.4-rc.2"}',
-        PATH: `${fixture.bin}:/usr/bin:/sbin`,
+        PATH: fixture.bin,
       }),
     });
 
