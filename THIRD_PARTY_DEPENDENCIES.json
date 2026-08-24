@@ -706,42 +706,6 @@
     },
     {
       "ecosystem": "cargo",
-      "name": "aws-lc-rs",
-      "version": "1.18.0",
-      "license": "ISC AND (Apache-2.0 OR ISC)",
-      "repository": "https://github.com/aws/aws-lc-rs",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "b50b376e7d24a0598488b730c3034ffcd0b58dd36c0913a24b9903a3cfd04bf7"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "aws-lc-sys",
-      "version": "0.44.0",
-      "license": "ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)",
-      "repository": "https://github.com/aws/aws-lc-rs",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "728536b4160e051f86d7c9c388f704866b3d512cd7df97ac3516c65279523c4e"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
       "name": "base64",
       "version": "0.21.7",
       "license": "MIT OR Apache-2.0",
@@ -1450,28 +1414,6 @@
         "desktop-rust"
       ],
       "licenseFiles": []
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "cmake",
-      "version": "0.1.58",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/rust-lang/cmake-rs",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
-        }
-      ]
     },
     {
       "ecosystem": "cargo",
@@ -3586,24 +3528,6 @@
     },
     {
       "ecosystem": "cargo",
-      "name": "fs_extra",
-      "version": "1.3.0",
-      "license": "MIT",
-      "repository": "https://github.com/webdesus/fs_extra",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "251ea8ccb1205ce5fa847d6e264d6b6753af62de2cecf2fd9abc0eb02c7c83fc"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
       "name": "futures-channel",
       "version": "0.3.34",
       "license": "MIT OR Apache-2.0",
@@ -5570,28 +5494,6 @@
     },
     {
       "ecosystem": "cargo",
-      "name": "jobserver",
-      "version": "0.1.35",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/rust-lang/jobserver-rs",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
       "name": "js-sys",
       "version": "0.3.104",
       "license": "MIT OR Apache-2.0",
@@ -5962,32 +5864,6 @@
         {
           "name": "LICENSE-MIT",
           "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "lru-slab",
-      "version": "0.1.2",
-      "license": "MIT OR Apache-2.0 OR Zlib",
-      "repository": "https://github.com/Ralith/lru-slab",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "1466d9b4f3a59bb8997fc8d5fa977ce3f6a24bb2358793c09bfdf007039f6486"
-        },
-        {
-          "name": "LICENSE-ZLIB",
-          "sha256": "09785877275ffada6c371b652a30e95c26b435126fc0fc62f1bc2d72171f80a4"
         }
       ]
     },
@@ -7899,72 +7775,6 @@
     },
     {
       "ecosystem": "cargo",
-      "name": "quinn-proto",
-      "version": "0.11.17",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/quinn-rs/quinn",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "quinn-udp",
-      "version": "0.5.15",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/quinn-rs/quinn",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "quinn",
-      "version": "0.11.11",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/quinn-rs/quinn",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
       "name": "quote",
       "version": "1.0.47",
       "license": "MIT OR Apache-2.0",
@@ -8074,28 +7884,6 @@
         {
           "name": "LICENSE-MIT",
           "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "rand_pcg",
-      "version": "0.10.2",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/rust-random/rngs",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "2234e3cefee876aeb686ad89e978bdb07bf118a1186ab1cf161bcdf69d4b4f57"
         }
       ]
     },
@@ -12495,28 +12283,6 @@
     },
     {
       "ecosystem": "cargo",
-      "name": "web-time",
-      "version": "1.1.0",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/daxpedda/web-time",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE-APACHE",
-          "sha256": "54a744942eb3fa63a74d8d359989ed6962c04f3f10ff20cfa08ff8aa7efbe4e6"
-        },
-        {
-          "name": "LICENSE-MIT",
-          "sha256": "f428305bbf2e70fbd807af0f3c7ac1b7acfb95311640f451e9d2e48db6d7e96b"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
       "name": "webkit2gtk-sys",
       "version": "2.0.2",
       "license": "MIT",
@@ -12554,24 +12320,6 @@
     {
       "ecosystem": "cargo",
       "name": "webpki-root-certs",
-      "version": "1.0.9",
-      "license": "CDLA-Permissive-2.0",
-      "repository": "https://github.com/rustls/webpki-roots",
-      "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "scopes": [
-        "cli-rust",
-        "desktop-rust"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8"
-        }
-      ]
-    },
-    {
-      "ecosystem": "cargo",
-      "name": "webpki-roots",
       "version": "1.0.9",
       "license": "CDLA-Permissive-2.0",
       "repository": "https://github.com/rustls/webpki-roots",
