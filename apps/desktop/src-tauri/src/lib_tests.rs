@@ -1738,3 +1738,25 @@ fn tracing_instrument_count_only_decreases() {
         "tracing::instrument count changed; set TRACING_INSTRUMENT_BUDGET to {total} only if it went down"
     );
 }
+
+#[test]
+fn broker_threat_model_names_every_scope_and_its_sensitive_commands() {
+    let doc = include_str!("../../../../docs/engineering/privileged-broker-threat-model.md");
+    for scope in crate::commands::privileged_command_broker_scopes() {
+        assert!(
+            doc.contains(scope.broker_command),
+            "threat model must name {}",
+            scope.broker_command
+        );
+        for command in scope.sensitive {
+            assert!(
+                doc.contains(command),
+                "threat model must list the sensitive command {command}"
+            );
+        }
+    }
+    assert!(
+        doc.contains("compromised renderer"),
+        "the document must state the boundary the broker does not defend"
+    );
+}

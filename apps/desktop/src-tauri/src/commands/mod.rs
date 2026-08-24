@@ -53,6 +53,16 @@ use std::sync::LazyLock;
 pub use error::{CommandError, CommandResult};
 pub use tokio::sync::Mutex as TokioMutex;
 
+/// Every privileged broker's scope: its broker command, label, allowlist,
+/// and sensitive-command subset. For code that audits or documents the
+/// table itself rather than dispatching through it; currently only the
+/// broker threat model guardrail (`lib_tests.rs`) calls this.
+#[cfg(test)]
+pub(crate) fn privileged_command_broker_scopes() -> &'static [privileged_command_broker::BrokerScope]
+{
+    privileged_command_broker::SCOPES
+}
+
 /// Unix paths: two or more slash-separated segments. A segment may contain
 /// spaces (`"Application Support"`), so this is deliberately permissive: it
 /// also over-matches into any trailing prose that happens to follow a path
