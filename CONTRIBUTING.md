@@ -10,12 +10,12 @@ Report security vulnerabilities privately according to [SECURITY.md](SECURITY.md
 
 ## What lives here, and what does not
 
-This repository is everything that runs on a user's machine: the desktop app, the CLI, the MCP server, and the scan engine with every current detector. That is the part the privacy claims are about, so it is the part that is open. Detectors, checks, and engine behavior are the code most worth discussing, and a bug report against a check is the most useful issue you can file.
+This repository is everything that runs on a user's machine: the desktop app, the CLI, the MCP server, and the scan engine with every current detector. That is the part the privacy claims are about, so it is the part that is open. Detectors, checks, and engine behavior are the code most worth discussing, and a bug report against a check is the most useful issue you can file; use the [False positive](https://github.com/brambleworks/SiteCMD/issues/new?template=false_positive.yml) form so it carries the check id, scan type, and sanitized evidence.
 
 Two things are deliberately elsewhere and are not accepted here:
 
 - **The maintained intelligence catalog.** Fix-guide content is separately licensed commercial content and is authored in the SiteCMD-Web repository, not in this one. Baseline remediation content that ships inside the app does live here.
-- **Connected-service internals.** The hosted scanner, the connected API, and the delivery workers run on SiteCMD infrastructure and live in SiteCMD-Web. The payload builder that decides what a connected client sends belongs on this side of the line on purpose, so what leaves the machine stays reviewable.
+- **Connected-service internals.** The hosted scanner, the connected API, and the delivery workers run on SiteCMD infrastructure and their code lives in SiteCMD-Web. Their implementation specifications are public in `docs/engineering/connected-service/` so the wire contract a client speaks can be reviewed; the service code that fulfills them is not accepted here. The payload builder that decides what a connected client sends belongs on this side of the line on purpose, so what leaves the machine stays reviewable.
 
 The source-publication decision record, maintained privately alongside the connected-service internals, owns that boundary and why it falls where it does.
 

@@ -56,6 +56,37 @@ See [Get value in five minutes](docs/product/get-value-in-5-minutes.md) for the
 shortest desktop walkthrough, or [the MCP server README](apps/mcp-server/README.md)
 to put the same findings inside an AI coding tool.
 
+## Verify your download
+
+Every release attaches `SHA256SUMS` and its detached signature
+`SHA256SUMS.minisig`, made with the SiteCMD updater key. It is the same key
+[install.sh](install.sh) uses to authenticate what it installs:
+
+```txt
+RWTtzNh0gmMU/8O1AJBbQbUEy9oD5lpqL/dV0qRqlpsCldfWNWgxr5kE
+```
+
+Verify the manifest signature first, on macOS, Windows, or Linux:
+
+```bash
+minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -P RWTtzNh0gmMU/8O1AJBbQbUEy9oD5lpqL/dV0qRqlpsCldfWNWgxr5kE
+```
+
+Then check the file you downloaded against the manifest you just trusted
+(macOS and Linux):
+
+```bash
+shasum -a 256 -c --ignore-missing SHA256SUMS
+```
+
+The macOS DMG is Apple-signed as well, and its checksum is listed in the same
+manifest.
+
+Releases published by the release workflow carry a Sigstore build-provenance
+attestation; verify one with
+`gh attestation verify <file> --repo brambleworks/SiteCMD`. Releases
+back-filled by hand before the workflow change carry none.
+
 ## Where your data lives
 
 Everything in this repository runs on your machine. Source code and raw file

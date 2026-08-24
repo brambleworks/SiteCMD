@@ -1,0 +1,37 @@
+{
+  "repository": "brambleworks/SiteCMD",
+  "privateVulnerabilityReporting": true,
+  "securityAndAnalysis": {
+    "secret_scanning": "enabled",
+    "secret_scanning_push_protection": "enabled",
+    "secret_scanning_non_provider_patterns": "enabled"
+  },
+  "branchRuleset": {
+    "name": "protect-main",
+    "target": "branch",
+    "refNameInclude": ["refs/heads/main"],
+    "refNameExclude": [],
+    "ruleTypes": [
+      "deletion",
+      "non_fast_forward",
+      "required_linear_history",
+      "required_signatures",
+      "pull_request",
+      "required_status_checks"
+    ],
+    "requiredStatusChecks": [
+      "Repository guardrails",
+      "Audit repository code",
+      "Scan repo for secrets",
+      "Analyze javascript-typescript",
+      "Analyze rust"
+    ]
+  },
+  "tagRuleset": {
+    "name": "protect-release-tags",
+    "target": "tag",
+    "refNameInclude": ["refs/tags/v*"],
+    "refNameExclude": [],
+    "ruleTypes": ["deletion", "non_fast_forward", "update"]
+  }
+}

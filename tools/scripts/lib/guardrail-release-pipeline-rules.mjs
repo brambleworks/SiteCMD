@@ -1,4 +1,5 @@
 import { orderedBefore } from "./guardrail-text-utils.mjs";
+import { releasePublicationSafetyFailures } from "./guardrail-release-publication-rules.mjs";
 
 export function releasePipelineSafetyFailures(read) {
   const releaseWorkflow = read(".github/workflows/release.yml");
@@ -190,6 +191,11 @@ export function releasePipelineSafetyFailures(read) {
       publisherJob.includes('add_upload "$dir/$cli_archive.sig" "$cli_archive.sig"'),
     "release.yml must embed its source commit and sign, verify, and publish every CLI archive signature beside the archive.",
   );
+
+  // Signed-checksum publication and provenance attestation live in their own
+  // module (guardrail-release-publication-rules.mjs) to stay under the line
+  // budget; merge their failures in here so callers see one combined list.
+  failures.push(...releasePublicationSafetyFailures(read));
 
   check(
     verifierJob.includes("needs: [prepare-candidate, sign-updaters]") &&

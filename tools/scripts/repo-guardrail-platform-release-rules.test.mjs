@@ -170,6 +170,241 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(run()).toEqual([]);
   });
 
+  it("catches a publisher that stopped uploading the signed checksum manifest", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace("          add_upload payload/SHA256SUMS.minisig SHA256SUMS.minisig\n", "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a verifier that stopped checking the checksum manifest signature", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace(
+            '"$verifier" updater-public-key.pub payload/SHA256SUMS checksum-signature.sig',
+            "true",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a verifier that stopped binding the CLI archive to the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace('verify_listed "$dir/$cli_archive"\n', "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a verifier that stopped binding the updater bundle to the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace('verify_listed "$dir/$filename"\n', "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a verifier that stopped binding the DMG to the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace('if [ -n "$dmg_name" ]; then verify_listed "$dir/$dmg_name"; fi\n', "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a verify_listed whose body no longer reads the manifest", () => {
+    const failures = run((file, source) =>
+      file.endsWith("verify-signed-payload.sh")
+        ? source.replace(/verify_listed\(\) \{[\s\S]*?\n\}/, "verify_listed() {\n  :\n}")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  const advanceStepBlock = (source) => {
+    const start = source.indexOf("      - name: Advance the production updater manifest");
+    const end = source.indexOf("\n      - ", start);
+    return source.slice(start, end + 1);
+  };
+
+  it("is not fooled by a decoy comment when the manifest advance moves after the release", () => {
+    const decoy = "      # Advance the production updater manifest ran in the step above\n";
+    const attestHeader = "      - name: Attest build provenance for the published artifacts\n";
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const step = advanceStepBlock(source);
+      return source.replace(step, decoy).replace(attestHeader, `${step}${attestHeader}`);
+    });
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("is not fooled by a decoy comment that literally names the releases-admin URL", () => {
+    // Unlike the paraphrase above, this decoy quotes the exact needle
+    // orderedBefore searches for, planted ahead of the real (now displaced)
+    // step; a raw indexOf would find the comment and wrongly call this ordered.
+    const decoy = "      # https://releases.sitecmd.com/api/releases-admin ran above already\n";
+    const attestHeader = "      - name: Attest build provenance for the published artifacts\n";
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const step = advanceStepBlock(source);
+      return source.replace(step, decoy).replace(attestHeader, `${step}${attestHeader}`);
+    });
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a publisher that drops the upload-plan cross-check", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace("          while read -r hash name; do\n", "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches an upload-plan cross-check whose lookup is a no-op", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            'grep -Fq "$(printf \'\\tv%s/%s\\t%s\' "$VERSION" "$name" "$hash")" publication/upload-plan.tsv',
+            "true",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("release-wide SHA256SUMS");
+  });
+
+  it("catches a publisher that leaves an existing Release unrepaired", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            '              gh release upload "$TAG_NAME" "payload/$asset" \\\n                --repo "$GITHUB_REPOSITORY" --clobber\n',
+            "",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("must repair an existing Release");
+  });
+
+  it("catches a publisher that stopped failing on a draft Release", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            `if [ "$(jq -r '.isDraft' release-state.json)" = "true" ]; then`,
+            "if false; then",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("must repair an existing Release");
+  });
+
+  it("catches a README that dropped the manifest-signature check the notes promise", () => {
+    const failures = run((file, source) =>
+      file === "README.md"
+        ? source.replace("minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -P ", "minisign -V # ")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("README.md#verify-your-download");
+  });
+
+  it("catches a README that dropped the downloaded-file checksum check", () => {
+    const failures = run((file, source) =>
+      file === "README.md"
+        ? source.replace("shasum -a 256 -c --ignore-missing SHA256SUMS", "shasum -a 256 SHA256SUMS")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("README.md#verify-your-download");
+  });
+
+  it("catches provenance attestation moved out of the publisher", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml") ? source.replace("      attestations: write\n", "") : source,
+    );
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it("catches a deleted attestation subject", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace("            payload/SHA256SUMS\n", "")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it("catches an attestation subject swapped for the unverified candidate manifest", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace(
+            "            payload/*/*.dmg\n",
+            "            release-candidate/manifest.json\n",
+          )
+        : source,
+    );
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it("is not fooled by a decoy comment when the attest step moves ahead of the release", () => {
+    const attestStep = [
+      "      - name: Attest build provenance for the published artifacts",
+      "        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2",
+      "        with:",
+      "          subject-path: |",
+      "            payload/*/*.tar.gz",
+      "            payload/*/*.AppImage",
+      "            payload/*/*-setup.exe",
+      "            payload/*/*.zip",
+      "            payload/*/*.dmg",
+      "            payload/SHA256SUMS",
+    ].join("\n");
+    const publishHeader = "      - name: Publish the GitHub Release with notes and checksums";
+    const decoy = "      # gh release create already ran; nothing left to publish\n";
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const withoutAttest = source.replace(`\n\n${attestStep}\n`, "\n");
+      return withoutAttest.replace(
+        `${publishHeader}\n`,
+        `${decoy}\n${attestStep}\n\n${publishHeader}\n`,
+      );
+    });
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
+  it('is not fooled by a decoy comment that literally names "gh release create"', () => {
+    // Unlike the paraphrase above, this decoy quotes the exact needle
+    // orderedBefore searches for, planted ahead of the attest step moved up
+    // in front of it; a raw indexOf would find the comment and wrongly call
+    // this ordered.
+    const attestStep = [
+      "      - name: Attest build provenance for the published artifacts",
+      "        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2",
+      "        with:",
+      "          subject-path: |",
+      "            payload/*/*.tar.gz",
+      "            payload/*/*.AppImage",
+      "            payload/*/*-setup.exe",
+      "            payload/*/*.zip",
+      "            payload/*/*.dmg",
+      "            payload/SHA256SUMS",
+    ].join("\n");
+    const publishHeader = "      - name: Publish the GitHub Release with notes and checksums";
+    const decoy = '      # gh release create "$TAG_NAME" already ran above\n';
+    const failures = run((file, source) => {
+      if (!file.includes("release.yml")) return source;
+      const withoutAttest = source.replace(`\n\n${attestStep}\n`, "\n");
+      return withoutAttest.replace(
+        `${publishHeader}\n`,
+        `${decoy}\n${attestStep}\n\n${publishHeader}\n`,
+      );
+    });
+    expect(failures.join("\n")).toContain("attest-build-provenance");
+  });
+
   it("catches a removed updater-key probe job", () => {
     const failures = run((file, source) =>
       file.includes("release.yml")

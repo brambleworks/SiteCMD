@@ -32,3 +32,17 @@ if [ -x "${verifier}.exe" ]; then verifier="${verifier}.exe"; fi
 cli_archive=$(jq -r '.cli_archive' "$dir/fragment.json")
 tr -d '\r' < "$dir/$cli_archive.sig" | base64 --decode > cli-signature.sig
 "$verifier" updater-public-key.pub "$dir/$cli_archive" cli-signature.sig
+
+# The release-wide checksum manifest carries the same key and names this leg's bytes.
+tr -d '\r' < payload/SHA256SUMS.sig | base64 --decode > checksum-signature.sig
+cmp -s checksum-signature.sig payload/SHA256SUMS.minisig
+"$verifier" updater-public-key.pub payload/SHA256SUMS checksum-signature.sig
+verify_listed() {
+  expected=$(awk -v name="$(basename "$1")" '$2 == name { print $1 }' payload/SHA256SUMS)
+  test -n "$expected"
+  test "$(sha256_file "$1")" = "$expected"
+}
+verify_listed "$dir/$filename"
+verify_listed "$dir/$cli_archive"
+dmg_name=$(jq -r '.dmg_name // empty' "$dir/fragment.json")
+if [ -n "$dmg_name" ]; then verify_listed "$dir/$dmg_name"; fi

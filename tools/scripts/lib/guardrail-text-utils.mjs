@@ -1,7 +1,21 @@
+/**
+ * Blanks lines whose first non-space character is `#`, so a YAML comment
+ * cannot forge or hide a marker for `orderedBefore`. Line count and the
+ * newlines between lines are preserved, so relative ordering of the
+ * remaining content is unaffected.
+ */
+function withoutHashCommentLines(source) {
+  return source
+    .split("\n")
+    .map((line) => (/^[ \t]*#/.test(line) ? "" : line))
+    .join("\n");
+}
+
 export function orderedBefore(source, first, second) {
-  const firstIndex = source.indexOf(first);
+  const searchable = withoutHashCommentLines(source);
+  const firstIndex = searchable.indexOf(first);
   if (firstIndex === -1) return false;
-  const secondIndex = source.indexOf(second);
+  const secondIndex = searchable.indexOf(second);
   if (secondIndex === -1) return false;
   return firstIndex < secondIndex;
 }

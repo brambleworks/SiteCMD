@@ -95,6 +95,7 @@ import { frontendMaintainabilityFailures } from "./lib/guardrail-frontend-mainta
 import { desktopBoundaryFailures } from "./lib/guardrail-desktop-boundary-rules.mjs";
 import { crossSurfaceContractFailures } from "./lib/guardrail-cross-surface-contract-rules.mjs";
 import { handRolledDialogFailures } from "./lib/guardrail-dialog-rules.mjs";
+import { publicFaceFailures } from "./lib/guardrail-public-face-rules.mjs";
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ROOT = process.env.SITECMD_GUARDRAILS_ROOT
   ? path.resolve(process.env.SITECMD_GUARDRAILS_ROOT)
@@ -516,6 +517,7 @@ export function repoGuardrailFailures({ root, read, readJson, exists, listFiles 
   failures.push(...agentGuidanceFailures(read, exists, listFiles));
   failures.push(...versionSyncFailures(read));
   failures.push(...testWiringFailures(read, { root }));
+  failures.push(...publicFaceFailures(read, exists, listFiles));
 
   return failures;
 }

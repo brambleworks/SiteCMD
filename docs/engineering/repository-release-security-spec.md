@@ -53,6 +53,12 @@ Configure these controls before making the repository public:
 - Keep default `GITHUB_TOKEN` permissions read-only. Grant write permissions only
   to the job that needs them.
 
+`.github/repository-protection.json` is the contract for the first three
+bullets and the two rulesets; `pnpm protection:check` proves every required
+check comes from a workflow that runs on every pull request, and
+`pnpm protection:check:live` reads the repository through `gh api` and fails
+on any drift. Run the live check after every settings change and quarterly.
+
 There is no routine bypass. A break-glass action is limited to an active security
 or release incident, must be recorded, and must restore the normal controls
 before unrelated work continues.
@@ -173,6 +179,7 @@ key. The `release-updater-signing` job:
 - Installs the signer with scripts disabled
 - Verifies the candidate and every input hash before exposing the key
 - Signs the exact updater and CLI bytes
+- Signs one release-wide `SHA256SUMS` covering every installer and archive
 - Records candidate, source, and artifact hashes in the signed payload
 
 This isolates the hardest-to-rotate credential from product build code. It does
@@ -195,6 +202,13 @@ The `release-publish` job downloads only the candidate and verified signed
 payload. It checks the tuple again, uploads immutable versioned objects to R2,
 and advances the production updater manifest through the release administration
 endpoint. It does not check out or execute product source.
+It also creates the GitHub Release for the tag, carrying the changelog notes
+and the signed `SHA256SUMS` and `SHA256SUMS.minisig`; the binaries stay on R2.
+Finally it records a build provenance attestation for every published
+artifact and the checksum manifest with `actions/attest-build-provenance`;
+`gh attestation verify <file> --repo brambleworks/SiteCMD` reads it. The
+attestation names the workflow run that published the bytes. It is not a
+reproducible-build proof.
 
 Publication stops if a platform is missing, an existing immutable object has
 different bytes, or any expected hash or signature differs.

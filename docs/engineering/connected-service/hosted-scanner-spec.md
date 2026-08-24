@@ -16,8 +16,8 @@ achieved and proven, what the `crawl_profile` and `execution_profile`
 pin, how pair-precise coverage is produced, the network-security
 boundary, scheduling and supersession behavior, and the verified-good
 drift checks. It does not own alert content or wake-up policy (alert
-and report delivery spec) or allowances and pricing (commercial terms
-spec).
+and report delivery spec) or allowances and pricing, which are set
+outside this specification.
 
 **Audience:** Engineers building the hosted runner in SiteCMD-Web and
 maintaining the desktop engine it must match.
@@ -578,14 +578,12 @@ Two, mirroring the desktop's own split (its scheduler always passes
   scans, where the drift checks below carry the watch and browser cost
   is not justified per tick. Cadence and the periodic full pass are
   operating values in the beta operating configuration below; what a
-  paid plan eventually includes is the commercial spec's pricing-pass
-  material.
+  paid plan eventually includes is decided outside this specification.
 
 ## Beta operating configuration
 
-The commercial spec deliberately sets no numbers before cost data
-exists, but a comped beta still has to run, and "the commercial spec
-will decide" is not an executable cadence. The beta's operational
+No plan numbers are set before cost data exists, but a comped beta
+still has to run, and "decided later" is not an executable cadence. The beta's operational
 values are therefore a **versioned configuration artifact** in the
 connect worker - engineering capacity decisions, explicitly not
 prices, replaced by the pricing pass's decided values at graduation:
@@ -730,8 +728,7 @@ pins:
   that can never be kept. The reconciliation is at the resource
   boundary instead: the protocol rejects a scope `PUT` exceeding the
   entitlement's connected-scope cap with `422 scope_exceeds_plan`
-  (v1 ceiling: 100 routes; the commercial spec sets per-plan values at
-  or under it), so scope and scan capacity are the same number by
+  (v1 ceiling: 100 routes; per-plan values are set at or under it), so scope and scan capacity are the same number by
   construction, session checks can always reach complete coverage,
   and nothing rots uncovered. The environment entry URL counts as a
   route (deduplicated if also listed). The wire-format bound of 5,000
@@ -1402,9 +1399,8 @@ actually computed from:
   the margin math.
 
 The roll-up to cost per connected site per month, as a distribution
-split by scan profile, is the commercial spec's measurement program;
-this instrumentation is what makes it computable (an RFC graduation
-gate).
+split by scan profile, is the measurement program this instrumentation
+exists to make computable.
 
 Provider items recorded for build-time verification rather than
 asserted: whether reaching Vercel Hobby deployments requires a Vercel

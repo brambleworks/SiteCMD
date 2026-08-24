@@ -814,6 +814,44 @@ describe.concurrent(
       );
     });
 
+    it("fails when the README publishes a different updater key than the installer", () => {
+      expectGuardrailFailure(
+        cliSurfaceFailures,
+        (fixtureRoot) => {
+          const readme = readFixtureFile(fixtureRoot, "README.md");
+          writeFixtureFile(
+            fixtureRoot,
+            "README.md",
+            mustMutate(
+              readme,
+              "\nRWTtzNh0gmMU/8O1AJBbQbUEy9oD5lpqL/dV0qRqlpsCldfWNWgxr5kE\n",
+              "\nRWQ000000000000000000000000000000000000000000000000000000\n",
+            ),
+          );
+        },
+        "must print the updater public key exactly as",
+      );
+    });
+
+    it("fails when the README's minisign -P argument diverges from the installer key", () => {
+      expectGuardrailFailure(
+        cliSurfaceFailures,
+        (fixtureRoot) => {
+          const readme = readFixtureFile(fixtureRoot, "README.md");
+          writeFixtureFile(
+            fixtureRoot,
+            "README.md",
+            mustMutate(
+              readme,
+              "-P RWTtzNh0gmMU/8O1AJBbQbUEy9oD5lpqL/dV0qRqlpsCldfWNWgxr5kE",
+              "-P RWQ000000000000000000000000000000000000000000000000000",
+            ),
+          );
+        },
+        "must print the updater public key exactly as",
+      );
+    });
+
     it("fails when the installer gate drops syntax or behavior verification", () => {
       expectGuardrailFailure(
         cliSurfaceFailures,
