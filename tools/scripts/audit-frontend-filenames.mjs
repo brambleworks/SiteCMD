@@ -86,7 +86,9 @@ function auditFile(filePath) {
     return failures;
   }
 
-  if (baseName.startsWith("use")) {
+  // A hook filename is use + PascalCase; a bare "use" prefix also matches
+  // ordinary words ("user-facing-error"), so require the uppercase boundary.
+  if (/^use[A-Z]/.test(baseName)) {
     if (!HOOK_RE.test(baseName)) {
       failures.push("hook files must use usePascalCase");
       return failures;
