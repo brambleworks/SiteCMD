@@ -48,6 +48,14 @@ impl Check for CookieSecurityCheck {
         "security.cookies"
     }
 
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![
+            "security.cookies".to_string(),
+            "security.cookies.malformed_header".to_string(),
+            "security.cookies.unreadable_headers".to_string(),
+        ]
+    }
+
     fn category(&self) -> ScanCategory {
         ScanCategory::Security
     }

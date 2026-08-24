@@ -51,7 +51,7 @@ fn every_emitted_web_check_id_has_a_manifest_contract() {
 /// not counted here: `seo::sync_checks()` deliberately excludes it in favor
 /// of `accessibility.headings` (see `src/checks/seo/mod.rs` tests), so it
 /// never appears as a bare id in `web_check_ids()` to begin with.
-const RUNNER_SHELLS_WITHOUT_EMITTED_IDS: usize = 3;
+const RUNNER_SHELLS_WITHOUT_EMITTED_IDS: usize = 0;
 
 #[test]
 fn runner_shells_declare_their_emitted_ids() {
@@ -61,4 +61,40 @@ fn runner_shells_declare_their_emitted_ids() {
         .filter(|(id, _)| ids.contains(*id))
         .count();
     assert_eq!(undeclared, RUNNER_SHELLS_WITHOUT_EMITTED_IDS);
+}
+
+/// Manifest rows no `Check`/`AsyncCheck` object in the desktop registries
+/// can produce, grouped by why:
+/// - Browser Run measurements (Core Web Vitals, evaluated live in the
+///   analyzer webview through `crates/engine/src/evaluation`, never through
+///   a static check registry) and the browser-only polish signal.
+/// - `seo.headings.h1`/`.hierarchy`: `HeadingsCheck` is deliberately never
+///   registered in `seo::sync_checks()` (`src/checks/seo/mod.rs` tests
+///   pin this) in favor of `accessibility.headings`.
+///
+/// Shrinks only if one of these gains a registry-visible emitter; never
+/// grows without a reviewed reason.
+const UNREACHABLE_MANIFEST_ROWS: &[&str] = &[
+    "performance.cls",
+    "performance.fcp",
+    "performance.lcp",
+    "performance.long_task_blocking",
+    "polish.js-errors",
+    "seo.headings.h1",
+    "seo.headings.hierarchy",
+];
+
+#[test]
+fn every_non_family_manifest_row_is_emitted_or_allowlisted() {
+    let ids: HashSet<String> = web_check_ids().into_iter().collect();
+    let missing: Vec<&str> = sitecmd_engine::manifest::registry::entries()
+        .filter(|entry| !entry.family)
+        .map(|entry| entry.check)
+        .filter(|check| !ids.contains(*check))
+        .filter(|check| !UNREACHABLE_MANIFEST_ROWS.contains(check))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "manifest rows missing from web_check_ids() and not allowlisted: {missing:?}"
+    );
 }

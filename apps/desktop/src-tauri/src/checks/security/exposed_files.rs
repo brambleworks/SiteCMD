@@ -18,6 +18,16 @@ impl AsyncCheck for ExposedFilesCheck {
         "security.exposed_files"
     }
 
+    /// Never emits its own id. `security.exposed_files.<path>` sub-ids are
+    /// dynamic (one per `SENSITIVE_PATHS` entry) and covered by the
+    /// manifest's family row instead of enumeration here.
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![
+            "security.exposed_files.source_secrets".to_string(),
+            "security.exposed_files.summary".to_string(),
+        ]
+    }
+
     fn category(&self) -> ScanCategory {
         ScanCategory::Security
     }

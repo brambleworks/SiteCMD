@@ -147,6 +147,12 @@ impl Check for ExposedApiKeysCheck {
     fn id(&self) -> &str {
         "security.vibe.exposed_keys"
     }
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![
+            "security.vibe.exposed_keys".to_string(),
+            "security.vibe.exposed_keys.public".to_string(),
+        ]
+    }
     fn category(&self) -> ScanCategory {
         ScanCategory::Security
     }

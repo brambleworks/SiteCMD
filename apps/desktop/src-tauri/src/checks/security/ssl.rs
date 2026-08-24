@@ -6,7 +6,7 @@
 use crate::checks::{AsyncCheck, CheckContext, CheckResult, ScanCategory};
 use sitecmd_engine::checks::security::tls::{
     evaluate_tls, parse_leaf_certificate, tls_unavailable_results, TlsFacts, TlsUnavailable,
-    TlsValidation, TrustAuthority,
+    TlsValidation, TrustAuthority, TLS_CHECK_IDS,
 };
 use std::io::Write;
 use std::net::TcpStream;
@@ -22,6 +22,11 @@ impl AsyncCheck for SslCheck {
     }
     fn id(&self) -> &str {
         "security.ssl"
+    }
+
+    /// Never emits its own id; every result carries one of TLS_CHECK_IDS.
+    fn emitted_ids(&self) -> Vec<String> {
+        TLS_CHECK_IDS.iter().map(|id| id.to_string()).collect()
     }
 
     fn category(&self) -> ScanCategory {

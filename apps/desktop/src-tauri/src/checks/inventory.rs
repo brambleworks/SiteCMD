@@ -24,6 +24,14 @@ pub fn web_check_ids() -> Vec<String> {
     for check in asynchronous {
         ids.extend(check.emitted_ids());
     }
+    // Session-level cross-page checks (src/core/session_analysis.rs) run
+    // over a whole scanned site, not a single PageContext/CheckContext, so
+    // they have no Check/AsyncCheck object for this union to iterate.
+    ids.extend(
+        crate::core::session_analysis::SESSION_CHECK_IDS
+            .iter()
+            .map(|id| id.to_string()),
+    );
     ids.sort();
     ids.dedup();
     ids

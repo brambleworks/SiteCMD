@@ -636,6 +636,13 @@ impl Check for DuplicateMetaCheck {
     fn id(&self) -> &str {
         "seo.duplicate_meta"
     }
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![
+            "seo.duplicate_meta".to_string(),
+            "seo.duplicate_title".to_string(),
+            "seo.duplicate_description".to_string(),
+        ]
+    }
     fn category(&self) -> ScanCategory {
         ScanCategory::Seo
     }
