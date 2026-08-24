@@ -70,7 +70,7 @@ pub async fn get_agent_tool_manual_config(
     app: tauri::AppHandle,
     tool: AgentTool,
 ) -> Result<McpManualConfig, CommandError> {
-    run_blocking(move || agent_tools::manual_config(&app, tool)).await?
+    Ok(run_blocking(move || agent_tools::manual_config(&app, tool)).await??)
 }
 
 /// Open the handoff URL and surface missing protocol handlers to the caller.
