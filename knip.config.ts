@@ -34,8 +34,10 @@ const config: KnipConfig = {
       project: ["tools/scripts/**/*.{mjs,ts}"],
     },
     "apps/desktop": {
+      // Playwright specs are entry points; fixtures are reached from them.
+      entry: ["e2e/**/*.spec.ts"],
       // Generated IPC bindings intentionally export more than the frontend imports.
-      project: ["src/**/*.{ts,tsx}", "!src/generated/**"],
+      project: ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "!src/generated/**"],
       // Treat tests as entry points.
       vitest: {
         config: "vitest.config.ts",
