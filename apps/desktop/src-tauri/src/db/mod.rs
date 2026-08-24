@@ -102,7 +102,6 @@ pub struct Database {
 
 impl Database {
     /// Run a shared-connection operation within [`DB_OP_TIMEOUT`].
-    #[tracing::instrument(skip(self, f))]
     pub(crate) fn execute<T: Send + 'static>(
         &self,
         f: impl FnOnce(&Connection) -> T + Send + 'static,
@@ -129,7 +128,6 @@ impl Database {
 
     /// Send a mutable operation (e.g. a transaction) to the DB thread and block
     /// until it returns, up to [`DB_OP_TIMEOUT`].
-    #[tracing::instrument(skip(self, f))]
     pub(crate) fn execute_mut<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> T + Send + 'static,

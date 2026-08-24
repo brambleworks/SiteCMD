@@ -1717,3 +1717,24 @@ fn one_crypto_provider_and_one_root_store_remain() {
         );
     }
 }
+
+/// Total `#[tracing::instrument]` attributes in src/. Lower as trivial getters
+/// and hot paths lose theirs; it must never rise without a reviewed reason.
+const TRACING_INSTRUMENT_BUDGET: usize = 608;
+
+#[test]
+fn tracing_instrument_count_only_decreases() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    let total: usize = files
+        .iter()
+        .map(|file| {
+            tracing_instrument_attributes(&std::fs::read_to_string(file).expect("read")).len()
+        })
+        .sum();
+    assert_eq!(
+        total, TRACING_INSTRUMENT_BUDGET,
+        "tracing::instrument count changed; set TRACING_INSTRUMENT_BUDGET to {total} only if it went down"
+    );
+}

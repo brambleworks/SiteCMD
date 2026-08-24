@@ -39,7 +39,6 @@ fn environment_from_host(host: &str) -> &'static str {
 }
 
 /// Detect if a URL is a localhost/pre-deploy URL (broad - includes *.local, *.localhost)
-#[tracing::instrument(skip(url))]
 pub fn is_localhost(url: &url::Url) -> bool {
     match url.host_str() {
         Some(host) => environment_from_host(host) == "local",
@@ -48,7 +47,6 @@ pub fn is_localhost(url: &url::Url) -> bool {
 }
 
 /// True only for exact loopback hosts; `.local` and subdomains may resolve remotely.
-#[tracing::instrument(skip(url))]
 pub fn is_strict_localhost(url: &url::Url) -> bool {
     match url.host_str() {
         Some(host) => {
@@ -60,7 +58,6 @@ pub fn is_strict_localhost(url: &url::Url) -> bool {
 }
 
 /// Infer the best default environment label for a URL from its hostname.
-#[tracing::instrument(skip(url))]
 pub fn infer_environment_name(url: &str) -> &'static str {
     url::Url::parse(url)
         .ok()
@@ -69,7 +66,6 @@ pub fn infer_environment_name(url: &str) -> &'static str {
 }
 
 /// Normalize a user-provided environment label into the canonical set used by SiteCMD.
-#[tracing::instrument(fields(value = %value))]
 pub fn normalize_environment_name(value: &str) -> Option<&'static str> {
     let normalized = value.trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -83,7 +79,6 @@ pub fn normalize_environment_name(value: &str) -> Option<&'static str> {
 }
 
 /// Resolve a canonical environment, giving localhost URLs precedence over labels.
-#[tracing::instrument(skip(url, provided), fields(has_provided = provided.is_some()))]
 pub fn resolve_environment_name(url: &str, provided: Option<&str>) -> &'static str {
     let inferred = infer_environment_name(url);
     match provided.and_then(normalize_environment_name) {

@@ -120,14 +120,12 @@ pub(crate) fn sanitize_error(msg: impl std::fmt::Display) -> String {
 /// Validate a scan URL. Local development loopback URLs are allowed, but
 /// private/link-local targets and DNS names resolving to them are rejected.
 #[cfg(test)]
-#[tracing::instrument(skip(url))]
 pub(crate) fn validate_url(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url_blocking(url, crate::network_policy::UrlPolicy::Scan)
 }
 
 /// Async version of `validate_url`; use this from Tauri commands so DNS
 /// resolution does not occupy Tokio's foreground IPC workers.
-#[tracing::instrument(skip(url))]
 pub(crate) async fn validate_url_async(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::Scan).await
 }
@@ -135,7 +133,6 @@ pub(crate) async fn validate_url_async(url: &str) -> Result<(), String> {
 /// Validate an outbound callback/webhook URL. Unlike scans, external callbacks
 /// cannot target localhost or any private/internal address.
 #[cfg(test)]
-#[tracing::instrument(skip(url))]
 pub(crate) fn validate_external_callback_url(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url_blocking(
         url,
@@ -143,7 +140,6 @@ pub(crate) fn validate_external_callback_url(url: &str) -> Result<(), String> {
     )
 }
 
-#[tracing::instrument(skip(url))]
 pub(crate) async fn validate_external_callback_url_async(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::ExternalCallback)
         .await
