@@ -56,11 +56,31 @@ function extractThresholds(source) {
     }
     // Matches both the JS shape (`export const NAME = N`) and the Rust
     // shape (`pub(crate) const NAME: usize = N;`), whose optional type
-    // annotation sits between the name and the `=`.
-    for (const match of line.matchAll(
-      /(?:export\s+)?(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Z][A-Z0-9_]*(?:_LIMIT|_BUDGET|_CAP|_MAX_[A-Z_]+|_MAXLINES))\s*(?::[^=]*)?=\s*(\d+)/g,
-    )) {
-      thresholds.set(`const:${match[1]}`, Number(match[2]));
+    // annotation sits between the name and the `=`. The threshold-suffix
+    // test lives in plain code because folding it into the name pattern
+    // makes the regex superlinear (safe-regex flags it).
+    for (const match of line.matchAll(/const\s+([A-Z][A-Z0-9_]*)/g)) {
+      const name = match[1];
+      if (!/_(?:LIMIT|BUDGET|CAP|MAXLINES)$/.test(name) && !/_MAX_[A-Z_]+$/.test(name)) {
+        continue;
+      }
+      const rest = line.slice(match.index + match[0].length);
+      const eq = rest.indexOf("=");
+      if (eq === -1) {
+        continue;
+      }
+      const annotation = rest.slice(0, eq).trim();
+      if (annotation !== "" && !annotation.startsWith(":")) {
+        continue;
+      }
+      const value = rest
+        .slice(eq + 1)
+        .trimStart()
+        .match(/^\d+/);
+      if (!value) {
+        continue;
+      }
+      thresholds.set(`const:${name}`, Number(value[0]));
     }
   }
 
