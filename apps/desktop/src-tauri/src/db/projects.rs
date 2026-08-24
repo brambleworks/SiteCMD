@@ -222,6 +222,24 @@ impl Database {
         self.get_project_path_result(project_id).ok().flatten()
     }
 
+    /// Async sibling of `get_project_path` for runtime callers.
+    #[tracing::instrument(skip(self), fields(project_id))]
+    pub async fn get_project_path_async(&self, project_id: i64) -> Option<String> {
+        self.run(move |conn| {
+            conn.query_row(
+                "SELECT path FROM projects WHERE id = ?1",
+                params![project_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map(|path| path.filter(|value| !value.is_empty()))
+        })
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten()
+    }
+
     #[tracing::instrument(skip(self), fields(project_id))]
     pub fn ensure_project_secret_namespace(&self, project_id: i64) -> Result<String, DbError> {
         self.execute(move |conn| {

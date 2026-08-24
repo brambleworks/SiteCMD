@@ -102,7 +102,6 @@ pub struct Database {
 
 impl Database {
     /// Run a shared-connection operation within [`DB_OP_TIMEOUT`].
-    #[tracing::instrument(skip(self, f))]
     pub(crate) fn execute<T: Send + 'static>(
         &self,
         f: impl FnOnce(&Connection) -> T + Send + 'static,
@@ -129,7 +128,6 @@ impl Database {
 
     /// Send a mutable operation (e.g. a transaction) to the DB thread and block
     /// until it returns, up to [`DB_OP_TIMEOUT`].
-    #[tracing::instrument(skip(self, f))]
     pub(crate) fn execute_mut<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> T + Send + 'static,
@@ -167,6 +165,64 @@ impl Database {
                 secs: timeout.as_secs(),
             }),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(DbError::WorkerTerminated),
+        }
+    }
+
+    /// Async-aware shared-connection operation. The calling task yields while
+    /// the worker runs `f`, so a slow query never parks a runtime worker.
+    ///
+    /// The closure is sent to the worker before this future first awaits,
+    /// so it runs exactly once even if the caller's future is dropped; only
+    /// the reply is lost on cancellation.
+    pub(crate) async fn run<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&Connection) -> T + Send + 'static,
+    ) -> Result<T, DbError> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<T>();
+        let op: DbOp = Box::new(move |conn| {
+            let _ = tx.send(f(&*conn));
+        });
+        self.dispatch_async(op, rx).await
+    }
+
+    /// Async-aware mutable operation (transactions). No domain method calls
+    /// this yet (only `run` has a caller so far, in `get_project_path_async`);
+    /// it exists now so `run`/`run_mut` land as one pair and a later migration
+    /// commit only has to call it, not build it. Covered directly by
+    /// `run_mut_delivers_the_worker_s_value` in `db::tests`.
+    ///
+    /// The closure is sent to the worker before this future first awaits,
+    /// so it runs exactly once even if the caller's future is dropped; only
+    /// the reply is lost on cancellation.
+    #[allow(dead_code)] // first write-path caller lands in a later migration commit
+    pub(crate) async fn run_mut<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Connection) -> T + Send + 'static,
+    ) -> Result<T, DbError> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<T>();
+        let op: DbOp = Box::new(move |conn| {
+            let _ = tx.send(f(conn));
+        });
+        self.dispatch_async(op, rx).await
+    }
+
+    async fn dispatch_async<T: Send + 'static>(
+        &self,
+        op: DbOp,
+        rx: tokio::sync::oneshot::Receiver<T>,
+    ) -> Result<T, DbError> {
+        #[cfg(test)]
+        self.operation_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.sender
+            .send(op)
+            .map_err(|_| DbError::WorkerUnavailable)?;
+        match tokio::time::timeout(DB_OP_TIMEOUT, rx).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(_)) => Err(DbError::WorkerTerminated),
+            Err(_) => Err(DbError::Timeout {
+                secs: DB_OP_TIMEOUT.as_secs(),
+            }),
         }
     }
 

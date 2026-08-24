@@ -591,12 +591,12 @@ describe.concurrent(
         (fixtureRoot) => {
           const source = readFixtureFile(fixtureRoot, sslPath);
           const mutated = source.replace(
-            "crate::ssl_probe::webpki_roots_client_config()",
-            "tokio_rustls::rustls::ClientConfig::builder()\n        .with_root_certificates(tokio_rustls::rustls::RootCertStore::empty())\n        .with_no_client_auth()",
+            "crate::ssl_probe::platform_verified_client_config,",
+            "|| tokio_rustls::rustls::ClientConfig::builder()\n        .with_root_certificates(tokio_rustls::rustls::RootCertStore::empty())\n        .with_no_client_auth(),",
           );
           if (mutated === source) {
             throw new Error(
-              "fixture mutation was a no-op: ssl.rs no longer routes through webpki_roots_client_config()",
+              "fixture mutation was a no-op: ssl.rs no longer references platform_verified_client_config",
             );
           }
           writeFixtureFile(fixtureRoot, sslPath, mutated);

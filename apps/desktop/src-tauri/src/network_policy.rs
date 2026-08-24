@@ -1,6 +1,6 @@
 //! Shared SSRF validation for scans, sitemaps, webhooks, and redirects.
 
-use std::net::{IpAddr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 
 #[derive(Debug, Clone, Copy)]
 pub enum UrlPolicy {
@@ -27,6 +27,66 @@ impl UrlPolicy {
             Self::ExternalCallback => "External callback URL",
             Self::Redirect { .. } => "Redirect target",
         }
+    }
+}
+
+/// How local a scan target is, computed once per scan and threaded through
+/// the pipeline instead of re-derived from the URL at every consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalOrigin {
+    /// `localhost`, `127.0.0.0/8`, `[::1]`: certificate checks are skipped
+    /// and the loopback redirect exception applies.
+    Loopback,
+    /// A `.localhost` subdomain: loopback by RFC 6761 but resolved by the OS,
+    /// so the redirect exception applies while certificate checks stay on.
+    LocalhostDomain,
+    /// `*.local` or `0.0.0.0`: a local environment label, no policy exception.
+    LocalNetworkName,
+    Public,
+}
+
+impl LocalOrigin {
+    /// Two deliberate widenings relative to the predicates this replaces:
+    /// every `127.0.0.0/8` literal classifies as `Loopback` (the old
+    /// `is_strict_localhost` accepted only `127.0.0.1`), and a trailing-dot
+    /// FQDN form (`localhost.`) normalizes the same way
+    /// `is_local_dev_domain` already normalizes it elsewhere in this file,
+    /// so it also classifies as `Loopback` even though `core::localhost`'s
+    /// predicates compare `host_str()` without trimming the trailing dot.
+    pub fn classify(url: &url::Url) -> Self {
+        match url.host() {
+            Some(url::Host::Ipv4(ip)) if ip.is_loopback() => Self::Loopback,
+            Some(url::Host::Ipv6(ip)) if ip.is_loopback() => Self::Loopback,
+            Some(url::Host::Ipv4(ip)) if ip.is_unspecified() => Self::LocalNetworkName,
+            Some(url::Host::Domain(domain)) => {
+                let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+                if domain == "localhost" {
+                    Self::Loopback
+                } else if domain.ends_with(".localhost") {
+                    Self::LocalhostDomain
+                } else if domain.ends_with(".local") {
+                    Self::LocalNetworkName
+                } else {
+                    Self::Public
+                }
+            }
+            _ => Self::Public,
+        }
+    }
+
+    /// Replaces `core::localhost::is_strict_localhost`.
+    pub fn is_strict_loopback(self) -> bool {
+        matches!(self, Self::Loopback)
+    }
+
+    /// Replaces `network_policy::scan_origin_allows_local_dev`.
+    pub fn allows_local_dev(self) -> bool {
+        matches!(self, Self::Loopback | Self::LocalhostDomain)
+    }
+
+    /// Replaces `core::localhost::is_localhost`.
+    pub fn is_local_environment(self) -> bool {
+        !matches!(self, Self::Public)
     }
 }
 
@@ -258,7 +318,7 @@ fn is_loopback_ip(ip: IpAddr) -> bool {
 fn is_private_or_internal_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
-            let [a, b, _, _] = ip.octets();
+            let [a, b, c, _] = ip.octets();
             ip.is_private()
                 || ip.is_loopback()
                 || ip.is_link_local()
@@ -270,18 +330,58 @@ fn is_private_or_internal_ip(ip: IpAddr) -> bool {
                 // 100.64.0.0/10 carrier-grade NAT (RFC 6598) - a common gateway
                 // range that is internal, not publicly routable.
                 || (a == 100 && (64..=127).contains(&b))
+                // 224.0.0.0/4 multicast and 240.0.0.0/4 reserved: never a host.
+                || ip.is_multicast()
+                || (a & 0xf0) == 240
+                // 198.18.0.0/15 benchmarking (RFC 2544) and 192.0.0.0/24 IETF
+                // protocol assignments (RFC 6890).
+                || (a == 198 && (b == 18 || b == 19))
+                || (a == 192 && b == 0 && c == 0)
         }
         IpAddr::V6(ip) => {
             ip.is_loopback()
                 || ip.is_unspecified()
+                || ip.is_multicast()
                 || is_unique_local_ipv6(ip)
                 || is_unicast_link_local_ipv6(ip)
-                || ip
-                    .to_ipv4_mapped()
-                    .map(|mapped| is_private_or_internal_ip(IpAddr::V4(mapped)))
-                    .unwrap_or(false)
+                || is_site_local_ipv6(ip)
+                || is_local_use_nat64(ip)
+                || embedded_ipv4_addresses(ip)
+                    .into_iter()
+                    .flatten()
+                    .any(|embedded| is_private_or_internal_ip(IpAddr::V4(embedded)))
         }
     }
+}
+
+/// IPv4 addresses carried inside transition-mechanism IPv6 prefixes. Each is
+/// checked against the IPv4 policy so an IPv6 literal cannot smuggle a
+/// private IPv4 target past the v4 range checks: RFC 4291 mapped and
+/// compatible forms, RFC 6052 NAT64, RFC 3056 6to4, and RFC 4380 Teredo
+/// (server address, plus the client address stored inverted).
+fn embedded_ipv4_addresses(ip: Ipv6Addr) -> [Option<Ipv4Addr>; 5] {
+    let s = ip.segments();
+    let pair = |high: u16, low: u16| Ipv4Addr::from(((high as u32) << 16) | low as u32);
+    let nat64 =
+        (s[0] == 0x0064 && s[1] == 0xff9b && s[2..6] == [0, 0, 0, 0]).then(|| pair(s[6], s[7]));
+    let six_to_four = (s[0] == 0x2002).then(|| pair(s[1], s[2]));
+    let teredo = s[0] == 0x2001 && s[1] == 0;
+    let teredo_server = teredo.then(|| pair(s[2], s[3]));
+    let teredo_client = teredo.then(|| Ipv4Addr::from(!(((s[6] as u32) << 16) | s[7] as u32)));
+    [
+        ip.to_ipv4(),
+        nat64,
+        six_to_four,
+        teredo_server,
+        teredo_client,
+    ]
+}
+
+/// 64:ff9b:1::/48 is the local-use NAT64 prefix (RFC 8215): the embedded
+/// address is site-specific, so the whole block is internal.
+fn is_local_use_nat64(ip: Ipv6Addr) -> bool {
+    let s = ip.segments();
+    s[0] == 0x0064 && s[1] == 0xff9b && s[2] == 0x0001
 }
 
 fn is_unique_local_ipv6(ip: Ipv6Addr) -> bool {
@@ -292,13 +392,73 @@ fn is_unicast_link_local_ipv6(ip: Ipv6Addr) -> bool {
     (ip.segments()[0] & 0xffc0) == 0xfe80
 }
 
+/// fec0::/10 site-local unicast (RFC 3879 deprecated it, stacks still route
+/// it). It sits just outside the fe80::/10 link-local mask, so it needs its
+/// own check rather than a wider mask that would also swallow fe00::/9.
+fn is_site_local_ipv6(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfec0
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         scan_origin_allows_local_dev, validate_ip_target, validate_redirect_target_nonblocking,
-        validate_resolved_domain_ip_target, validate_url_blocking, UrlPolicy,
+        validate_resolved_domain_ip_target, validate_url_blocking, LocalOrigin, UrlPolicy,
     };
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn local_origin_matches_the_predicates_it_replaces() {
+        use crate::core::localhost::{is_localhost, is_strict_localhost};
+        for url in [
+            "http://localhost:3000",
+            "http://127.0.0.1:8080",
+            "http://0.0.0.0:5173",
+            "http://myapp.local",
+            "http://myapp.localhost:3000",
+            "http://[::1]:5173",
+            "https://localhost.run",
+            "https://example.com",
+            "https://127.0.0.1.example.com",
+        ] {
+            let parsed = url::Url::parse(url).expect(url);
+            let origin = LocalOrigin::classify(&parsed);
+            assert_eq!(
+                origin.is_local_environment(),
+                is_localhost(&parsed),
+                "{url}"
+            );
+            assert_eq!(
+                origin.is_strict_loopback(),
+                is_strict_localhost(&parsed),
+                "{url}"
+            );
+            assert_eq!(
+                origin.allows_local_dev(),
+                scan_origin_allows_local_dev(&parsed),
+                "{url}"
+            );
+        }
+        // The one deliberate widening: every 127/8 literal is loopback.
+        let wide = url::Url::parse("http://127.0.0.2:5173").unwrap();
+        assert!(LocalOrigin::classify(&wide).is_strict_loopback());
+        assert!(!is_strict_localhost(&wide));
+
+        // A second deliberate widening: a trailing-dot FQDN form of
+        // localhost normalizes the same way `is_local_dev_domain` (and
+        // therefore `scan_origin_allows_local_dev`) already normalizes it
+        // elsewhere in this file, so `LocalOrigin` treats "localhost." as
+        // loopback even though the two `core::localhost` predicates compare
+        // `host_str()` without trimming the trailing dot.
+        let trailing_dot = url::Url::parse("http://localhost./").unwrap();
+        let trailing_dot_origin = LocalOrigin::classify(&trailing_dot);
+        assert!(trailing_dot_origin.is_strict_loopback());
+        assert!(!is_strict_localhost(&trailing_dot));
+        assert!(trailing_dot_origin.is_local_environment());
+        assert!(!is_localhost(&trailing_dot));
+        assert!(trailing_dot_origin.allows_local_dev());
+        assert!(scan_origin_allows_local_dev(&trailing_dot));
+    }
 
     #[test]
     fn scan_validation_allows_explicit_local_dev_loopback() {
@@ -409,6 +569,32 @@ mod tests {
         );
     }
 
+    // fec0::/10 sits outside the fe80::/10 link-local mask, so it needed its
+    // own branch; fe00::/9 and the public 2000::/3 space must stay allowed.
+    #[test]
+    fn ip_target_rejects_ipv6_site_local_addresses() {
+        for site_local in ["fec0::1", "feff:ffff::1", "fed0::8888"] {
+            assert!(
+                validate_ip_target(
+                    IpAddr::V6(site_local.parse::<Ipv6Addr>().unwrap()),
+                    UrlPolicy::ExternalCallback
+                )
+                .is_err(),
+                "{site_local} is site-local and must be refused"
+            );
+        }
+        for public in ["2606:4700::1111", "2001:4860:4860::8888"] {
+            assert!(
+                validate_ip_target(
+                    IpAddr::V6(public.parse::<Ipv6Addr>().unwrap()),
+                    UrlPolicy::ExternalCallback
+                )
+                .is_ok(),
+                "{public} is public and must stay allowed"
+            );
+        }
+    }
+
     #[test]
     fn ip_target_rejects_ipv4_mapped_ipv6_private_addresses() {
         let mapped: Ipv6Addr = "::ffff:10.0.0.1".parse().unwrap();
@@ -416,6 +602,57 @@ mod tests {
             validate_ip_target(IpAddr::V6(mapped), UrlPolicy::ExternalCallback).is_err(),
             "v4-mapped private address must be refused so an IPv6 query path cannot bypass the v4 private-range check"
         );
+    }
+
+    #[test]
+    fn reserved_and_embedded_private_ranges_are_refused_with_public_neighbors_allowed() {
+        let policy = UrlPolicy::ExternalCallback;
+        let cases: &[(&str, bool)] = &[
+            // 224.0.0.0/4 multicast and 240.0.0.0/4 reserved.
+            ("224.0.0.1", false),
+            ("239.255.255.255", false),
+            ("223.255.255.255", true),
+            ("240.0.0.1", false),
+            ("255.255.255.254", false),
+            // 198.18.0.0/15 benchmarking (RFC 2544).
+            ("198.18.0.1", false),
+            ("198.19.255.255", false),
+            ("198.17.255.255", true),
+            ("198.20.0.1", true),
+            // 192.0.0.0/24 IETF protocol assignments (RFC 6890).
+            ("192.0.0.1", false),
+            ("192.0.0.255", false),
+            ("192.0.1.1", true),
+            // NAT64 64:ff9b::/96 carries an IPv4 address in the low 32 bits;
+            // 64:ff9b:1::/48 is local-use NAT64 and always internal.
+            ("64:ff9b::10.0.0.1", false),
+            ("64:ff9b::a9fe:a9fe", false),
+            ("64:ff9b::8.8.8.8", true),
+            ("64:ff9b:1::1", false),
+            // 6to4 2002::/16 carries the IPv4 address in bits 16-47.
+            ("2002:0a00:0001::1", false),
+            ("2002:c0a8:0101::1", false),
+            ("2002:0808:0808::1", true),
+            // Teredo 2001:0000::/32: server address in bits 32-63, client
+            // address inverted in the low 32 bits.
+            ("2001:0:0a00:1:0:0:f7f7:f7f7", false),
+            ("2001:0:0808:0808:0:0:f5ff:fffe", false),
+            ("2001:0:0808:0808:0:0:f7f7:f7f7", true),
+            // IPv6 multicast and the deprecated IPv4-compatible form.
+            ("ff02::1", false),
+            ("::10.0.0.1", false),
+            ("2606:4700::1111", true),
+            ("1.1.1.1", true),
+        ];
+        for (address, allowed) in cases {
+            let ip: IpAddr = address.parse().expect(address);
+            assert_eq!(
+                validate_ip_target(ip, policy).is_ok(),
+                *allowed,
+                "{address} should be {}",
+                if *allowed { "allowed" } else { "refused" }
+            );
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use super::integrations::{
-    redact_integration_secrets, store_integration_secrets_with_durable_store,
-    strip_tokens_from_extra,
+    hydrate_integration_secrets_with, redact_integration_secrets,
+    store_integration_secrets_with_durable_store, strip_tokens_from_extra,
 };
 use super::migrate_restored_credentials;
 use super::migration::{
@@ -13,6 +13,11 @@ use super::names::{
 use super::store::{delete_secret, get_secret, set_secret, SECRET_TEST_GUARD};
 use crate::integrations::{IntegrationConfig, IntegrationType};
 use tauri::test::mock_app;
+
+/// Refusal audit sink that drops entries: these tests assert on the config,
+/// and no test may append to the real security log under the app-data
+/// directory.
+fn discarded_audit(_op: &str, _detail: serde_json::Value, _result: &str) {}
 
 #[cfg(debug_assertions)]
 fn clear_debug_secret_store() {
@@ -571,4 +576,76 @@ fn migrate_restored_credentials_does_not_consult_legacy_id_keyring_entries() {
     );
     delete_secret(app.handle(), &legacy_key_name(project_id, "github"))
         .expect("cleanup legacy api key");
+}
+
+#[test]
+fn hydrate_refuses_unmigrated_plaintext_credentials() {
+    let _guard = SECRET_TEST_GUARD.lock().expect("secret test guard");
+    #[cfg(debug_assertions)]
+    clear_debug_secret_store();
+
+    let app = mock_app();
+    let db = temp_db();
+    let project_id = db
+        .upsert_project("Unmigrated", "/tmp/unmigrated", Some("astro"))
+        .expect("project");
+    let mut config = IntegrationConfig {
+        integration_type: IntegrationType::Plausible,
+        api_key: Some("still-plaintext".to_string()),
+        site_id: Some("sitecmd.com".to_string()),
+        extra: Some(serde_json::json!({
+            "tokens": { "access_token": "still-plaintext" },
+            "label": "dev"
+        })),
+        enabled: true,
+    };
+
+    hydrate_integration_secrets_with(app.handle(), &db, project_id, &mut config, &discarded_audit);
+
+    assert_eq!(
+        config.api_key.as_deref(),
+        Some(KEYRING_PLACEHOLDER),
+        "a plaintext SQLite key must never be used once the durable store is the boundary; the placeholder makes the integration report reconnect"
+    );
+    assert!(config
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("tokens"))
+        .is_none());
+    assert_eq!(
+        config
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("label"))
+            .and_then(|value| value.as_str()),
+        Some("dev")
+    );
+}
+
+#[test]
+fn scheduler_configs_drop_unmigrated_plaintext_before_resolution() {
+    let plaintext = IntegrationConfig {
+        integration_type: IntegrationType::GitHub,
+        api_key: Some("ghp_plaintext".to_string()),
+        site_id: Some("owner/repo".to_string()),
+        extra: None,
+        enabled: true,
+    };
+    let placeholder = IntegrationConfig {
+        integration_type: IntegrationType::GitHub,
+        api_key: Some(KEYRING_PLACEHOLDER.to_string()),
+        site_id: Some("owner/repo".to_string()),
+        extra: None,
+        enabled: true,
+    };
+    let cleaned = super::without_unmigrated_plaintext_secrets_with(
+        vec![plaintext, placeholder],
+        &discarded_audit,
+    );
+    assert_eq!(
+        cleaned[0].api_key.as_deref(),
+        Some(KEYRING_PLACEHOLDER),
+        "the plaintext value is replaced by the placeholder, never carried through"
+    );
+    assert_eq!(cleaned[1].api_key.as_deref(), Some(KEYRING_PLACEHOLDER));
 }

@@ -151,40 +151,31 @@ pub(crate) fn github_context_from_configs(
         }
     }
 
-    // Prefer PAT; fall back to OAuth token from extra.tokens or keyring.
+    // Prefer the PAT; otherwise take the OAuth token from the keychain. An
+    // inline `extra.tokens` is never consulted: the keychain is the boundary,
+    // and `without_unmigrated_plaintext_secrets` has already removed any
+    // plaintext copy a failed migration left in SQLite.
     let pat = cfg
         .api_key
         .filter(|k| !k.is_empty() && k != crate::keyring::KEYRING_PLACEHOLDER);
     let token = match pat {
         Some(token) => Some(token),
-        None => {
-            let from_extra = cfg
-                .extra
-                .as_ref()
-                .and_then(|e| e.pointer("/tokens/access_token"))
-                .and_then(|v| v.as_str())
-                .filter(|t| !t.is_empty())
-                .map(|t| t.to_string());
-            match from_extra {
-                Some(token) => Some(token),
-                None => match get_tokens() {
-                    Ok(tokens_json) => tokens_json.and_then(|tokens_json| {
-                        serde_json::from_str::<serde_json::Value>(&tokens_json)
-                            .ok()
-                            .and_then(|v| {
-                                v.pointer("/access_token")
-                                    .and_then(|t| t.as_str())
-                                    .filter(|t| !t.is_empty())
-                                    .map(|t| t.to_string())
-                            })
-                    }),
-                    Err(e) => {
-                        tracing::warn!("resolve_github_context: keyring tokens read failed: {}", e);
-                        return GithubContextResolution::Unobservable;
-                    }
-                },
+        None => match get_tokens() {
+            Ok(tokens_json) => tokens_json.and_then(|tokens_json| {
+                serde_json::from_str::<serde_json::Value>(&tokens_json)
+                    .ok()
+                    .and_then(|v| {
+                        v.pointer("/access_token")
+                            .and_then(|t| t.as_str())
+                            .filter(|t| !t.is_empty())
+                            .map(|t| t.to_string())
+                    })
+            }),
+            Err(e) => {
+                tracing::warn!("resolve_github_context: keyring tokens read failed: {}", e);
+                return GithubContextResolution::Unobservable;
             }
-        }
+        },
     };
 
     match token {
@@ -193,6 +184,67 @@ pub(crate) fn github_context_from_configs(
         // at-rest state (not a transient failure), so it keeps the
         // pre-existing skip-and-resolve behavior.
         None => GithubContextResolution::NotConfigured,
+    }
+}
+
+/// Resolve credentials for a matched integration config with injected keyring
+/// readers, mirroring how `github_context_from_configs` separates from
+/// `resolve_github_context` so the wiring is testable without a live
+/// `AppHandle` (whose default `Wry` runtime cannot be constructed in tests).
+///
+/// Applies `without_unmigrated_plaintext_secrets` before any `api_key` or
+/// OAuth token is read below, so a plaintext SQLite credential left by a
+/// failed keyring migration is dropped rather than handed to an adapter's
+/// outbound poll. `audit` is the sink that refusal records to; production
+/// passes `keyring::audit_to_log`.
+pub(crate) fn credentials_from_configs(
+    configs: Vec<crate::integrations::IntegrationConfig>,
+    integration_type: crate::integrations::IntegrationType,
+    github: Option<crate::integrations::adapters::GithubContext>,
+    github_unobservable: bool,
+    get_api_key: impl FnOnce() -> Result<Option<String>, String>,
+    get_tokens: impl FnOnce() -> Result<Option<String>, String>,
+    audit: crate::keyring::RefusalAudit<'_>,
+) -> Credentials {
+    let configs = crate::keyring::without_unmigrated_plaintext_secrets_with(configs, audit);
+
+    let mut cfg = match configs
+        .into_iter()
+        .find(|c| c.enabled && c.integration_type == integration_type)
+    {
+        Some(c) => c,
+        None => return Credentials::empty(),
+    };
+
+    // Hydrate API key from keychain if it holds the placeholder.
+    if cfg.api_key.as_deref() == Some(crate::keyring::KEYRING_PLACEHOLDER) {
+        if let Ok(Some(real)) = get_api_key() {
+            cfg.api_key = Some(real);
+        }
+    }
+
+    // The OAuth access token comes from the keychain only: the refusal above
+    // removed any `extra.tokens` a failed migration left in SQLite.
+    let oauth_token = match get_tokens() {
+        Ok(Some(tokens_json)) => serde_json::from_str::<serde_json::Value>(&tokens_json)
+            .ok()
+            .and_then(|v| {
+                v.pointer("/access_token")
+                    .and_then(|t| t.as_str())
+                    .filter(|t| !t.is_empty())
+                    .map(|t| t.to_string())
+            }),
+        _ => None,
+    };
+
+    Credentials {
+        api_key: cfg
+            .api_key
+            .filter(|k| !k.trim().is_empty() && k != crate::keyring::KEYRING_PLACEHOLDER),
+        oauth_token,
+        site_id: cfg.site_id,
+        github,
+        github_unobservable,
     }
 }
 
@@ -254,62 +306,15 @@ impl IntegrationScheduler {
             Err(_) => return Credentials::empty(),
         };
 
-        let mut cfg = match configs
-            .into_iter()
-            .find(|c| c.enabled && c.integration_type == integration_type)
-        {
-            Some(c) => c,
-            None => return Credentials::empty(),
-        };
-
-        // Hydrate API key from keychain if it holds the placeholder.
-        if cfg.api_key.as_deref() == Some(crate::keyring::KEYRING_PLACEHOLDER) {
-            if let Ok(Some(real)) = crate::keyring::get_api_key(app, db, project_id, type_str) {
-                cfg.api_key = Some(real);
-            }
-        }
-
-        // Extract OAuth access_token from extra.tokens (hydrated via get_tokens if needed).
-        let oauth_token = {
-            // Support legacy inline tokens until keyring hydration completes.
-            let from_extra = cfg
-                .extra
-                .as_ref()
-                .and_then(|e| e.pointer("/tokens/access_token"))
-                .and_then(|v| v.as_str())
-                .filter(|t| !t.is_empty())
-                .map(|t| t.to_string());
-
-            if from_extra.is_some() {
-                from_extra
-            } else {
-                // Try keyring tokens store.
-                if let Ok(Some(tokens_json)) =
-                    crate::keyring::get_tokens(app, db, project_id, type_str)
-                {
-                    serde_json::from_str::<serde_json::Value>(&tokens_json)
-                        .ok()
-                        .and_then(|v| {
-                            v.pointer("/access_token")
-                                .and_then(|t| t.as_str())
-                                .filter(|t| !t.is_empty())
-                                .map(|t| t.to_string())
-                        })
-                } else {
-                    None
-                }
-            }
-        };
-
-        Credentials {
-            api_key: cfg
-                .api_key
-                .filter(|k| !k.trim().is_empty() && k != crate::keyring::KEYRING_PLACEHOLDER),
-            oauth_token,
-            site_id: cfg.site_id,
+        credentials_from_configs(
+            configs,
+            integration_type,
             github,
             github_unobservable,
-        }
+            || crate::keyring::get_api_key(app, db, project_id, type_str),
+            || crate::keyring::get_tokens(app, db, project_id, type_str),
+            &crate::keyring::audit_to_log,
+        )
     }
 
     /// Loads and hydrates the linked GitHub integration for CI detection.
@@ -332,7 +337,7 @@ impl IntegrationScheduler {
             }
         };
         github_context_from_configs(
-            configs,
+            crate::keyring::without_unmigrated_plaintext_secrets(configs),
             || crate::keyring::get_api_key(app, db, project_id, "github"),
             || crate::keyring::get_tokens(app, db, project_id, "github"),
         )

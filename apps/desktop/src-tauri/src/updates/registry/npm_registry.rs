@@ -205,7 +205,12 @@ async fn fetch_package(
         ));
     }
 
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::NPM_PACKUMENT_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await?;
     Ok(Some(PackageFinding {
         update: build_update_from_packument(pkg, &body, chrono::Utc::now()),
         install_scripts: install_script_package_from_packument(name, current, is_dev, &body),
@@ -638,5 +643,25 @@ mod tests {
 
         assert_eq!(scan.updates.len(), 1);
         assert!(!scan.partial);
+    }
+
+    #[tokio::test]
+    async fn oversized_packument_is_refused_and_marks_the_scan_partial() {
+        // One byte over the cap with an honest content-length, so the limited
+        // reader refuses before buffering; the stub's write then fails on a
+        // closed socket, which it ignores.
+        let oversized: &'static str = Box::leak(
+            " ".repeat(crate::constants::NPM_PACKUMENT_MAX_BYTES as usize + 1)
+                .into_boxed_str(),
+        );
+        let base = spawn_registry_stub("HTTP/1.1 200 OK", oversized).await;
+
+        let scan = check_updates_at(&[installed("left-pad", "1.0.0")], &base).await;
+
+        assert!(scan.updates.is_empty());
+        assert!(
+            scan.partial,
+            "a packument over NPM_PACKUMENT_MAX_BYTES must be refused and counted as unobserved"
+        );
     }
 }

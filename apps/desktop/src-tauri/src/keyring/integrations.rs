@@ -80,12 +80,103 @@ pub(super) fn store_integration_secrets_with_durable_store<R: tauri::Runtime>(
     Ok(sanitized)
 }
 
+/// Sink for the refusal audit entry. Production passes `audit_to_log`, which
+/// appends to the real security log; tests pass a collector, so no test run
+/// writes to that log or needs the app-data directory to exist. The detail
+/// carries only the integration type, never the refused value.
+pub type RefusalAudit<'a> = &'a dyn Fn(&str, serde_json::Value, &str);
+
+/// The production refusal sink.
+pub fn audit_to_log(op: &str, detail: serde_json::Value, result: &str) {
+    crate::audit_log::record(op, detail, result);
+}
+
+/// A plaintext credential still in SQLite while the durable store is the
+/// boundary means a migration failed. It is never used: the value is dropped
+/// and the api_key field is left holding the keychain placeholder, so the
+/// integration reports "reconnect" rather than "no API key configured", and a
+/// half-migrated row (keychain written, SQLite not cleaned) still recovers
+/// from the keychain. Tokens have no placeholder form, so they are removed.
+/// Returns whether anything was refused. Takes the audit sink injected;
+/// production passes `audit_to_log`.
+pub fn refuse_unmigrated_plaintext_secrets_with(
+    config: &mut IntegrationConfig,
+    audit: RefusalAudit<'_>,
+) -> bool {
+    // Vestigial while durable_secret_store_enabled() always returns true, but
+    // kept as the single switch if the durable store ever becomes conditional
+    // again.
+    if !durable_secret_store_enabled() {
+        return false;
+    }
+    let mut refused = false;
+    if config
+        .api_key
+        .as_deref()
+        .is_some_and(|key| !key.is_empty() && key != KEYRING_PLACEHOLDER)
+    {
+        config.api_key = Some(KEYRING_PLACEHOLDER.to_string());
+        refused = true;
+    }
+    if let Some(serde_json::Value::Object(map)) = config.extra.as_mut() {
+        if map.remove("tokens").is_some() {
+            refused = true;
+        }
+    }
+    if refused {
+        let integration_type = integration_type_name(config);
+        tracing::warn!(
+            "Refusing unmigrated plaintext credential for {}; reconnect the integration",
+            integration_type
+        );
+        audit(
+            "credential_refused_unmigrated",
+            serde_json::json!({ "integration": integration_type }),
+            "refused",
+        );
+    }
+    refused
+}
+
+/// `refuse_unmigrated_plaintext_secrets_with` over a loaded config list.
+pub fn without_unmigrated_plaintext_secrets(
+    configs: Vec<IntegrationConfig>,
+) -> Vec<IntegrationConfig> {
+    without_unmigrated_plaintext_secrets_with(configs, &audit_to_log)
+}
+
+/// `without_unmigrated_plaintext_secrets` with the audit sink injected.
+pub fn without_unmigrated_plaintext_secrets_with(
+    configs: Vec<IntegrationConfig>,
+    audit: RefusalAudit<'_>,
+) -> Vec<IntegrationConfig> {
+    configs
+        .into_iter()
+        .map(|mut config| {
+            refuse_unmigrated_plaintext_secrets_with(&mut config, audit);
+            config
+        })
+        .collect()
+}
+
 pub fn hydrate_integration_secrets<R: tauri::Runtime>(
     app: &AppHandle<R>,
     db: &crate::db::Database,
     project_id: i64,
     config: &mut IntegrationConfig,
 ) {
+    hydrate_integration_secrets_with(app, db, project_id, config, &audit_to_log)
+}
+
+/// `hydrate_integration_secrets` with the refusal audit sink injected.
+pub(super) fn hydrate_integration_secrets_with<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    db: &crate::db::Database,
+    project_id: i64,
+    config: &mut IntegrationConfig,
+    audit: RefusalAudit<'_>,
+) {
+    refuse_unmigrated_plaintext_secrets_with(config, audit);
     let integration_type = integration_type_name(config);
 
     if config.api_key.as_deref() == Some(KEYRING_PLACEHOLDER) {

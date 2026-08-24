@@ -186,10 +186,13 @@ pub async fn create_jira_issue(
         return Err(format!("Jira create issue returned {}", status));
     }
 
-    let created: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Jira create issue parse error: {}", e))?;
+    let created: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::JIRA_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Jira create issue parse error: {}", e))?;
     let key = validate_jira_issue_key(extract_issue_key(&created).map_err(String::from)?.as_str())?;
     let external_url = format!("https://{}/browse/{}", instance_url, key);
 
@@ -252,10 +255,13 @@ pub async fn resolve_jira_issue(
         return Err(format!("Jira transitions returned {}", resp.status()));
     }
 
-    let transitions: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Jira transitions parse error: {}", e))?;
+    let transitions: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::JIRA_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Jira transitions parse error: {}", e))?;
 
     let transition_id = find_done_transition_id(&transitions)
         .ok_or("No Done/Resolved/Closed transition found for Jira issue")?;

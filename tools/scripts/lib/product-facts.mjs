@@ -5,6 +5,7 @@ const DEEP_LINKS = "apps/desktop/src-tauri/src/desktop_deep_links.rs";
 const COMMERCIAL_MODEL = "apps/desktop/src/lib/commercial-model.json";
 const POLISH_SIGNALS = "apps/desktop/src/generated/polish_signal_manifest.json";
 const ANALYZER = "apps/desktop/src-tauri/src/webview/analyzer.rs";
+const PRIVATE_NETWORK_RULES = "apps/desktop/src-tauri/src/webview/private_network_rules.rs";
 const AGENT = "apps/desktop/src-tauri/crates/engine/src/agent.rs";
 const PROBE = "apps/desktop/src-tauri/crates/engine/src/probe.rs";
 const EXPOSED_FILES = "apps/desktop/src-tauri/crates/engine/src/checks/security/exposed_files.rs";
@@ -99,8 +100,11 @@ export function webCheckIdPrefixes(read, listFiles, trees = Object.values(WEB_CH
 }
 
 /** Derives the public check total from the owning engine sources. */
-export function deriveCheckCounts(read, listFiles) {
-  const ids = webCheckIdSources(read, listFiles);
+export function deriveCheckCounts(read, _listFiles) {
+  // The registries themselves generate this snapshot (`cargo test
+  // checks::inventory` in apps/desktop/src-tauri), including runner shells'
+  // sub-ids that a regex scrape of `id()`/`check_id` literals cannot see.
+  const web = JSON.parse(read("apps/desktop/src-tauri/check-inventory.json")).web.length;
 
   const polishSource = read("apps/desktop/src-tauri/src/checks/polish/mod.rs");
   const start = polishSource.indexOf("pub fn run_all_signals");
@@ -111,12 +115,12 @@ export function deriveCheckCounts(read, listFiles) {
   const codeScan = [...registry.matchAll(/^\s*d\("[a-z0-9-]+"/gm)].length;
 
   return {
-    web: ids.size,
+    web,
     polish,
     codeScan,
     axe: AXE_WCAG_A_AA_RULES,
     dependencyEcosystems: DEPENDENCY_ENGINE_ECOSYSTEMS,
-    total: ids.size + polish + codeScan + AXE_WCAG_A_AA_RULES + DEPENDENCY_ENGINE_ECOSYSTEMS,
+    total: web + polish + codeScan + AXE_WCAG_A_AA_RULES + DEPENDENCY_ENGINE_ECOSYSTEMS,
   };
 }
 
@@ -125,14 +129,25 @@ function analyzerProtections(read) {
   const source = read(ANALYZER);
   const prose = source.replace(/^\s*\/\/+/gm, " ").replace(/\s+/g, " ");
   return {
-    validatesScanTarget: source.includes("validate_url_target_blocking"),
+    validatesScanTarget: source.includes("network_policy::validate_url("),
     revalidatesNavigations: source.includes("on_navigation"),
     usesRedirectPolicy: source.includes("UrlPolicy::Redirect"),
     isPrivateWindow: source.includes("incognito(true)"),
     deniesNewWindows: source.includes("NewWindowResponse::Deny"),
     refusesDownloads: source.includes("on_download(|_, _| false)"),
     disclaimsSubresourceInterception: prose.includes(SUBRESOURCE_DISCLAIMER),
+    privateNetworkSubresourceRulePlatforms: analyzerRulePlatforms(read(PRIVATE_NETWORK_RULES)),
   };
+}
+
+/** Platforms with a real installer for the analyzer's private-network rules. */
+function analyzerRulePlatforms(rulesSource) {
+  const arms = [
+    ["macos", /#\[cfg\(target_os = "macos"\)\]\s*pub\(crate\) fn install_private_network_rules/],
+    ["windows", /#\[cfg\(windows\)\]\s*pub\(crate\) fn install_private_network_rules/],
+    ["linux", /#\[cfg\(target_os = "linux"\)\]\s*pub\(crate\) fn install_private_network_rules/],
+  ];
+  return arms.filter(([, pattern]) => pattern.test(rulesSource)).map(([platform]) => platform);
 }
 
 /** Evaluates the simple numeric expressions used by Rust constants. */

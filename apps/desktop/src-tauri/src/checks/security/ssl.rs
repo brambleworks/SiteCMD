@@ -6,7 +6,7 @@
 use crate::checks::{AsyncCheck, CheckContext, CheckResult, ScanCategory};
 use sitecmd_engine::checks::security::tls::{
     evaluate_tls, parse_leaf_certificate, tls_unavailable_results, TlsFacts, TlsUnavailable,
-    TlsValidation, TrustAuthority,
+    TlsValidation, TrustAuthority, TLS_CHECK_IDS,
 };
 use std::io::Write;
 use std::net::TcpStream;
@@ -22,6 +22,11 @@ impl AsyncCheck for SslCheck {
     }
     fn id(&self) -> &str {
         "security.ssl"
+    }
+
+    /// Never emits its own id; every result carries one of TLS_CHECK_IDS.
+    fn emitted_ids(&self) -> Vec<String> {
+        TLS_CHECK_IDS.iter().map(|id| id.to_string()).collect()
     }
 
     fn category(&self) -> ScanCategory {
@@ -75,9 +80,9 @@ fn handshake_failure_is_certificate_rejection(message: &str) -> bool {
     lower.contains("certificate") || lower.contains("unknownissuer")
 }
 
-/// Facts for a chain the WebPKI authority rejected: the rejection itself is
-/// the fact, and the certificate fields stay unavailable because the
-/// handshake never produced a peer certificate we can trust to parse.
+/// Facts for a chain the platform's trust program rejected: the rejection
+/// itself is the fact, and the certificate fields stay unavailable because
+/// the handshake never produced a peer certificate we can trust to parse.
 fn rejected_chain_facts(detail: String, observed_at: chrono::DateTime<chrono::Utc>) -> TlsFacts {
     TlsFacts {
         not_before: None,
@@ -86,19 +91,36 @@ fn rejected_chain_facts(detail: String, observed_at: chrono::DateTime<chrono::Ut
         subject_names: Vec::new(),
         protocol: None,
         validation: TlsValidation::invalid(
-            TrustAuthority::Webpki,
+            TrustAuthority::PlatformVerifier,
             crate::log_sanitizer::bounded_issue_evidence(&detail),
         ),
         facts_observed_at: observed_at,
     }
 }
 
-/// Handshake with the bundled WebPKI roots and read the facts off the
-/// negotiated connection.
+/// Handshake with the platform's certificate store and read the facts off
+/// the negotiated connection.
 fn capture_tls_facts(
     addr: &str,
     host: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
+) -> Result<TlsFacts, TlsUnavailable> {
+    capture_tls_facts_with_config(
+        addr,
+        host,
+        observed_at,
+        crate::ssl_probe::platform_verified_client_config,
+    )
+}
+
+/// `capture_tls_facts` with the TLS config build behind a seam, so a test
+/// can prove a `platform_verified_client_config` failure (e.g. no native CA
+/// certificates load) reports a transport outcome instead of panicking.
+fn capture_tls_facts_with_config(
+    addr: &str,
+    host: &str,
+    observed_at: chrono::DateTime<chrono::Utc>,
+    build_config: impl Fn() -> Result<tokio_rustls::rustls::ClientConfig, String>,
 ) -> Result<TlsFacts, TlsUnavailable> {
     let transport = |detail: String| TlsUnavailable::Transport {
         detail: crate::log_sanitizer::bounded_issue_evidence(&detail),
@@ -115,7 +137,8 @@ fn capture_tls_facts(
 
     // Same crypto stack as the async ssl_probe, in sync mode: we only need
     // the handshake's outcome and the peer certificate, not a usable stream.
-    let config = crate::ssl_probe::webpki_roots_client_config();
+    let config =
+        build_config().map_err(|e| transport(format!("TLS configuration error: {}", e)))?;
     let server_name = tokio_rustls::rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|e| transport(format!("Invalid SNI hostname: {}", e)))?;
     let mut conn = tokio_rustls::rustls::ClientConnection::new(Arc::new(config), server_name)
@@ -153,9 +176,10 @@ fn capture_tls_facts(
             .map(|issuer| crate::log_sanitizer::bounded_issue_evidence(&issuer)),
         subject_names: parsed.map(|facts| facts.subject_names).unwrap_or_default(),
         protocol,
-        // The handshake completed against the bundled WebPKI roots, which is
-        // exactly what that authority accepting the chain means.
-        validation: TlsValidation::valid(TrustAuthority::Webpki),
+        // The handshake completed against the operating system's trust
+        // program (rustls-platform-verifier), which is exactly what that
+        // authority accepting the chain means.
+        validation: TlsValidation::valid(TrustAuthority::PlatformVerifier),
         facts_observed_at: observed_at,
     })
 }

@@ -18,14 +18,24 @@ pub const TLS_CHECK_IDS: &[&str] = &[
     PROTOCOL_CHECK_ID,
 ];
 
-/// Which trust program validated (or rejected) the chain. The two are
-/// different programs, which is exactly why the chain sub-verdict compares
-/// within an authority rather than across adapters.
+/// Which trust program validated (or rejected) the chain. The programs
+/// differ from each other, which is exactly why the chain sub-verdict
+/// compares within an authority rather than across adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustAuthority {
-    /// The bundled WebPKI root set (desktop `rustls`, wasm handshake).
+    /// The bundled WebPKI root set. Desktop stopped producing this value
+    /// when it switched to rustls-platform-verifier (see
+    /// `PlatformVerifier`); stored scan history from before that switch may
+    /// still carry `"webpki"` and remains valid to deserialize. A wasm
+    /// handshake, not yet implemented, would still use this authority.
     Webpki,
+    /// The operating system's own trust program, reached through
+    /// rustls-platform-verifier: Keychain on macOS, CryptoAPI on Windows,
+    /// and on other Unix targets (including Linux) native certificates
+    /// loaded through `rustls-native-certs`, not a bundled root set. This is
+    /// what desktop's sync and async TLS probes both produce today.
+    PlatformVerifier,
     /// Chromium's validator, as reported by a Browser Run navigation.
     Chromium,
     /// Cloudflare Workers' public-fetch and `node:tls` trust program.
@@ -36,6 +46,7 @@ impl TrustAuthority {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Webpki => "webpki",
+            Self::PlatformVerifier => "platform_verifier",
             Self::Chromium => "chromium",
             Self::CloudflareWorkers => "cloudflare_workers",
         }
@@ -475,8 +486,8 @@ fn evaluate_hostname(host: &str, facts: &TlsFacts) -> CheckResult {
 }
 
 /// `security.ssl.chain` - deterministic, compared WITHIN a trust authority:
-/// webpki and Chromium are different trust programs, so a disagreement is
-/// not necessarily a site change.
+/// the platform verifier and Chromium are different trust programs, so a
+/// disagreement is not necessarily a site change.
 fn evaluate_chain(facts: &TlsFacts) -> CheckResult {
     let authority = facts.validation.authority;
     match facts.validation.result {

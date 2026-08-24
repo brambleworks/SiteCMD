@@ -179,10 +179,13 @@ async fn query_batch(
         return Err(format!("OSV returned status {}", resp.status()));
     }
 
-    let batch: OsvBatchResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("OSV parse failed: {}", e))?;
+    let batch: OsvBatchResponse = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::OSV_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("OSV parse failed: {}", e))?;
     if batch.results.len() != packages.len() {
         return Err(format!(
             "OSV returned {} results for {} queries",
@@ -234,7 +237,13 @@ async fn fetch_vuln_detail(client: &Client, id: &str, api_base: &str) -> Option<
     if !resp.status().is_success() {
         return None;
     }
-    resp.json::<OsvVuln>().await.ok()
+    crate::http_client::read_json_limited::<OsvVuln>(
+        resp,
+        crate::constants::OSV_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .ok()
 }
 
 /// Build the per-package vulnerability list from a querybatch response, using

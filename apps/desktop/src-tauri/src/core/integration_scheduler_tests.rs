@@ -445,18 +445,20 @@ fn github_context_missing_credential_at_rest_stays_not_configured() {
     assert!(matches!(resolution, GithubContextResolution::NotConfigured));
 }
 
+// The keychain is the only OAuth token source: an inline `extra.tokens` left
+// in SQLite by a failed migration is ignored, never preferred.
 #[test]
-fn github_context_oauth_token_from_extra_never_touches_keyring() {
-    let extra = serde_json::json!({"tokens": {"access_token": "gho_token"}});
+fn github_context_ignores_an_inline_token_and_reads_the_keychain() {
+    let extra = serde_json::json!({"tokens": {"access_token": "gho_plaintext_in_sqlite"}});
     let resolution = github_context_from_configs(
         vec![github_config(None, Some("acme/site"), Some(extra))],
         keyring_untouched,
-        keyring_untouched,
+        || Ok(Some(r#"{"access_token":"gho_from_keychain"}"#.to_string())),
     );
     let GithubContextResolution::Resolved(gh) = resolution else {
         panic!("expected Resolved, got {resolution:?}");
     };
-    assert_eq!(gh.token, "gho_token");
+    assert_eq!(gh.token, "gho_from_keychain");
 }
 
 #[test]
@@ -497,5 +499,137 @@ fn paid_cadence_is_unchanged() {
     assert_eq!(
         tier_adjusted_cadence(base, crate::licensing::config::Tier::Pro),
         base
+    );
+}
+
+// credentials_from_configs: a plaintext SQLite credential left by a failed
+// keyring migration must never reach an adapter's outbound poll. This is the
+// pure core `resolve_credentials` delegates to (mirroring how
+// `github_context_from_configs` separates from `resolve_github_context`), so
+// it is testable without a live `AppHandle`.
+
+/// In-memory refusal audit. `credentials_from_configs` takes the sink as an
+/// argument, so these tests read the entries straight back instead of
+/// grepping the developer's real `audit.log`: no test appends to that
+/// security log, and none of them needs the app-data directory to exist.
+#[derive(Default)]
+struct RecordedAudit {
+    entries: std::cell::RefCell<Vec<(String, serde_json::Value, String)>>,
+}
+
+impl RecordedAudit {
+    fn record(&self, op: &str, detail: serde_json::Value, result: &str) {
+        self.entries
+            .borrow_mut()
+            .push((op.to_string(), detail, result.to_string()));
+    }
+
+    fn refusals_for(&self, integration: &str) -> usize {
+        self.entries
+            .borrow()
+            .iter()
+            .filter(|(op, detail, result)| {
+                op == "credential_refused_unmigrated"
+                    && detail["integration"] == integration
+                    && result == "refused"
+            })
+            .count()
+    }
+
+    /// Every recorded detail, serialized, so a test can prove no refused
+    /// secret rode along into the audit trail.
+    fn serialized_details(&self) -> String {
+        self.entries
+            .borrow()
+            .iter()
+            .map(|(_, detail, _)| detail.to_string())
+            .collect()
+    }
+}
+
+#[test]
+fn credentials_from_configs_refuses_unmigrated_plaintext_api_key() {
+    use crate::integrations::{IntegrationConfig, IntegrationType};
+
+    let config = IntegrationConfig {
+        integration_type: IntegrationType::Plausible,
+        api_key: Some("plausible-live-secret-value".to_string()),
+        site_id: Some("sitecmd.com".to_string()),
+        extra: None,
+        enabled: true,
+    };
+
+    let audit = RecordedAudit::default();
+
+    // Refusal leaves the keychain placeholder, so hydration runs and finds
+    // nothing: the migration never completed, which is why the plaintext
+    // value was still in SQLite.
+    let creds = credentials_from_configs(
+        vec![config],
+        IntegrationType::Plausible,
+        None,
+        false,
+        || Ok(None),
+        || Ok(None),
+        &|op, detail, result| audit.record(op, detail, result),
+    );
+
+    assert_eq!(
+        creds.api_key, None,
+        "a plaintext SQLite api_key must never reach the adapter poll"
+    );
+    assert_eq!(
+        audit.refusals_for("plausible"),
+        1,
+        "expected one credential_refused_unmigrated audit entry for plausible"
+    );
+    assert!(
+        !audit.serialized_details().contains("plausible-live-secret"),
+        "the audit detail must carry only the integration type"
+    );
+}
+
+#[test]
+fn credentials_from_configs_refuses_unmigrated_plaintext_oauth_token() {
+    use crate::integrations::{IntegrationConfig, IntegrationType};
+
+    let config = IntegrationConfig {
+        integration_type: IntegrationType::GoogleSearchConsole,
+        api_key: None,
+        site_id: Some("https://sitecmd.com/".to_string()),
+        extra: Some(serde_json::json!({
+            "tokens": { "access_token": "gsc-live-oauth-secret" }
+        })),
+        enabled: true,
+    };
+
+    let audit = RecordedAudit::default();
+
+    // get_api_key panics if called: there is no api_key on this config, so
+    // the placeholder-hydration path must never run. get_tokens simulates
+    // the keychain having nothing either, matching a migration that never
+    // completed (the reason the plaintext token was still in SQLite).
+    let creds = credentials_from_configs(
+        vec![config],
+        IntegrationType::GoogleSearchConsole,
+        None,
+        false,
+        keyring_untouched,
+        || Ok(None),
+        &|op, detail, result| audit.record(op, detail, result),
+    );
+
+    assert_eq!(
+        creds.oauth_token, None,
+        "a plaintext SQLite OAuth token must never reach the adapter poll"
+    );
+    assert_eq!(
+        audit.refusals_for("googlesearchconsole"),
+        1,
+        "expected one credential_refused_unmigrated audit entry for googlesearchconsole"
+    );
+    assert!(
+        !audit.serialized_details().contains("gsc-live-oauth-secret"),
+        "the audit detail must carry only the integration type"
     );
 }

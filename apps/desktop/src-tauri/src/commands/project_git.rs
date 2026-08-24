@@ -14,10 +14,7 @@ pub async fn get_git_status(
     project_id: i64,
     limit: Option<u32>,
 ) -> Result<git::GitStatus, String> {
-    let project_path = {
-        let db = (*db).clone();
-        run_blocking(move || db.get_project_path(project_id)).await?
-    };
+    let project_path = db.get_project_path_async(project_id).await;
     let Some(project_path) = project_path else {
         return Ok(git::GitStatus {
             is_git_repo: false,
@@ -29,9 +26,9 @@ pub async fn get_git_status(
     };
     let limit = limit.unwrap_or(20).clamp(1, 200);
 
-    tauri::async_runtime::spawn_blocking(move || git::get_git_status(&project_path, limit))
+    git::get_git_status_async(project_path, limit)
         .await
-        .map_err(|e| sanitize_error(format!("Git status task failed: {}", e)))
+        .map_err(sanitize_error)
 }
 
 /// Get git commits since a given date and auto-create deploy events from them.
@@ -42,18 +39,14 @@ pub async fn get_commits_since(
     since: String,
 ) -> Result<Vec<git::GitCommit>, String> {
     let db = (*db).clone();
-    let project_path = {
-        let db = db.clone();
-        run_blocking(move || db.get_project_path(project_id)).await?
-    };
+    let project_path = db.get_project_path_async(project_id).await;
     let Some(project_path) = project_path else {
         return Ok(Vec::new());
     };
 
-    let commits =
-        tauri::async_runtime::spawn_blocking(move || git::get_commits_since(&project_path, &since))
-            .await
-            .map_err(|e| sanitize_error(format!("Git commits task failed: {}", e)))?;
+    let commits = git::get_commits_since_async(project_path, since)
+        .await
+        .map_err(sanitize_error)?;
 
     if !commits.is_empty() {
         let events: Vec<SiteEvent> = commits

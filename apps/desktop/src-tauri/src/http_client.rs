@@ -111,6 +111,10 @@ where
 /// Reuses TCP/TLS connections across requests.
 pub fn client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+        // reqwest builds with rustls-no-provider, so entry points that never
+        // call `run()` (the CLI, examples) still need a crypto provider
+        // installed before a client with a rustls backend can be built.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         Client::builder()
             .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
             .user_agent(crate::constants::USER_AGENT.as_str())
@@ -126,6 +130,7 @@ pub fn client() -> &'static Client {
 /// Skips TLS certificate verification for self-signed local dev servers.
 pub fn localhost_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         Client::builder()
             .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
             .user_agent(crate::constants::USER_AGENT.as_str())
@@ -142,6 +147,7 @@ pub fn localhost_client() -> &'static Client {
 /// Used by redirect chain checks, HTTPS enforcement, and open redirect detection.
 pub fn no_redirect_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         Client::builder()
             .timeout(crate::constants::CHECK_PROBE_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
@@ -156,6 +162,7 @@ pub fn no_redirect_client() -> &'static Client {
 /// Non-redirecting client with strict DNS policy for credentialed requests.
 pub fn credentialed_service_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         Client::builder()
             .timeout(crate::constants::API_TIMEOUT_SHORT)
             .redirect(reqwest::redirect::Policy::none())
@@ -183,6 +190,7 @@ pub fn no_decompress_client(is_strict_local: bool) -> &'static Client {
 }
 
 fn build_no_decompress_client(is_strict_local: bool) -> Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     Client::builder()
         .timeout(crate::constants::API_TIMEOUT_SHORT)
         .user_agent(crate::constants::USER_AGENT.as_str())

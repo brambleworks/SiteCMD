@@ -48,17 +48,10 @@ pub async fn run_data_admin_command(
     token_state: State<'_, PrivilegedCommandTokenState>,
     request: PrivilegedCommandRequest,
 ) -> Result<Value, String> {
-    let command = request.command;
-    if !DATA_ADMIN_COMMANDS.contains(&command.as_str()) {
-        return Err(format!("Unsupported {SCOPE_LABEL} command."));
-    }
-    token_state.consume(
-        request.token.as_deref(),
-        BROKER_COMMAND,
-        &command,
-        &request.args,
-    )?;
-    dispatch(app, db, command, request.args).await
+    super::BrokerScope::by_broker(BROKER_COMMAND)
+        .expect("registered scope") // allow-expect: BROKER_COMMAND is a SCOPES entry, proved by every_scope_admits_only_allowlisted_commands_with_live_tokens
+        .admit(&token_state, &request)?;
+    dispatch(app, db, request.command, request.args).await
 }
 
 async fn dispatch(
@@ -119,7 +112,9 @@ async fn dispatch(
             crate::licensing::commands::deactivate_license(app, db).await?;
             json_response(())
         }
-        _ => Err(format!("Unsupported {SCOPE_LABEL} command.")),
+        // `BrokerScope::admit` already checked `command` against
+        // `DATA_ADMIN_COMMANDS`, so every string reaching here has a match arm.
+        _ => unreachable!("admit validated {command} against the {SCOPE_LABEL} allowlist"),
     }
 }
 
@@ -154,12 +149,6 @@ mod tests {
             error.contains("invalid or expired"),
             "unexpected error message: {error}"
         );
-    }
-
-    #[test]
-    fn unknown_command_returns_scope_labelled_error() {
-        let unsupported = format!("Unsupported {SCOPE_LABEL} command.");
-        assert_eq!(unsupported, "Unsupported data administration command.");
     }
 
     #[test]

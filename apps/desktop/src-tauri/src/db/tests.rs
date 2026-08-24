@@ -48,6 +48,47 @@ mod tests {
         assert_eq!(value, 42);
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_yields_to_the_runtime_while_the_worker_is_busy() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let db = temp_db();
+        let ticked = Arc::new(AtomicBool::new(false));
+        let ticker = tokio::spawn({
+            let ticked = ticked.clone();
+            async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                ticked.store(true, Ordering::SeqCst);
+            }
+        });
+
+        let value = db
+            .run(|_conn| {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                7
+            })
+            .await
+            .expect("worker answers");
+
+        assert_eq!(value, 7);
+        assert!(
+            ticked.load(Ordering::SeqCst),
+            "a 20ms timer must fire during a 200ms database operation on a single-threaded runtime; the sync execute would have blocked it"
+        );
+        ticker.await.expect("ticker task");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_mut_delivers_the_worker_s_value() {
+        let db = temp_db();
+        let value = db
+            .run_mut(|_conn| 9)
+            .await
+            .expect("worker answers on the mutable path");
+        assert_eq!(value, 9);
+    }
+
     #[test]
     fn open_sets_wal_and_normal_synchronous_pragmas() {
         let db = temp_db();

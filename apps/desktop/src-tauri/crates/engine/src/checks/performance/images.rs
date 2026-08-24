@@ -70,6 +70,14 @@ impl Check for ImageOptimizationCheck {
     fn id(&self) -> &str {
         "performance.images"
     }
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![
+            "performance.images".to_string(),
+            "performance.images.dimensions".to_string(),
+            "performance.images.format".to_string(),
+            "performance.images.lazy".to_string(),
+        ]
+    }
     fn category(&self) -> ScanCategory {
         ScanCategory::Performance
     }

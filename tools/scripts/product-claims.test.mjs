@@ -87,12 +87,15 @@ describe("productionHalf", () => {
 });
 
 describe("check-id extraction", () => {
-  it("counts id constants but not the namespace prefix they share", () => {
+  it("reads the web count from the generated inventory snapshot", () => {
     const sources = {
-      "apps/desktop/src-tauri/crates/engine/src/checks/accessibility/axe.rs": [
-        'pub const CHECK_ID_PREFIX: &str = "accessibility.axe.";',
-        'pub const LCP_CHECK_ID: &str = "performance.lcp";',
-      ].join("\n"),
+      // The registries generate this file (`cargo test checks::inventory`);
+      // deriveCheckCounts reads it rather than regex-scraping id constants,
+      // so a runner shell's sub-ids (e.g. security.headers.csp) count once
+      // each instead of once for the shell.
+      "apps/desktop/src-tauri/check-inventory.json": JSON.stringify({
+        web: ["performance.lcp"],
+      }),
       "apps/desktop/src-tauri/src/checks/polish/mod.rs":
         "pub fn run_all_signals(ctx: &Ctx) -> Vec<Signal> {\n    vec![\n        signals::one(ctx),\n    ]\n}",
       "apps/desktop/src-tauri/src/core/code_scan/registry.rs": '    d("example-rule"),',
@@ -102,7 +105,7 @@ describe("check-id extraction", () => {
       Object.keys(sources).filter((file) => file.startsWith(dir) && file.endsWith(".rs"));
 
     const counts = deriveCheckCounts(fakeRead, fakeList);
-    expect(counts.web, "the prefix constant must not count as a check").toBe(1);
+    expect(counts.web, "web count comes from the inventory snapshot's length").toBe(1);
   });
 });
 

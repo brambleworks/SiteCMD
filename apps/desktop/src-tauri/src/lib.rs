@@ -120,7 +120,7 @@ fn initialize_persistent_state(app: &mut tauri::App<tauri::Wry>) -> Result<(), B
             Ok(n) if n > 0 => tracing::info!("Keyring migration complete: {} credentials moved", n),
             Ok(_) => {}
             Err(e) => tracing::error!(
-                "Keyring migration failed (credentials stay in SQLite): {}",
+                "Keyring migration failed; unmigrated plaintext credentials are refused at read time: {}",
                 e
             ),
         }

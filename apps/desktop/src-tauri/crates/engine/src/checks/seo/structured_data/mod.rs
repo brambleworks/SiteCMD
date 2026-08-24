@@ -80,6 +80,13 @@ impl Check for StructuredDataCheck {
     fn id(&self) -> &str {
         "seo.structured_data"
     }
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![
+            "seo.structured_data".to_string(),
+            "seo.structured_data.incomplete".to_string(),
+            "seo.structured_data.invalid".to_string(),
+        ]
+    }
     fn category(&self) -> ScanCategory {
         ScanCategory::Seo
     }

@@ -20,6 +20,7 @@ mod data;
 mod desktop;
 mod desktop_project_commands;
 mod desktop_watch;
+mod error;
 mod events;
 mod fix_attempt_guidance;
 mod fix_attempts;
@@ -28,7 +29,7 @@ mod issue_links;
 pub(crate) mod issue_source_capabilities;
 pub(crate) mod issues;
 mod oauth;
-mod privileged_command_broker;
+pub(crate) mod privileged_command_broker;
 mod project;
 mod project_dashboard;
 mod project_git;
@@ -49,34 +50,92 @@ mod webhooks;
 
 use std::sync::LazyLock;
 
+pub use error::{CommandError, CommandResult};
 pub use tokio::sync::Mutex as TokioMutex;
 
-/// Compiled once, reused on every error path.
-pub(crate) static PATH_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"(?:/[\w.@\- ]+){2,}").unwrap());
+/// Every privileged broker's scope: its broker command, label, allowlist,
+/// and sensitive-command subset. For code that audits or documents the
+/// table itself rather than dispatching through it; currently only the
+/// broker threat model guardrail (`lib_tests.rs`) calls this.
+#[cfg(test)]
+pub(crate) fn privileged_command_broker_scopes() -> &'static [privileged_command_broker::BrokerScope]
+{
+    privileged_command_broker::SCOPES
+}
 
-/// Sanitize error messages before returning to the frontend.
-/// Strips filesystem paths to avoid leaking internal directory structure.
-#[tracing::instrument(skip(msg))]
+/// Unix paths: two or more slash-separated segments. A segment may contain
+/// spaces (`"Application Support"`), so this is deliberately permissive: it
+/// also over-matches into any trailing prose that happens to follow a path
+/// (`"...open /a/b/c then it failed"`). The regex crate has no lookaround,
+/// so a single pattern cannot both allow spaces inside a segment and stop
+/// exactly at the real path; `path_trailing_prose` recovers the prose half
+/// after the match, in a second, non-regex pass.
+pub(crate) static PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    let pattern = r"(?:/[\w.@-]+(?: [\w.@-]+)*){2,}";
+    regex::Regex::new(pattern).expect("static Unix path regex") // allow-expect: compile-time literal regex
+});
+
+/// Windows drive paths (`C:\a\b`) and UNC paths (`\\server\share\a`). The
+/// segment class already allows spaces (`"Program Files"`), which is the
+/// same permissive-match tradeoff `PATH_RE` makes; `path_trailing_prose`
+/// trims the same way.
+static WINDOWS_PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?:[A-Za-z]:|\\\\[^\\\s]+)(?:\\[^\\/:*?"<>|\r\n]+)+"#)
+        .expect("static Windows path regex") // allow-expect: compile-time literal regex
+});
+
+/// Split a permissive path-regex match (`PATH_RE` or `WINDOWS_PATH_RE`) into
+/// its real final segment and whatever prose follows it. The real path ends
+/// at the first space after the last `separator`; a segment with an
+/// embedded space (`"Application Support"`, `"Program Files"`) survives
+/// because it is a middle segment, not the last one on the line that
+/// decides where the match ends here. A space inside the *final* segment is
+/// the one shape this can't tell apart from trailing prose and still leaks:
+/// see the `..._leaks_a_spaced_final_segment` tests.
+fn path_trailing_prose(candidate: &str, separator: char) -> &str {
+    let last_separator = candidate.rfind(separator).unwrap_or(0);
+    let after_separator = &candidate[last_separator..];
+    let cut = last_separator + after_separator.find(' ').unwrap_or(after_separator.len());
+    &candidate[cut..]
+}
+
+/// URLs whose path segments must survive the path stripping.
+static URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    let pattern = r#"(?:https?|wss?)://[^\s'"<>]+"#;
+    regex::Regex::new(pattern).expect("static URL regex") // allow-expect: compile-time literal regex
+});
+
+/// Sanitize error messages before returning to the frontend. Strips Windows
+/// and Unix filesystem paths, keeps URLs intact, then redacts secret formats.
 pub(crate) fn sanitize_error(msg: impl std::fmt::Display) -> String {
-    let stripped = PATH_RE
-        .replace_all(&msg.to_string(), "[internal path]")
-        .into_owned();
-    // Backstop: scrub any secret/token format before the error reaches the UI.
-    crate::log_sanitizer::redact_secrets(&stripped)
+    let raw = msg.to_string();
+    let mut urls = Vec::new();
+    let held = URL_RE.replace_all(&raw, |captures: &regex::Captures| {
+        urls.push(captures[0].to_string());
+        format!("\u{1}URL{}\u{1}", urls.len() - 1)
+    });
+    let stripped = WINDOWS_PATH_RE.replace_all(&held, |captures: &regex::Captures| {
+        format!("[internal path]{}", path_trailing_prose(&captures[0], '\\'))
+    });
+    let stripped = PATH_RE.replace_all(&stripped, |captures: &regex::Captures| {
+        format!("[internal path]{}", path_trailing_prose(&captures[0], '/'))
+    });
+    let mut restored = stripped.into_owned();
+    for (index, url) in urls.iter().enumerate() {
+        restored = restored.replace(&format!("\u{1}URL{index}\u{1}"), url);
+    }
+    crate::log_sanitizer::redact_secrets(&restored)
 }
 
 /// Validate a scan URL. Local development loopback URLs are allowed, but
 /// private/link-local targets and DNS names resolving to them are rejected.
 #[cfg(test)]
-#[tracing::instrument(skip(url))]
 pub(crate) fn validate_url(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url_blocking(url, crate::network_policy::UrlPolicy::Scan)
 }
 
 /// Async version of `validate_url`; use this from Tauri commands so DNS
 /// resolution does not occupy Tokio's foreground IPC workers.
-#[tracing::instrument(skip(url))]
 pub(crate) async fn validate_url_async(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::Scan).await
 }
@@ -84,7 +143,6 @@ pub(crate) async fn validate_url_async(url: &str) -> Result<(), String> {
 /// Validate an outbound callback/webhook URL. Unlike scans, external callbacks
 /// cannot target localhost or any private/internal address.
 #[cfg(test)]
-#[tracing::instrument(skip(url))]
 pub(crate) fn validate_external_callback_url(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url_blocking(
         url,
@@ -92,7 +150,6 @@ pub(crate) fn validate_external_callback_url(url: &str) -> Result<(), String> {
     )
 }
 
-#[tracing::instrument(skip(url))]
 pub(crate) async fn validate_external_callback_url_async(url: &str) -> Result<(), String> {
     crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::ExternalCallback)
         .await

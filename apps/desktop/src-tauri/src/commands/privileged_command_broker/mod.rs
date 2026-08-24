@@ -78,43 +78,94 @@ pub(super) const SENSITIVE_FILESYSTEM_ACCESS_COMMANDS: &[&str] = &[
     "launch_agent_handoff",
 ];
 
-pub(super) fn broker_allowed_commands(broker_command: &str) -> Option<&'static [&'static str]> {
-    match broker_command {
-        "run_data_admin_command" => Some(DATA_ADMIN_COMMANDS),
-        "run_filesystem_export_command" => Some(FILESYSTEM_EXPORT_COMMANDS),
-        "run_external_connector_command" => Some(EXTERNAL_CONNECTOR_COMMANDS),
-        "run_filesystem_access_command" => Some(FILESYSTEM_ACCESS_COMMANDS),
-        "run_project_execution_command" => Some(PROJECT_EXECUTION_COMMANDS),
-        _ => None,
+/// One row per broker: its command name, human label, command allowlist, and
+/// the subset of that allowlist needing native user-intent confirmation
+/// before a token is issued. `admit` is the seam every `run_*` entry calls;
+/// `tauri::test::mock_app()` yields an `App<MockRuntime>` while the `run_*`
+/// entry points are typed on the Wry `AppHandle`, so this seam is what unit
+/// tests can exercise instead of the entry points themselves.
+pub(crate) struct BrokerScope {
+    pub(crate) broker_command: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) allowlist: &'static [&'static str],
+    /// Commands that need a native user-intent confirmation before a token is issued.
+    pub(crate) sensitive: &'static [&'static str],
+}
+
+pub(crate) const SCOPES: &[BrokerScope] = &[
+    BrokerScope {
+        broker_command: "run_data_admin_command",
+        label: "data administration",
+        allowlist: DATA_ADMIN_COMMANDS,
+        sensitive: &[],
+    },
+    BrokerScope {
+        broker_command: "run_external_connector_command",
+        label: "external connector",
+        allowlist: EXTERNAL_CONNECTOR_COMMANDS,
+        sensitive: SENSITIVE_CONNECTOR_COMMANDS,
+    },
+    BrokerScope {
+        broker_command: "run_filesystem_access_command",
+        label: "filesystem access",
+        allowlist: FILESYSTEM_ACCESS_COMMANDS,
+        sensitive: SENSITIVE_FILESYSTEM_ACCESS_COMMANDS,
+    },
+    BrokerScope {
+        broker_command: "run_filesystem_export_command",
+        label: "filesystem export",
+        allowlist: FILESYSTEM_EXPORT_COMMANDS,
+        sensitive: &[],
+    },
+    BrokerScope {
+        broker_command: "run_project_execution_command",
+        label: "project execution",
+        allowlist: PROJECT_EXECUTION_COMMANDS,
+        sensitive: &[],
+    },
+];
+
+impl BrokerScope {
+    pub(crate) fn by_broker(broker_command: &str) -> Option<&'static BrokerScope> {
+        SCOPES
+            .iter()
+            .find(|scope| scope.broker_command == broker_command)
     }
+
+    /// The admission every `run_*` entry performs before dispatch: allowlist,
+    /// then single-use token bound to (broker, command, args).
+    pub(crate) fn admit(
+        &self,
+        tokens: &TokenStore,
+        request: &PrivilegedCommandRequest,
+    ) -> Result<(), String> {
+        if !self.allowlist.contains(&request.command.as_str()) {
+            return Err(format!("Unsupported {} command.", self.label));
+        }
+        tokens.consume(
+            request.token.as_deref(),
+            self.broker_command,
+            &request.command,
+            &request.args,
+        )
+    }
+}
+
+pub(super) fn broker_allowed_commands(broker_command: &str) -> Option<&'static [&'static str]> {
+    BrokerScope::by_broker(broker_command).map(|scope| scope.allowlist)
 }
 
 pub(super) fn privileged_token_issue_requires_user_intent(
     broker_command: &str,
     command: &str,
 ) -> bool {
-    if broker_command == "run_external_connector_command"
-        && SENSITIVE_CONNECTOR_COMMANDS.contains(&command)
-    {
-        return true;
-    }
-    if broker_command == "run_filesystem_access_command"
-        && SENSITIVE_FILESYSTEM_ACCESS_COMMANDS.contains(&command)
-    {
-        return true;
-    }
-    false
+    BrokerScope::by_broker(broker_command).is_some_and(|scope| scope.sensitive.contains(&command))
 }
 
 pub(super) fn privileged_token_issue_scope_label(broker_command: &str) -> &'static str {
-    match broker_command {
-        "run_data_admin_command" => "data administration",
-        "run_filesystem_export_command" => "filesystem export",
-        "run_project_execution_command" => "project execution",
-        "run_external_connector_command" => "external connector",
-        "run_filesystem_access_command" => "filesystem access",
-        _ => "privileged",
-    }
+    BrokerScope::by_broker(broker_command)
+        .map(|scope| scope.label)
+        .unwrap_or("privileged")
 }
 
 pub(super) async fn confirm_sensitive_token_issue(

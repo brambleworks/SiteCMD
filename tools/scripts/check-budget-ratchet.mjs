@@ -7,6 +7,9 @@ const BUDGET_FILE_PATTERNS = [
   /^tools\/scripts\/check-repo-guardrails\.mjs$/,
   /^tools\/scripts\/lib\/guardrail-.*\.mjs$/,
   /^tools\/scripts\/check-knip-export-budget\.mjs$/,
+  // Rust ratchet constants (e.g. STRING_RESULT_COMMAND_BUDGET) live in the
+  // test module, not a tools/scripts/*.mjs file; cover it explicitly.
+  /^apps\/desktop\/src-tauri\/src\/lib_tests\.rs$/,
 ];
 
 const BYPASS_TOKEN_RE = /^\[budget-raised:[^\]]+\]/m;
@@ -51,8 +54,11 @@ function extractThresholds(source) {
     for (const match of line.matchAll(/file:\s*"([^"]+)"[^}]*maxLines:\s*(\d+)/g)) {
       thresholds.set(match[1], Number(match[2]));
     }
+    // Matches both the JS shape (`export const NAME = N`) and the Rust
+    // shape (`pub(crate) const NAME: usize = N;`), whose optional type
+    // annotation sits between the name and the `=`.
     for (const match of line.matchAll(
-      /(?:export\s+)?const\s+([A-Z][A-Z0-9_]*(?:_LIMIT|_BUDGET|_CAP|_MAX_[A-Z_]+|_MAXLINES))\s*=\s*(\d+)/g,
+      /(?:export\s+)?(?:pub(?:\([^)]*\))?\s+)?const\s+([A-Z][A-Z0-9_]*(?:_LIMIT|_BUDGET|_CAP|_MAX_[A-Z_]+|_MAXLINES))\s*(?::[^=]*)?=\s*(\d+)/g,
     )) {
       thresholds.set(`const:${match[1]}`, Number(match[2]));
     }
@@ -102,6 +108,20 @@ function diffThresholds(oldMap, newMap) {
   return violations;
 }
 
+function commitEditMessagePath() {
+  // `.git` is a file (a gitlink), not a directory, in a linked worktree, so a
+  // hardcoded `.git/COMMIT_EDITMSG` join silently misses the real file there
+  // and this falls back to the previous commit's message instead of the
+  // pending one. Ask git, which resolves the per-worktree path correctly.
+  try {
+    return execFileSync("git", ["rev-parse", "--git-path", "COMMIT_EDITMSG"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return path.join(".git", "COMMIT_EDITMSG");
+  }
+}
+
 function commitMessage(rangeTip) {
   // Accept a bypass marker from any commit in the checked range.
   if (rangeTip) {
@@ -113,7 +133,7 @@ function commitMessage(rangeTip) {
       return "";
     }
   }
-  const messageFile = path.join(".git", "COMMIT_EDITMSG");
+  const messageFile = commitEditMessagePath();
   if (fs.existsSync(messageFile)) {
     try {
       return fs.readFileSync(messageFile, "utf8");

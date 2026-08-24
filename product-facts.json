@@ -18,12 +18,12 @@
     "ticketMirroring": "available"
   },
   "checkCounts": {
-    "web": 159,
+    "web": 154,
     "polish": 30,
     "codeScan": 168,
     "axe": 55,
     "dependencyEcosystems": 8,
-    "total": 420
+    "total": 415
   },
   "polishSignals": [
     {
@@ -185,7 +185,11 @@
     "isPrivateWindow": true,
     "deniesNewWindows": true,
     "refusesDownloads": true,
-    "disclaimsSubresourceInterception": true
+    "disclaimsSubresourceInterception": true,
+    "privateNetworkSubresourceRulePlatforms": [
+      "macos",
+      "windows"
+    ]
   },
   "scannerIdentity": {
     "docsUrl": "https://sitecmd.com/scanner",

@@ -250,10 +250,13 @@ pub async fn fetch_stats(
         return Err(format!("UptimeRobot API returned {}", resp.status()));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::UPTIMEROBOT_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Parse error: {}", e))?;
 
     parse_response(&json, url_filter)
 }

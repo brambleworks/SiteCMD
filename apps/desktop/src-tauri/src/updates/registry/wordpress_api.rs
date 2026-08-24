@@ -183,7 +183,12 @@ async fn fetch_plugin_latest(
             status, slug
         ));
     }
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::WORDPRESS_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await?;
     Ok(build_plugin_update_from_response(
         slug,
         current,
@@ -210,7 +215,12 @@ async fn check_core(
             status
         ));
     }
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::WORDPRESS_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await?;
     Ok(build_core_update_from_response(current, source, &body))
 }
 

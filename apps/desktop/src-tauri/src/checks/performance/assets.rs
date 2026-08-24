@@ -13,6 +13,14 @@ impl AsyncCheck for AssetSamplerCheck {
     fn id(&self) -> &str {
         "performance.asset_weight"
     }
+    fn emitted_ids(&self) -> Vec<String> {
+        vec![
+            "performance.asset_weight".to_string(),
+            "performance.asset_caching".to_string(),
+            "performance.broken_images".to_string(),
+            "performance.images.heavy".to_string(),
+        ]
+    }
     fn category(&self) -> ScanCategory {
         ScanCategory::Performance
     }

@@ -115,15 +115,12 @@ fn broker_only_command_names() -> BTreeSet<String> {
     ] {
         commands.extend(command_permissions_from_commands_allow(src));
     }
-    for scope in [
-        crate::commands::DATA_ADMIN_COMMANDS,
-        crate::commands::EXTERNAL_CONNECTOR_COMMANDS,
-        crate::commands::FILESYSTEM_ACCESS_COMMANDS,
-        crate::commands::FILESYSTEM_EXPORT_COMMANDS,
-        crate::commands::PROJECT_EXECUTION_COMMANDS,
-    ] {
-        commands.extend(scope.iter().map(|command| command.to_string()));
-    }
+    commands.extend(
+        crate::commands::privileged_command_broker::SCOPES
+            .iter()
+            .flat_map(|scope| scope.allowlist)
+            .map(|command| command.to_string()),
+    );
     commands
 }
 
@@ -236,6 +233,226 @@ fn rust_source_files(dir: &Path, files: &mut Vec<PathBuf>) {
         } else if path.extension().is_some_and(|extension| extension == "rs") {
             files.push(path);
         }
+    }
+}
+
+/// True for a `cfg` predicate that holds only under `cargo test`: the bare
+/// `test`, or an `all(...)` whose top-level list carries a bare `test`.
+/// `any(test, ...)` and `not(test)` are deliberately excluded because both
+/// can hold in a production build, so a module carrying them is production
+/// code the source-scanning guardrails must keep seeing.
+fn cfg_is_test_only(predicate: &str) -> bool {
+    let trimmed = predicate.trim();
+    if trimmed == "test" {
+        return true;
+    }
+    let Some(list) = trimmed
+        .strip_prefix("all(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return false;
+    };
+    let mut depth = 0usize;
+    list.split(|ch| {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        ch == ',' && depth == 0
+    })
+    .any(|item| item.trim() == "test")
+}
+
+/// Byte offset just past the `}` closing a block whose opening `{` the caller
+/// already consumed, or `None` when the block never closes. Braces inside
+/// string, raw-string, and character literals and inside `//` and `/* */`
+/// comments do not count, so a `{` in a test fixture cannot swallow the file.
+fn end_of_block(source: &str, body_start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = body_start;
+    let mut depth = 1usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' => {
+                depth += 1;
+                index += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                index += 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index = match source[index..].find('\n') {
+                    Some(offset) => index + offset + 1,
+                    None => bytes.len(),
+                };
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index = end_of_block_comment(source, index + 2);
+            }
+            b'"' => index = end_of_string_literal(source, index + 1),
+            b'r' | b'b' => match raw_string_hashes(source, index) {
+                Some((quote, hashes)) => index = end_of_raw_string(source, quote + 1, hashes),
+                None => index += 1,
+            },
+            b'\'' => index = end_of_char_literal(source, index),
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// Offset just past the terminating `*/`, honouring Rust's nested block
+/// comments. `index` points just past the opening `/*`.
+fn end_of_block_comment(source: &str, mut index: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut depth = 1usize;
+    while index < bytes.len() {
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            depth += 1;
+            index += 2;
+        } else if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+            depth -= 1;
+            index += 2;
+            if depth == 0 {
+                return index;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    bytes.len()
+}
+
+/// Offset just past the closing `"`. `index` points just past the opening
+/// quote; `\"` and `\\` do not terminate the literal.
+fn end_of_string_literal(source: &str, mut index: usize) -> usize {
+    let bytes = source.as_bytes();
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return index + 1,
+            _ => index += 1,
+        }
+    }
+    bytes.len()
+}
+
+/// `(offset of the opening quote, hash count)` when `index` starts a raw
+/// string (`r"`, `r#"`, `br"`, `br##"`, ...) rather than an identifier that
+/// merely begins with `r` or `b`.
+fn raw_string_hashes(source: &str, index: usize) -> Option<(usize, usize)> {
+    let bytes = source.as_bytes();
+    let previous = index.checked_sub(1).map(|before| bytes[before]);
+    if previous.is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+        return None;
+    }
+    let mut cursor = index;
+    if bytes[cursor] == b'b' {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'r') {
+        return None;
+    }
+    cursor += 1;
+    let hashes_start = cursor;
+    while bytes.get(cursor) == Some(&b'#') {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'"') {
+        return None;
+    }
+    Some((cursor, cursor - hashes_start))
+}
+
+/// Offset just past a raw string's terminating `"` plus its `#` run.
+/// `index` points just past the opening quote.
+fn end_of_raw_string(source: &str, mut index: usize, hashes: usize) -> usize {
+    let bytes = source.as_bytes();
+    let closing = format!("\"{}", "#".repeat(hashes));
+    match source[index..].find(&closing) {
+        Some(offset) => {
+            index += offset + closing.len();
+            index
+        }
+        None => bytes.len(),
+    }
+}
+
+/// Offset just past a character literal's closing `'`, or just past the
+/// opening `'` when this is a lifetime rather than a literal.
+fn end_of_char_literal(source: &str, index: usize) -> usize {
+    let bytes = source.as_bytes();
+    if bytes.get(index + 1) == Some(&b'\\') {
+        let mut cursor = index + 2;
+        if bytes.get(cursor) == Some(&b'u') {
+            while cursor < bytes.len() && bytes[cursor] != b'}' {
+                cursor += 1;
+            }
+            cursor += 1;
+        } else {
+            cursor += 1;
+        }
+        if bytes.get(cursor) == Some(&b'\'') {
+            return cursor + 1;
+        }
+        return index + 1;
+    }
+    if let Some(character) = source[index + 1..].chars().next() {
+        let after = index + 1 + character.len_utf8();
+        if bytes.get(after) == Some(&b'\'') {
+            return after + 1;
+        }
+    }
+    index + 1
+}
+
+/// Source with every inline test module excised. A `#[cfg(test)]` attribute
+/// (or a compound test-only form such as `#[cfg(all(test, feature =
+/// "desktop"))]`) followed, after optional whitespace and other attribute
+/// lines, by `mod <ident> {` opens an inline test module; its body is matched
+/// brace for brace, replaced by the newlines it spanned, and the scan
+/// continues after its closing brace. Production code on *both* sides of a
+/// test module therefore stays visible to the source-scanning guardrails, and
+/// every surviving line keeps its original line number so a guardrail can
+/// report `file:line` accurately. A `#[cfg(test)] mod tests;` declaration, or
+/// a `#[cfg(test)]` on a `use`, field, or function, does not match.
+fn production_half(source: &str) -> String {
+    let inline_test_module = regex::Regex::new(
+        r"#\[cfg\(([^\]]*)\)\](?:\s*#\[[^\]]*\])*\s*mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
+    )
+    .expect("inline test module pattern");
+
+    let mut kept = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    loop {
+        let Some(captures) = inline_test_module.captures(&source[cursor..]) else {
+            kept.push_str(&source[cursor..]);
+            return kept;
+        };
+        let matched = captures.get(0).expect("whole match");
+        let start = cursor + matched.start();
+        let body = cursor + matched.end();
+        let predicate = captures.get(1).map_or("", |group| group.as_str());
+        if !cfg_is_test_only(predicate) {
+            kept.push_str(&source[cursor..body]);
+            cursor = body;
+            continue;
+        }
+        kept.push_str(&source[cursor..start]);
+        // An unbalanced module body cannot be excised safely; drop the rest
+        // rather than let test code count as production.
+        let Some(end) = end_of_block(source, body) else {
+            return kept;
+        };
+        for _ in 0..source[start..end].matches('\n').count() {
+            kept.push('\n');
+        }
+        cursor = end;
     }
 }
 
@@ -570,6 +787,281 @@ fn broker_only_annotation_guard_detects_reannotated_commands() {
 }
 
 #[test]
+fn git_is_spawned_only_by_the_hardened_runner() {
+    let spawn = regex::Regex::new(r#"Command::new\(\s*"(?:[^"]*/)?git(?:\.exe)?"\s*\)"#)
+        .expect("git spawn pattern");
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    assert!(!files.is_empty(), "Rust source scan found no files");
+
+    let mut findings = Vec::new();
+    let mut runner_spawns = 0;
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        if relative.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        let hits = spawn.find_iter(&production_half(&source)).count();
+        if relative == "src/core/git.rs" {
+            runner_spawns = hits;
+        } else if hits > 0 {
+            findings.push(format!("{relative} ({hits})"));
+        }
+    }
+
+    assert_eq!(
+        runner_spawns, 1,
+        "src/core/git.rs must spawn git exactly once, inside hardened_git_command"
+    );
+    assert!(
+        findings.is_empty(),
+        "git must be spawned only through core::git::run_git so every invocation carries the config and environment hardening. This scan covers src/ only, excluding files named *_tests.rs; crates/cli and crates/engine are not scanned: {:?}",
+        findings,
+    );
+}
+
+// Negative control: the spawn pattern sees absolute and .exe forms.
+#[test]
+fn git_spawn_guard_detects_every_spelling() {
+    let spawn = regex::Regex::new(r#"Command::new\(\s*"(?:[^"]*/)?git(?:\.exe)?"\s*\)"#)
+        .expect("git spawn pattern");
+    for source in [
+        r#"Command::new("git")"#,
+        r#"std::process::Command::new("/usr/bin/git")"#,
+        r#"tokio::process::Command::new( "git.exe" )"#,
+    ] {
+        assert!(spawn.is_match(source), "{source}");
+    }
+    assert!(!spawn.is_match(r#"Command::new("gitleaks")"#));
+}
+
+// Negative control: an external test-module declaration must not truncate
+// the production code that follows it.
+#[test]
+fn production_half_keeps_code_after_an_external_test_module_declaration() {
+    let source = concat!(
+        "#[cfg(test)]\n",
+        "mod tests;\n",
+        "\n",
+        "fn spawn_git() {\n",
+        "    Command::new(\"git\");\n",
+        "}\n",
+    );
+    assert!(
+        production_half(source).contains(r#"Command::new("git")"#),
+        "an external test module declaration must not truncate production code"
+    );
+}
+
+#[test]
+fn production_half_strips_an_inline_test_module() {
+    let source = concat!(
+        "fn production() {}\n",
+        "\n",
+        "#[cfg(test)]\n",
+        "mod tests {\n",
+        "    fn spawn_git() {\n",
+        "        Command::new(\"git\");\n",
+        "    }\n",
+        "}\n",
+    );
+    let half = production_half(source);
+    assert!(half.contains("fn production"));
+    assert!(
+        !half.contains(r#"Command::new("git")"#),
+        "an inline test module's contents must be stripped"
+    );
+}
+
+// The regression F1 closes: a truncating `production_half` hid every line
+// after the first inline test module from all four source-scanning
+// guardrails.
+#[test]
+fn production_half_keeps_production_code_after_an_inline_test_module() {
+    let source = concat!(
+        "fn before() {}\n",
+        "\n",
+        "#[cfg(test)]\n",
+        "mod tests {\n",
+        "    fn spawn_git() {\n",
+        "        Command::new(\"git\");\n",
+        "    }\n",
+        "}\n",
+        "\n",
+        "fn after() {\n",
+        "    Command::new(\"gitleaks\");\n",
+        "}\n",
+    );
+    let half = production_half(source);
+    assert!(half.contains("fn before"));
+    assert!(
+        half.contains("fn after"),
+        "production code after an inline test module must survive: {half:?}"
+    );
+    assert!(half.contains(r#"Command::new("gitleaks")"#));
+    assert!(!half.contains(r#"Command::new("git")"#));
+    assert_eq!(
+        half.matches('\n').count(),
+        source.matches('\n').count(),
+        "excision must preserve line numbering so guardrails report file:line"
+    );
+    assert_eq!(
+        half.lines().nth(9),
+        Some("fn after() {"),
+        "every surviving line must keep its original line number"
+    );
+}
+
+#[test]
+fn production_half_excises_every_inline_test_module() {
+    let source = concat!(
+        "fn first() {}\n",
+        "#[cfg(test)]\n",
+        "mod early_tests {\n",
+        "    const FIXTURE: &str = \"{ unbalanced\";\n",
+        "    fn a() { Command::new(\"git\"); }\n",
+        "}\n",
+        "fn middle() {}\n",
+        "#[cfg(all(test, feature = \"desktop\"))]\n",
+        "mod late_tests {\n",
+        "    fn b() { Command::new(\"/usr/bin/git\"); }\n",
+        "}\n",
+        "fn last() {}\n",
+    );
+    let half = production_half(source);
+    for kept in ["fn first", "fn middle", "fn last"] {
+        assert!(half.contains(kept), "{kept} must survive: {half:?}");
+    }
+    assert!(!half.contains("fn a()"));
+    assert!(!half.contains("fn b()"));
+    assert!(!half.contains("Command::new"));
+    assert_eq!(half.matches('\n').count(), source.matches('\n').count());
+}
+
+// `any(test, ...)` and `not(test)` also hold in a production build, so a
+// module carrying them is production code the scans must keep seeing.
+#[test]
+fn production_half_keeps_modules_whose_cfg_is_not_test_only() {
+    for predicate in ["any(test, feature = \"desktop\")", "not(test)"] {
+        let source = format!("#[cfg({predicate})]\nmod shipped {{\n    fn spawn() {{ Command::new(\"git\"); }}\n}}\n");
+        assert!(
+            production_half(&source).contains(r#"Command::new("git")"#),
+            "#[cfg({predicate})] mod is production code"
+        );
+    }
+}
+
+/// Independent, line-based estimate of a file's production lines, written
+/// without reusing `production_half`: a plain walk that enters an inline test
+/// module at a test-only `#[cfg(...)]` line whose next line declares a module
+/// with a body, and leaves it when a naive brace count returns to zero. Naive
+/// counting is enough for an estimate compared against a 90 percent floor.
+fn non_test_line_count(source: &str) -> usize {
+    let mut count = 0usize;
+    let mut depth: i64 = 0;
+    let mut inside_test_module = false;
+    let mut saw_test_cfg = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if inside_test_module {
+            depth += trimmed.matches('{').count() as i64;
+            depth -= trimmed.matches('}').count() as i64;
+            inside_test_module = depth > 0;
+            continue;
+        }
+        if saw_test_cfg && trimmed.starts_with("mod ") && trimmed.ends_with('{') {
+            inside_test_module = true;
+            saw_test_cfg = false;
+            depth = 1;
+            continue;
+        }
+        if trimmed.starts_with("#[cfg(")
+            && trimmed.contains("test")
+            && !trimmed.contains("any(")
+            && !trimmed.contains("not(test")
+        {
+            saw_test_cfg = true;
+            continue;
+        }
+        saw_test_cfg = saw_test_cfg && trimmed.starts_with("#[");
+        if !trimmed.is_empty() {
+            count += 1;
+        }
+    }
+    count
+}
+
+// Truncation is loud here: before F1, eight real files (env_files.rs,
+// commands/oauth.rs, db/types.rs, commands/scan/tools.rs, commands/mod.rs,
+// commands/reports.rs and two code_scan corpus files) lost most of their
+// production lines to `production_half`.
+#[test]
+fn production_half_retains_the_production_lines_of_every_source_file() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    assert!(!files.is_empty(), "Rust source scan found no files");
+
+    let mut thin = Vec::new();
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        let half = production_half(&source);
+        assert_eq!(
+            half.matches('\n').count(),
+            source.matches('\n').count(),
+            "{relative}: production_half must preserve line numbering"
+        );
+        let retained = half.lines().filter(|line| !line.trim().is_empty()).count();
+        let expected = non_test_line_count(&source);
+        if retained * 10 < expected * 9 {
+            thin.push(format!("{relative} ({retained} of ~{expected})"));
+        }
+    }
+
+    assert!(
+        thin.is_empty(),
+        "production_half must excise each inline test module and keep scanning, never truncate the file at the first one: {:?}",
+        thin,
+    );
+}
+
+// The fail-closed wait on the private-network rules is its own budget. While
+// it shared WEBVIEW_PAGE_LOAD_WAIT, retuning page readiness silently retuned
+// how long the analyzer would wait before refusing to scan at all.
+#[test]
+fn the_analyzer_waits_on_rules_install_with_its_own_budget() {
+    let production = production_half(include_str!("webview/analyzer.rs"));
+    assert!(
+        production.contains("WEBVIEW_RULES_INSTALL_WAIT, ready_receiver"),
+        "the private-network rules wait must use constants::WEBVIEW_RULES_INSTALL_WAIT"
+    );
+    assert!(
+        crate::constants::WEBVIEW_RULES_INSTALL_WAIT > std::time::Duration::ZERO,
+        "a zero rules-install budget would fail every scan closed"
+    );
+}
+
+#[test]
+fn analyzer_never_resolves_dns_on_the_navigation_thread() {
+    let production = production_half(include_str!("webview/analyzer.rs"));
+    assert!(
+        !production.contains("_blocking("),
+        "analyzer.rs must use the async validators; synchronous DNS on the webview thread stalls the UI"
+    );
+}
+
+#[test]
 fn elevated_commands_are_not_in_baseline_acl() {
     let default_cmds =
         command_permissions_from_default_toml(include_str!("../permissions/default.toml"));
@@ -867,5 +1359,404 @@ fn tracing_instrument_fields_do_not_record_raw_or_secretish_values() {
         findings.is_empty(),
         "tracing::instrument fields must not record raw or secret-like values. Use skip(...) and log parsed safe metadata instead: {:?}",
         findings,
+    );
+}
+
+/// Empty by design: every response body is read through the limited readers.
+/// Adding an entry here is a regression, not a migration step.
+const UNCAPPED_BODY_READ_FILES: &[&str] = &[];
+
+#[test]
+fn response_bodies_are_read_only_through_the_limited_readers() {
+    let uncapped = regex::Regex::new(r"\.(?:json|text)(?:::<[^>]*>)?\(\)\s*\.await")
+        .expect("uncapped read pattern");
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+
+    let mut unexpected = Vec::new();
+    let mut listed_but_clean: Vec<&str> = UNCAPPED_BODY_READ_FILES.to_vec();
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        if relative == "src/http_client.rs" || relative.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        let hits = uncapped.find_iter(&production_half(&source)).count();
+        if hits == 0 {
+            continue;
+        }
+        if UNCAPPED_BODY_READ_FILES.contains(&relative.as_str()) {
+            listed_but_clean.retain(|listed| *listed != relative);
+        } else {
+            unexpected.push(format!("{relative} ({hits})"));
+        }
+    }
+
+    assert!(
+        unexpected.is_empty(),
+        "Read response bodies through http_client::read_json_limited or read_text_limited with a cap from constants.rs. This scan covers src/ only, excluding src/http_client.rs and files named *_tests.rs; crates/cli and crates/engine are not scanned: {:?}",
+        unexpected,
+    );
+    assert!(
+        listed_but_clean.is_empty(),
+        "These files no longer contain uncapped reads; remove them from UNCAPPED_BODY_READ_FILES so the ratchet only moves toward zero: {:?}",
+        listed_but_clean,
+    );
+}
+
+// The scan roots and the failure messages must not drift apart: a message
+// that claims wider coverage than the walk sends a reader hunting a violation
+// the scan never looks for. This pins what the messages now state.
+#[test]
+fn the_source_scans_cover_only_the_roots_their_messages_name() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest.join("src");
+    let commands_dir = src_dir.join("commands");
+    let crates_dir = manifest.join("crates");
+
+    let mut src_files = Vec::new();
+    rust_source_files(&src_dir, &mut src_files);
+    let mut command_files = Vec::new();
+    rust_source_files(&commands_dir, &mut command_files);
+    let mut crate_files = Vec::new();
+    rust_source_files(&crates_dir, &mut crate_files);
+
+    assert!(!src_files.is_empty(), "src/ scan found no files");
+    assert!(
+        !command_files.is_empty(),
+        "src/commands/ scan found no files"
+    );
+    assert!(
+        !crate_files.is_empty(),
+        "crates/ holds Rust sources the src/ scans never walk, which is exactly what their messages must keep saying"
+    );
+    assert!(
+        src_files.iter().all(|file| !file.starts_with(&crates_dir)),
+        "the git-spawn and uncapped-read scans walk src/ only, never crates/cli or crates/engine"
+    );
+    assert!(
+        command_files.len() < src_files.len()
+            && command_files.iter().all(|file| file.starts_with(&src_dir)),
+        "the inline-git scan walks src/commands/ only, a strict subset of src/"
+    );
+}
+
+// Negative control: the pattern sees the turbofish and the multi-line form.
+#[test]
+fn uncapped_read_guard_detects_every_spelling() {
+    let uncapped = regex::Regex::new(r"\.(?:json|text)(?:::<[^>]*>)?\(\)\s*\.await")
+        .expect("uncapped read pattern");
+    assert!(uncapped.is_match("resp.json().await"));
+    assert!(uncapped.is_match("resp.json::<OsvVuln>().await"));
+    assert!(uncapped.is_match("resp\n        .text()\n        .await"));
+    assert!(!uncapped.is_match(".json(&body).send().await"));
+}
+
+/// Line numbers of sync `core::git` helper calls that sit inside an `async fn`
+/// without a `run_blocking`/`spawn_blocking` wrapper lexically enclosing the
+/// call. A wrapper only covers a call while the call site is still nested
+/// inside that wrapper's own argument list or closure body: brace/paren depth
+/// is tracked from each `fn` signature forward, a `run_blocking(` or
+/// `spawn_blocking(` token records the depth it was seen at, and that record
+/// is dropped as soon as depth returns to (or below) that level. A wrapper
+/// that already closed earlier in the same function therefore cannot cover a
+/// later, unrelated call.
+fn inline_sync_git_calls(source: &str) -> Vec<usize> {
+    let call = regex::Regex::new(
+        r"\bgit::(?:get_git_status|get_commits_since|get_commits_between|get_recent_commits|checkout_head_and_clean)\(",
+    )
+    .expect("git call pattern");
+    let signature = regex::Regex::new(r"^\s*(?:pub(?:\([a-z]+\))?\s+)?(async\s+)?fn\s+\w+")
+        .expect("fn signature pattern");
+    let wrapper = regex::Regex::new(r"\b(?:run_blocking|spawn_blocking)\(").expect("wrapper");
+
+    let mut findings = Vec::new();
+    let mut is_async = false;
+    let mut depth: i64 = 0;
+    let mut open_wrappers: Vec<i64> = Vec::new();
+
+    let production = production_half(source);
+    for (index, line) in production.lines().enumerate() {
+        if let Some(captures) = signature.captures(line) {
+            is_async = captures.get(1).is_some();
+        }
+
+        let wrapper_starts: Vec<usize> = wrapper.find_iter(line).map(|m| m.start()).collect();
+        let call_starts: Vec<usize> = call.find_iter(line).map(|m| m.start()).collect();
+
+        for (byte, ch) in line.char_indices() {
+            if wrapper_starts.contains(&byte) {
+                open_wrappers.push(depth);
+            }
+            if call_starts.contains(&byte) && is_async && open_wrappers.is_empty() {
+                findings.push(index + 1);
+            }
+            match ch {
+                '{' | '(' => depth += 1,
+                '}' | ')' => {
+                    depth -= 1;
+                    while open_wrappers.last().is_some_and(|&start| depth <= start) {
+                        open_wrappers.pop();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    findings
+}
+
+#[test]
+fn sync_git_helpers_are_not_called_inline_from_async_commands() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("commands");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    let mut findings = Vec::new();
+    for file in files {
+        let relative = file
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        if relative.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        for line in inline_sync_git_calls(&source) {
+            findings.push(format!("{relative}:{line}"));
+        }
+    }
+    assert!(
+        findings.is_empty(),
+        "sync git helpers block on a child process; call git::get_git_status_async or git::get_commits_since_async, or run the helper inside run_blocking. This scan covers src/commands/ only, excluding files named *_tests.rs: {:?}",
+        findings,
+    );
+}
+
+#[test]
+fn inline_git_call_scan_sees_async_bodies_and_ignores_wrapped_or_sync_ones() {
+    let inline = "pub async fn a() -> Result<(), String> {\n    let s = git::get_git_status(&p, 1);\n    Ok(())\n}\n";
+    assert_eq!(inline_sync_git_calls(inline), vec![2]);
+
+    let wrapped = "pub async fn b() {\n    run_blocking(move || {\n        git::get_recent_commits(&p, 100)\n    }).await\n}\n";
+    assert!(inline_sync_git_calls(wrapped).is_empty());
+
+    let sync = "fn c() {\n    git::get_commits_since(&p, since)\n}\n";
+    assert!(inline_sync_git_calls(sync).is_empty());
+
+    let async_wrapper = "pub async fn d() {\n    git::get_git_status_async(p, 1).await\n}\n";
+    assert!(inline_sync_git_calls(async_wrapper).is_empty());
+}
+
+// A wrapper that has already closed earlier in the function must not shield a
+// later, unrelated call: this is the blind spot the depth tracking closes.
+#[test]
+fn inline_git_call_scan_does_not_let_a_closed_wrapper_cover_a_later_call() {
+    let closed_then_bare = "pub async fn e() -> Result<(), String> {\n    run_blocking(move || db.get_project_path(id)).await?;\n    let s = git::get_git_status(&path, 20);\n    Ok(())\n}\n";
+    assert_eq!(inline_sync_git_calls(closed_then_bare), vec![3]);
+
+    let genuinely_wrapped = "pub async fn f() -> Result<(), String> {\n    run_blocking(move || db.get_project_path(id)).await?;\n    let status = run_blocking(move || {\n        git::get_git_status(&path, 20)\n    })\n    .await?;\n    Ok(())\n}\n";
+    assert!(inline_sync_git_calls(genuinely_wrapped).is_empty());
+}
+
+/// Number of Tauri commands whose signature still returns `Result<_, String>`.
+/// Lower it with every migration commit; it must never rise. Measure with the
+/// assertion message below.
+const STRING_RESULT_COMMAND_BUDGET: usize = 100;
+
+fn string_result_command_count(source: &str) -> usize {
+    let signature = regex::Regex::new(
+        r#"#\[(?:cfg_attr\(feature = "desktop", )?tauri::command\)?\][^{]*?fn\s+\w+[^{]*?->\s*Result<[^{]*?,\s*String>"#,
+    )
+    .expect("command signature pattern");
+    signature.find_iter(&production_half(source)).count()
+}
+
+#[test]
+fn string_returning_commands_only_decrease() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    let total: usize = files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+        .map(|file| string_result_command_count(&std::fs::read_to_string(file).expect("read")))
+        .sum();
+    assert_eq!(
+        total, STRING_RESULT_COMMAND_BUDGET,
+        "commands returning Result<_, String> changed; set STRING_RESULT_COMMAND_BUDGET to {total} only if it went down, and migrate the command to CommandError otherwise"
+    );
+}
+
+#[test]
+fn string_result_command_scan_sees_both_attribute_forms() {
+    let bare = format!(
+        "#[{}]\npub async fn a(x: i64) -> Result<(), String> {{}}\n",
+        concat!("tauri", "::command")
+    );
+    assert_eq!(string_result_command_count(&bare), 1);
+    let cfg_attr = format!(
+        "#[cfg_attr(feature = \"desktop\", {})]\npub async fn b() -> Result<Vec<u8>, String> {{}}\n",
+        concat!("tauri", "::command")
+    );
+    assert_eq!(string_result_command_count(&cfg_attr), 1);
+    let migrated = format!(
+        "#[{}]\npub async fn c() -> Result<(), CommandError> {{}}\n",
+        concat!("tauri", "::command")
+    );
+    assert_eq!(string_result_command_count(&migrated), 0);
+}
+
+/// `run_blocking(` call sites in src/. Lower with every migration commit.
+const RUN_BLOCKING_CALL_BUDGET: usize = 163;
+/// Sync `self.execute(`/`self.execute_mut(`/`self.execute_with_timeout(` calls
+/// in src/db/. Lower as domain methods move to `run`/`run_mut`.
+const SYNC_DB_EXECUTE_BUDGET: usize = 198;
+
+fn count_matches(dir: &Path, pattern: &regex::Regex) -> usize {
+    let mut files = Vec::new();
+    rust_source_files(dir, &mut files);
+    files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+        .map(|file| {
+            let source = std::fs::read_to_string(file).expect("read Rust source file");
+            pattern.find_iter(&production_half(&source)).count()
+        })
+        .sum()
+}
+
+#[test]
+fn blocking_database_call_sites_only_decrease() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let run_blocking = count_matches(
+        &root,
+        &regex::Regex::new(r"\brun_blocking\(").expect("run_blocking pattern"),
+    );
+    assert_eq!(
+        run_blocking, RUN_BLOCKING_CALL_BUDGET,
+        "run_blocking call sites changed; set RUN_BLOCKING_CALL_BUDGET to {run_blocking} only if it went down"
+    );
+    let sync_execute = count_matches(
+        &root.join("db"),
+        &regex::Regex::new(r"self\.execute(?:_mut)?(?:_with_timeout)?\(").expect("execute pattern"),
+    );
+    assert_eq!(
+        sync_execute, SYNC_DB_EXECUTE_BUDGET,
+        "sync Database::execute call sites changed; set SYNC_DB_EXECUTE_BUDGET to {sync_execute} only if it went down"
+    );
+}
+
+/// Calls to the four legacy local-origin predicates outside their definitions.
+/// Lower as callers move to `LocalOrigin::classify`; delete the predicates at 0.
+const LEGACY_LOCAL_PREDICATE_BUDGET: usize = 24;
+
+#[test]
+fn legacy_local_origin_predicates_only_decrease() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let pattern = regex::Regex::new(
+        r"\b(?:is_strict_localhost|is_localhost|scan_origin_allows_local_dev|is_local_dev_domain)\(",
+    )
+    .expect("predicate pattern");
+    let definitions = regex::Regex::new(
+        r"fn (?:is_strict_localhost|is_localhost|scan_origin_allows_local_dev|is_local_dev_domain)\(",
+    )
+    .expect("definition pattern");
+    let mut files = Vec::new();
+    rust_source_files(&root, &mut files);
+    let total: usize = files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+        .map(|file| {
+            let source = std::fs::read_to_string(file).expect("read");
+            let production = production_half(&source);
+            pattern.find_iter(&production).count() - definitions.find_iter(&production).count()
+        })
+        .sum();
+    assert_eq!(
+        total, LEGACY_LOCAL_PREDICATE_BUDGET,
+        "legacy local-origin predicate calls changed; set LEGACY_LOCAL_PREDICATE_BUDGET to {total} only if it went down"
+    );
+}
+
+#[test]
+fn one_crypto_provider_and_one_root_store_remain() {
+    // webpki-roots is deliberately excluded here: it still reaches Cargo.lock
+    // through the accepted, off-by-default `browser` feature's build chain
+    // (headless_chrome -> auto_generate_cdp -> ureq), the same exception
+    // deny.toml already documents. This test only guards the crypto
+    // provider and the code we control (below).
+    let lock = include_str!("../Cargo.lock");
+    for crate_name in ["aws-lc-rs", "aws-lc-sys"] {
+        assert!(
+            !lock.contains(&format!("name = \"{crate_name}\"")),
+            "{crate_name} is back in Cargo.lock; reqwest must use rustls-no-provider and every rustls ClientConfig must use the platform verifier on ring"
+        );
+    }
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    // Excludes `_tests.rs` files (this file included) so the assertion's own
+    // string literal below cannot match itself.
+    for file in files
+        .iter()
+        .filter(|file| !file.to_string_lossy().ends_with("_tests.rs"))
+    {
+        let source = std::fs::read_to_string(file).expect("read");
+        assert!(
+            !source.contains("webpki_roots::"),
+            "{} still uses webpki-roots",
+            file.display()
+        );
+    }
+}
+
+/// Total `#[tracing::instrument]` attributes in src/. Lower as trivial getters
+/// and hot paths lose theirs; it must never rise without a reviewed reason.
+const TRACING_INSTRUMENT_BUDGET: usize = 608;
+
+#[test]
+fn tracing_instrument_count_only_decreases() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+    let total: usize = files
+        .iter()
+        .map(|file| {
+            tracing_instrument_attributes(&std::fs::read_to_string(file).expect("read")).len()
+        })
+        .sum();
+    assert_eq!(
+        total, TRACING_INSTRUMENT_BUDGET,
+        "tracing::instrument count changed; set TRACING_INSTRUMENT_BUDGET to {total} only if it went down"
+    );
+}
+
+#[test]
+fn broker_threat_model_names_every_scope_and_its_sensitive_commands() {
+    let doc = include_str!("../../../../docs/engineering/privileged-broker-threat-model.md");
+    for scope in crate::commands::privileged_command_broker_scopes() {
+        assert!(
+            doc.contains(scope.broker_command),
+            "threat model must name {}",
+            scope.broker_command
+        );
+        for command in scope.sensitive {
+            assert!(
+                doc.contains(command),
+                "threat model must list the sensitive command {command}"
+            );
+        }
+    }
+    assert!(
+        doc.contains("compromised renderer"),
+        "the document must state the boundary the broker does not defend"
     );
 }

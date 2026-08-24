@@ -14,9 +14,9 @@ const TRANSPORT_PROFILE: &str = "reqwest_rustls";
 /// The TLS client profile behind every handshake, including the sync
 /// certificate probe.
 const TLS_CLIENT_PROFILE: &str = "rustls";
-/// Chain validation runs against the bundled Mozilla root set, not the
-/// platform store, so two machines cannot disagree about a chain.
-const TRUST_AUTHORITY: &str = "webpki_roots";
+/// Chain validation runs against the operating system's certificate store
+/// through rustls-platform-verifier, the same verifier reqwest itself uses.
+const TRUST_AUTHORITY: &str = "platform_verifier";
 /// DNS answers come from the system resolver configuration.
 const RESOLVER: &str = "system";
 

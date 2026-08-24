@@ -55,18 +55,16 @@ pub async fn run_filesystem_access_command(
     token_state: State<'_, PrivilegedCommandTokenState>,
     request: PrivilegedCommandRequest,
 ) -> Result<Value, String> {
-    let command = request.command;
-    let response_event = request.response_event;
-    if !FILESYSTEM_ACCESS_COMMANDS.contains(&command.as_str()) {
-        return Err(format!("Unsupported {SCOPE_LABEL} command."));
-    }
-    token_state.consume(
-        request.token.as_deref(),
-        BROKER_COMMAND,
-        &command,
-        &request.args,
-    )?;
-    let outcome = dispatch(app.clone(), db, scan_control, command, request.args).await;
+    super::BrokerScope::by_broker(BROKER_COMMAND)
+        .expect("registered scope") // allow-expect: BROKER_COMMAND is a SCOPES entry, proved by every_scope_admits_only_allowlisted_commands_with_live_tokens
+        .admit(&token_state, &request)?;
+    let PrivilegedCommandRequest {
+        command,
+        args,
+        response_event,
+        ..
+    } = request;
+    let outcome = dispatch(app.clone(), db, scan_control, command, args).await;
     emit_privileged_command_response(&app, response_event.as_deref(), &outcome);
     outcome
 }
@@ -206,7 +204,9 @@ async fn dispatch(
             .await?;
             json_response(())
         }
-        _ => Err(format!("Unsupported {SCOPE_LABEL} command.")),
+        // `BrokerScope::admit` already checked `command` against
+        // `FILESYSTEM_ACCESS_COMMANDS`, so every string reaching here has a match arm.
+        _ => unreachable!("admit validated {command} against the {SCOPE_LABEL} allowlist"),
     }
 }
 
@@ -241,12 +241,6 @@ mod tests {
             error.contains("invalid or expired"),
             "unexpected error message: {error}"
         );
-    }
-
-    #[test]
-    fn unknown_command_returns_scope_labelled_error() {
-        let unsupported = format!("Unsupported {SCOPE_LABEL} command.");
-        assert_eq!(unsupported, "Unsupported filesystem access command.");
     }
 
     #[test]

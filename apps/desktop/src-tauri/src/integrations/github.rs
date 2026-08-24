@@ -297,10 +297,13 @@ pub(crate) async fn fetch_workflow_runs(
         return Err(format!("GitHub API returned {}", resp.status()));
     }
 
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse workflow runs: {}", e))?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GITHUB_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse workflow runs: {}", e))?;
     Ok(parse_workflow_runs_response(&body))
 }
 
@@ -357,10 +360,13 @@ async fn fetch_deployments(
         return Err(format!("GitHub API returned {}", resp.status()));
     }
 
-    let deployments: Vec<GhDeployment> = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse deployments: {}", e))?;
+    let deployments: Vec<GhDeployment> = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GITHUB_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse deployments: {}", e))?;
 
     let mut results = Vec::new();
     for d in deployments {
@@ -370,7 +376,13 @@ async fn fetch_deployments(
         );
         let status = match github_get(client, token, &status_url).await {
             Ok(resp) => {
-                let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::json!([]));
+                let body: serde_json::Value = crate::http_client::read_json_limited(
+                    resp,
+                    crate::constants::GITHUB_API_RESPONSE_MAX_BYTES,
+                    crate::constants::BODY_READ_TIMEOUT,
+                )
+                .await
+                .unwrap_or(serde_json::json!([]));
                 pick_deployment_status(&body)
             }
             Err(_) => "unknown".into(),
@@ -397,10 +409,13 @@ async fn fetch_open_prs(
         return Err(format!("GitHub API returned {}", resp.status()));
     }
 
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse pull requests: {}", e))?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GITHUB_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse pull requests: {}", e))?;
     Ok(parse_pull_requests_response(&body))
 }
 
@@ -427,10 +442,13 @@ pub async fn fetch_pr_files(
         ));
     }
 
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse PR files response: {}", e))?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GITHUB_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Failed to parse PR files response: {}", e))?;
 
     // Use the shared parser so tests exercise the production extraction path.
     Ok(parse_pr_files_response(&body))
@@ -514,7 +532,13 @@ pub async fn fetch_latest_release(
     if !resp.status().is_success() {
         return Err(format!("GitHub returned {}", resp.status()));
     }
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::GITHUB_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(parse_latest_release_response(&body))
 }
 

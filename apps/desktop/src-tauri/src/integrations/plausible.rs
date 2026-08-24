@@ -88,7 +88,13 @@ async fn query(
         // plan/feature gating) instead of a bare status - the status alone
         // can't tell a wrong site_id from an access problem.
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+        let body = crate::http_client::read_text_limited(
+            resp,
+            crate::constants::INTEGRATION_ERROR_BODY_MAX_BYTES,
+            crate::constants::BODY_READ_TIMEOUT,
+        )
+        .await
+        .unwrap_or_default();
         return Err(format!(
             "Plausible API returned {}: {}",
             status,
@@ -96,9 +102,13 @@ async fn query(
         ));
     }
 
-    resp.json()
-        .await
-        .map_err(|e| format!("Plausible parse error: {}", e))
+    crate::http_client::read_json_limited(
+        resp,
+        crate::constants::PLAUSIBLE_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Plausible parse error: {}", e))
 }
 
 // API v2 aligns dimension and metric arrays with their request order.

@@ -193,10 +193,13 @@ async fn resolve_zone_id(api_key: &str, zone_ref: &str) -> Result<String, String
         ));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Cloudflare zone lookup parse error: {}", e))?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::CLOUDFLARE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Cloudflare zone lookup parse error: {}", e))?;
     parse_zone_lookup_response(&json, &zone_name)
 }
 
@@ -264,10 +267,13 @@ pub async fn fetch_stats_with_period(
         return fetch_stats_rest(api_key, &resolved_zone_id).await;
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::CLOUDFLARE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Parse error: {}", e))?;
 
     if !cloudflare_error_messages(&json).is_empty() || !graphql_response_has_zone(&json) {
         return fetch_stats_rest(api_key, &resolved_zone_id).await;
@@ -295,10 +301,13 @@ async fn fetch_stats_rest(api_key: &str, zone_id: &str) -> Result<CloudflareData
         return Err(format!("Cloudflare API returned {}", resp.status()));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let json: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::CLOUDFLARE_API_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await
+    .map_err(|e| format!("Parse error: {}", e))?;
 
     Ok(parse_rest_response(&json))
 }

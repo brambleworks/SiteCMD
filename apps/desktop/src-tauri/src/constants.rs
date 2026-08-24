@@ -89,6 +89,42 @@ pub const OAUTH_RESPONSE_MAX_BYTES: u64 = 256 * 1024;
 /// Batch size for OSV.dev vulnerability API requests
 pub const OSV_BATCH_SIZE: usize = 1000;
 
+/// Registry metadata documents are bounded per ecosystem. A scanned
+/// repository's manifests choose which packages are looked up, so a hostile
+/// manifest must not be able to point the sweep at an unbounded document.
+/// npm and PyPI serve every historical version in one document, so their
+/// caps are generous; the rest are small per-package records.
+pub const NPM_PACKUMENT_MAX_BYTES: u64 = 32 * 1024 * 1024;
+pub const PYPI_RESPONSE_MAX_BYTES: u64 = 32 * 1024 * 1024;
+pub const PACKAGIST_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+pub const CRATES_IO_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+pub const WORDPRESS_API_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+pub const DRUPAL_API_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+pub const OSV_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+pub const RUBYGEMS_RESPONSE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+pub const GO_PROXY_RESPONSE_MAX_BYTES: u64 = 1024 * 1024;
+
+/// Integration API documents. Each provider's largest legitimate response
+/// (a paged issue list, a 500-row analytics report, a Lighthouse JSON) sits
+/// well under its cap; the cap only stops a broken or hostile endpoint from
+/// streaming unbounded bytes into a scan.
+pub const GITHUB_API_RESPONSE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+pub const JIRA_API_RESPONSE_MAX_BYTES: u64 = 2 * 1024 * 1024;
+pub const CLOUDFLARE_API_RESPONSE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+pub const BING_API_RESPONSE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+pub const PLAUSIBLE_RESPONSE_MAX_BYTES: u64 = 4 * 1024 * 1024;
+pub const UPTIMEROBOT_RESPONSE_MAX_BYTES: u64 = 2 * 1024 * 1024;
+/// GA4 and Search Console reports share one cap.
+pub const GOOGLE_API_RESPONSE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+pub const PAGESPEED_RESPONSE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+/// Error bodies are surfaced to the user as a message fragment; a few
+/// kilobytes is all that fragment can use.
+pub const INTEGRATION_ERROR_BODY_MAX_BYTES: u64 = 64 * 1024;
+
+/// License activation, validation, and deactivation responses are one small
+/// JSON object each.
+pub const LICENSE_API_RESPONSE_MAX_BYTES: u64 = 64 * 1024;
+
 /// Maximum response body size (10 MB). Responses larger than this are rejected.
 pub const MAX_BODY_SIZE: u64 = 10 * 1024 * 1024;
 
@@ -178,6 +214,12 @@ pub const SUPERVISED_MAX_BACKOFF: Duration = Duration::from_secs(300);
 
 /// Cap for waiting on the analyzer webview's ready state.
 pub const WEBVIEW_PAGE_LOAD_WAIT: Duration = Duration::from_secs(8);
+
+/// Cap for waiting on the analyzer webview's private-network rules to compile
+/// and install. Same budget as the page-load wait today, but a separate knob:
+/// rule compilation and page readiness fail for unrelated reasons, and the
+/// analyzer fails closed when this one expires.
+pub const WEBVIEW_RULES_INSTALL_WAIT: Duration = Duration::from_secs(8);
 
 /// Interval between analyzer webview polls (readyState probes, CWV title reads).
 pub const WEBVIEW_POLL_INTERVAL: Duration = Duration::from_millis(100);

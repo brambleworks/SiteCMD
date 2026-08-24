@@ -146,7 +146,12 @@ async fn fetch_latest(
         return Err(format!("Packagist returned status {} for {}", status, name));
     }
 
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let body: serde_json::Value = crate::http_client::read_json_limited(
+        resp,
+        crate::constants::PACKAGIST_RESPONSE_MAX_BYTES,
+        crate::constants::BODY_READ_TIMEOUT,
+    )
+    .await?;
     Ok(build_update_from_response(
         name,
         current,

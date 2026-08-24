@@ -39,6 +39,12 @@ desktop = [
     "dep:tauri-plugin-autostart",
     "dep:tauri-plugin-single-instance",
     "dep:mac-notification-sys",
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-web-kit",
+    "dep:block2",
+    "dep:webview2-com",
+    "dep:windows",
 ]
 browser = ["dep:headless_chrome"]
 
@@ -60,7 +66,16 @@ log = "0.4"
 tracing = { version = "0.1", features = ["log"] }
 tauri = { version = "2.11.0", features = ["tray-icon"], optional = true }
 tauri-plugin-log = { version = "2", optional = true }
-reqwest = { version = "0.13", features = ["json", "rustls", "cookies", "form", "query"] }
+reqwest = { version = "0.13", default-features = false, features = [
+    "json",
+    "rustls-no-provider",
+    "cookies",
+    "form",
+    "query",
+    "charset",
+    "http2",
+    "system-proxy",
+] }
 tokio = { version = "1", features = ["full"] }
 thread-priority = "3"
 url = { version = "2", features = ["serde"] }
@@ -82,8 +97,12 @@ thiserror = "2"
 async-trait = "0.1"
 # Pure Rust TLS stack for async requests and synchronous certificate checks.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-tokio-rustls = "0.26"
-webpki-roots = "1"
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "logging",
+    "tls12",
+    "ring",
+] }
+rustls-platform-verifier = "0.7"
 x509-parser = "0.18"
 rusqlite = { version = "0.40", features = ["backup", "bundled"] }
 postgres = "0.19"
@@ -121,6 +140,16 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"], option
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = { version = "0.6.12", optional = true }
+# Analyzer webview content rules (WKContentRuleList) for private-network subresources.
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-web-kit = { version = "0.3", optional = true, default-features = false, features = ["std", "block2", "WKContentRuleList", "WKContentRuleListStore", "WKUserContentController"] }
+block2 = { version = "0.6", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# Analyzer webview request filter (WebResourceRequested) for private-network subresources.
+webview2-com = { version = "0.38", optional = true }
+windows = { version = "0.61", optional = true, features = ["Win32_System_Com"] }
 
 [dev-dependencies]
 tauri = { version = "2.11.0", features = ["test"] }

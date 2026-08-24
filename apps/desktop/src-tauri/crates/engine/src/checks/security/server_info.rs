@@ -9,6 +9,14 @@ impl Check for ServerInfoCheck {
         "security.server_info"
     }
 
+    /// Never emits its own id; each header gets its own sub-check verdict.
+    fn emitted_ids(&self) -> Vec<String> {
+        ["server_header", "x_powered_by"]
+            .iter()
+            .map(|suffix| format!("security.server_info.{suffix}"))
+            .collect()
+    }
+
     fn category(&self) -> ScanCategory {
         ScanCategory::Security
     }
