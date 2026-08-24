@@ -443,4 +443,30 @@
   .inline-int-repo-tag {
     margin-left: var(--space-snug);
   }
+
+  /* Manual MCP setup: a closed disclosure under the agent tool rows. */
+  .agent-manual-setup {
+    margin-top: var(--space-base);
+  }
+  .agent-manual-setup-summary {
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--muted-foreground);
+  }
+  .agent-manual-setup-summary:hover {
+    color: var(--foreground);
+  }
+  .agent-manual-setup-body {
+    display: grid;
+    gap: var(--space-snug);
+    margin-top: var(--space-snug);
+  }
+  .agent-manual-setup-location {
+    font-family: var(--font-mono);
+  }
+  .agent-manual-setup-code {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
 }

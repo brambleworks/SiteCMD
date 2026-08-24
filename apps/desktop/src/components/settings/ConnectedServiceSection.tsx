@@ -15,6 +15,7 @@ import {
   syncConnectedSite,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 import { AccountRecoveryCard } from "./AccountRecoveryCard";
 import { ConnectedAlertDestinationsSection } from "./ConnectedAlertDestinationsSection";
 import { ConnectedServiceManagement } from "./ConnectedServiceManagement";
@@ -110,7 +111,7 @@ export function ConnectedServiceSection({
       const inspection = await inspectConnectedSync(scope);
       setPayload(inspection.payload);
     } catch (error) {
-      toast.error("Payload inspection failed", String(error));
+      toast.error("Payload inspection failed", userFacingError(error, "Try again in a moment."));
     } finally {
       setInspecting(false);
     }
@@ -135,7 +136,7 @@ export function ConnectedServiceSection({
           : settled,
       );
     } catch (error) {
-      toast.error("Connected sync failed", String(error));
+      toast.error("Connected sync failed", userFacingError(error, "Try again in a moment."));
     } finally {
       setSyncing(false);
     }

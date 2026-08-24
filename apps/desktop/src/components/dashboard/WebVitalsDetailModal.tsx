@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { Monitor, RefreshCw, Smartphone, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { ExtLink } from "@/components/ui/external-link";
+import { userFacingError } from "@/lib/user-facing-error";
 import {
   fetchPageSpeedReport,
   isRateLimitError,
@@ -37,6 +38,7 @@ const RATING_LABEL: Record<VitalRating, string> = {
 interface MetricSpec {
   metric: VitalMetric;
   name: string;
+  plain: string;
   value: number | null;
   format: (v: number) => string;
   help: string;
@@ -45,21 +47,84 @@ interface MetricSpec {
 function labMetrics(report: PageSpeedReport): MetricSpec[] {
   const cls = (v: number) => v.toFixed(2);
   return [
-    { metric: "lcp", name: "LCP", value: report.lcpMs, format: formatMs, help: "≤ 2.5s" },
-    { metric: "cls", name: "CLS", value: report.cls, format: cls, help: "≤ 0.1" },
-    { metric: "tbt", name: "TBT", value: report.tbtMs, format: formatMs, help: "≤ 200ms" },
-    { metric: "fcp", name: "FCP", value: report.fcpMs, format: formatMs, help: "≤ 1.8s" },
-    { metric: "ttfb", name: "TTFB", value: report.ttfbMs, format: formatMs, help: "≤ 0.8s" },
-    { metric: "si", name: "Speed Index", value: report.siMs, format: formatMs, help: "≤ 3.4s" },
+    {
+      metric: "lcp",
+      name: "LCP",
+      plain: "Largest content load",
+      value: report.lcpMs,
+      format: formatMs,
+      help: "≤ 2.5s",
+    },
+    {
+      metric: "cls",
+      name: "CLS",
+      plain: "Layout shift",
+      value: report.cls,
+      format: cls,
+      help: "≤ 0.1",
+    },
+    {
+      metric: "tbt",
+      name: "TBT",
+      plain: "Main-thread blocking",
+      value: report.tbtMs,
+      format: formatMs,
+      help: "≤ 200ms",
+    },
+    {
+      metric: "fcp",
+      name: "FCP",
+      plain: "First content paint",
+      value: report.fcpMs,
+      format: formatMs,
+      help: "≤ 1.8s",
+    },
+    {
+      metric: "ttfb",
+      name: "TTFB",
+      plain: "Server response time",
+      value: report.ttfbMs,
+      format: formatMs,
+      help: "≤ 0.8s",
+    },
+    {
+      metric: "si",
+      name: "Speed Index",
+      plain: "Visual completeness",
+      value: report.siMs,
+      format: formatMs,
+      help: "≤ 3.4s",
+    },
   ];
 }
 
 function fieldMetrics(report: PageSpeedReport): MetricSpec[] {
   const cls = (v: number) => v.toFixed(2);
   return [
-    { metric: "lcp", name: "LCP", value: report.fieldLcpMs, format: formatMs, help: "≤ 2.5s" },
-    { metric: "cls", name: "CLS", value: report.fieldCls, format: cls, help: "≤ 0.1" },
-    { metric: "inp", name: "INP", value: report.fieldInpMs, format: formatMs, help: "≤ 200ms" },
+    {
+      metric: "lcp",
+      name: "LCP",
+      plain: "Largest content load",
+      value: report.fieldLcpMs,
+      format: formatMs,
+      help: "≤ 2.5s",
+    },
+    {
+      metric: "cls",
+      name: "CLS",
+      plain: "Layout shift",
+      value: report.fieldCls,
+      format: cls,
+      help: "≤ 0.1",
+    },
+    {
+      metric: "inp",
+      name: "INP",
+      plain: "Input response",
+      value: report.fieldInpMs,
+      format: formatMs,
+      help: "≤ 200ms",
+    },
   ];
 }
 
@@ -70,6 +135,7 @@ function MetricCell({ spec }: { spec: MetricSpec }) {
       <span className="tile__label">
         <span>{spec.name}</span>
       </span>
+      <span className="text-meta vitals-metric-plain">{spec.plain}</span>
       <span className={`vitals-metric-value ${ratingColorClass(rating)}`}>
         {spec.value !== null ? spec.format(spec.value) : "--"}
       </span>
@@ -184,13 +250,7 @@ export function WebVitalsDetailModal({ url, hostname, onClose }: Props) {
         setReport(await fetchPageSpeedReport(url, target));
       } catch (err) {
         setReport(null);
-        setError(
-          typeof err === "string"
-            ? err
-            : err instanceof Error
-              ? err.message
-              : "PageSpeed request failed",
-        );
+        setError(userFacingError(err, "PageSpeed Insights could not run for this page."));
       } finally {
         setLoading(false);
       }
@@ -208,7 +268,7 @@ export function WebVitalsDetailModal({ url, hostname, onClose }: Props) {
       setKeyInput("");
       await load(strategy);
     } catch (err) {
-      setError(typeof err === "string" ? err : "Could not save the API key");
+      setError(userFacingError(err, "Your change was not saved. Try again."));
     } finally {
       setSavingKey(false);
     }
@@ -231,141 +291,118 @@ export function WebVitalsDetailModal({ url, hostname, onClose }: Props) {
     };
   }, []);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
-
-  return createPortal(
-    <div className="fix-prompt-modal-backdrop" onClick={onClose}>
-      <section
-        className="fix-prompt-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="web-vitals-title"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="fix-prompt-modal-header">
-          <div className="min-w-0">
-            <h3 id="web-vitals-title" className="fix-prompt-modal-title">
-              Web Vitals
-            </h3>
-            <p className="text-meta text-truncate vitals-modal-subtitle">
-              {hostname} · Google PageSpeed Insights
-            </p>
-          </div>
-          <div className="row no-shrink">
-            <div className="toggle-group" role="group" aria-label="PageSpeed strategy">
-              <Button
-                unstyled
-                type="button"
-                className={`toggle-btn ${strategy === "mobile" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
-                aria-pressed={strategy === "mobile"}
-                onClick={() => setStrategy("mobile")}>
-                <Smartphone className="icon-sm vitals-toggle-icon" />
-                Mobile
-              </Button>
-              <Button
-                unstyled
-                type="button"
-                className={`toggle-btn ${strategy === "desktop" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
-                aria-pressed={strategy === "desktop"}
-                onClick={() => setStrategy("desktop")}>
-                <Monitor className="icon-sm vitals-toggle-icon" />
-                Desktop
-              </Button>
-            </div>
+  return (
+    <Dialog labelledBy="web-vitals-title" onClose={onClose} className="fix-prompt-modal">
+      <div className="fix-prompt-modal-header">
+        <div className="min-w-0">
+          <h3 id="web-vitals-title" className="fix-prompt-modal-title">
+            Web Vitals
+          </h3>
+          <p className="text-meta text-truncate vitals-modal-subtitle">
+            {hostname} · Google PageSpeed Insights
+          </p>
+        </div>
+        <div className="row no-shrink">
+          <div className="toggle-group" role="group" aria-label="PageSpeed strategy">
             <Button
               unstyled
               type="button"
-              className="details-close"
-              aria-label="Close"
-              onClick={onClose}>
-              <X />
+              className={`toggle-btn ${strategy === "mobile" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
+              aria-pressed={strategy === "mobile"}
+              onClick={() => setStrategy("mobile")}>
+              <Smartphone className="icon-sm vitals-toggle-icon" />
+              Mobile
+            </Button>
+            <Button
+              unstyled
+              type="button"
+              className={`toggle-btn ${strategy === "desktop" ? "toggle-btn-active" : "toggle-btn-inactive"}`}
+              aria-pressed={strategy === "desktop"}
+              onClick={() => setStrategy("desktop")}>
+              <Monitor className="icon-sm vitals-toggle-icon" />
+              Desktop
             </Button>
           </div>
-        </div>
-
-        <div className="agent-handoff-body">
-          {loading ? (
-            <div className="vitals-modal-status">
-              <RefreshCw
-                className="icon-lg animate-spin text-muted-foreground"
-                aria-hidden="true"
-              />
-              <p className="text-body-muted">Running PageSpeed Insights for {hostname}...</p>
-            </div>
-          ) : error ? (
-            <div className="vitals-modal-status">
-              <p className="text-body vitals-heading">Couldn&apos;t load PageSpeed</p>
-              <p className="text-body-muted">{error}</p>
-              {isRateLimitError(error) ? (
-                <div className="vitals-key-prompt">
-                  <p className="text-meta">
-                    {hasKey
-                      ? "A PageSpeed API key is saved, but the shared limit was still hit. Wait a minute and retry, or replace the key below."
-                      : "The keyless PageSpeed API is shared and rate-limited. Add a free API key (25,000 runs/day) to fix this - it is stored in your OS keychain."}
-                  </p>
-                  <div className="vitals-key-row">
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      aria-label="PageSpeed API key"
-                      value={keyInput}
-                      onChange={(event) => setKeyInput(event.target.value)}
-                      placeholder={hasKey ? "Paste a new key" : "Paste your PageSpeed API key"}
-                      className="field-control field-control--card"
-                      disabled={savingKey}
-                    />
-                    <Button
-                      type="button"
-                      onClick={saveKeyAndRetry}
-                      disabled={!keyInput.trim() || savingKey}>
-                      {savingKey ? "Saving..." : "Save & retry"}
-                    </Button>
-                  </div>
-                  <ExtLink
-                    href="https://developers.google.com/speed/docs/insights/v5/get-started#APIKey"
-                    className="vitals-key-link">
-                    Get a free key →
-                  </ExtLink>
-                </div>
-              ) : (
-                <p className="text-meta">
-                  PageSpeed only works on publicly reachable URLs (not localhost or private
-                  networks).
-                </p>
-              )}
-              <Button variant="outline" type="button" onClick={() => load(strategy)}>
-                Try again
-              </Button>
-            </div>
-          ) : report ? (
-            <ReportView report={report} />
-          ) : null}
-        </div>
-
-        <div className="fix-prompt-modal-footer">
           <Button
-            variant="outline"
+            unstyled
             type="button"
-            onClick={() => load(strategy)}
-            disabled={loading}
-            className="modal-footer-lead">
-            <RefreshCw className={`icon-md ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-          <Button variant="outline" type="button" onClick={onClose}>
-            Close
+            className="details-close"
+            aria-label="Close"
+            onClick={onClose}>
+            <X />
           </Button>
         </div>
-      </section>
-    </div>,
-    document.body,
+      </div>
+
+      <div className="agent-handoff-body">
+        {loading ? (
+          <div className="vitals-modal-status">
+            <RefreshCw className="icon-lg animate-spin text-muted-foreground" aria-hidden="true" />
+            <p className="text-body-muted">Running PageSpeed Insights for {hostname}...</p>
+          </div>
+        ) : error ? (
+          <div className="vitals-modal-status">
+            <p className="text-body vitals-heading">Couldn&apos;t load PageSpeed</p>
+            <p className="text-body-muted">{error}</p>
+            {isRateLimitError(error) ? (
+              <div className="vitals-key-prompt">
+                <p className="text-meta">
+                  {hasKey
+                    ? "A PageSpeed API key is saved, but the shared limit was still hit. Wait a minute and retry, or replace the key below."
+                    : "The keyless PageSpeed API is shared and rate-limited. Add a free API key (25,000 runs/day) to fix this - it is stored in your OS keychain."}
+                </p>
+                <div className="vitals-key-row">
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    aria-label="PageSpeed API key"
+                    value={keyInput}
+                    onChange={(event) => setKeyInput(event.target.value)}
+                    placeholder={hasKey ? "Paste a new key" : "Paste your PageSpeed API key"}
+                    className="field-control field-control--card"
+                    disabled={savingKey}
+                  />
+                  <Button
+                    type="button"
+                    onClick={saveKeyAndRetry}
+                    disabled={!keyInput.trim() || savingKey}>
+                    {savingKey ? "Saving..." : "Save & retry"}
+                  </Button>
+                </div>
+                <ExtLink
+                  href="https://developers.google.com/speed/docs/insights/v5/get-started#APIKey"
+                  className="vitals-key-link">
+                  Get a free key →
+                </ExtLink>
+              </div>
+            ) : (
+              <p className="text-meta">
+                PageSpeed only works on publicly reachable URLs (not localhost or private networks).
+              </p>
+            )}
+            <Button variant="outline" type="button" onClick={() => load(strategy)}>
+              Try again
+            </Button>
+          </div>
+        ) : report ? (
+          <ReportView report={report} />
+        ) : null}
+      </div>
+
+      <div className="fix-prompt-modal-footer">
+        <Button
+          variant="outline"
+          type="button"
+          onClick={() => load(strategy)}
+          disabled={loading}
+          className="modal-footer-lead">
+          <RefreshCw className={`icon-md ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+        <Button variant="outline" type="button" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </Dialog>
   );
 }

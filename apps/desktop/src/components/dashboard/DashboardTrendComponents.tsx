@@ -245,7 +245,12 @@ function CategoryTrendCard({
             showEndpoints={false}
           />
         ) : (
-          <ProgressBar percent={score} color={cssVar} trackClassName="category-trend-track" />
+          <ProgressBar
+            percent={score}
+            color={cssVar}
+            label={`${label} score`}
+            trackClassName="category-trend-track"
+          />
         )}
       </div>
     </Button>

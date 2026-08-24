@@ -43,19 +43,19 @@ export function desktopFrontendDisplayFailures(read, sourceFiles) {
     `Desktop URL display labels must use lib/utils.ts URL display helpers instead of local regex, hostname, or pathname parsing: ${inlineUrlDisplayFiles.join(", ")}`,
   );
 
-  // The backdrop must clear the top bar and the scan column must remain
-  // reachable when it exceeds the viewport height.
+  // The scan overlay has no bounded height of its own (unlike every other
+  // Dialog panel, which self-limits via max-height and an internal scroll
+  // region), so it must stay reachable when it exceeds a short window.
   const layoutCss = read("apps/desktop/src/styles/layout.css");
   const scanCss = read("apps/desktop/src/styles/pages/scan.css");
   const scanOverlaySource = read("apps/desktop/src/components/scan/ScanOverlay.tsx");
-  const scanBackdropRule = layoutCss.split(".overlay-backdrop--scan")[1]?.split("}")[0] ?? "";
+  const dialogOpenRule = layoutCss.split(".dialog[open]")[1]?.split("}")[0] ?? "";
   const scanContentRule = scanCss.split(".scan-overlay-content")[1]?.split("}")[0] ?? "";
   check(
-    /top:\s*3rem/.test(scanBackdropRule) &&
-      /overflow-y:\s*auto/.test(scanBackdropRule) &&
+    /overflow-y:\s*auto/.test(dialogOpenRule) &&
       scanOverlaySource.includes('className="scan-overlay-content"') &&
       /margin:\s*auto/.test(scanContentRule),
-    "Scan overlay must stay reachable in short windows: .overlay-backdrop--scan needs top: 3rem + overflow-y: auto (the z-110 top bar paints above it), and .scan-overlay-content needs margin: auto so overflow top-aligns and scrolls instead of clipping.",
+    "Scan overlay must stay reachable in short windows: .dialog[open] needs overflow-y: auto, and .scan-overlay-content needs margin: auto (not align-items alone) so overflow top-aligns and scrolls instead of clipping.",
   );
 
   // Persistent route banners can outlive transient scan errors.

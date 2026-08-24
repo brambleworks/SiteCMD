@@ -124,7 +124,7 @@ function buildUpdateSections({
     if (items.length > 0) {
       sections.push({
         label: `MAJOR UPDATES (${items.length})`,
-        color: "text-amber-400",
+        color: "text-severity-medium",
         updates: items,
       });
     }
@@ -146,7 +146,7 @@ function buildUpdateSections({
     if (items.length > 0) {
       sections.push({
         label: `PATCH UPDATES (${items.length})`,
-        color: "text-emerald-400",
+        color: "text-score-excellent",
         updates: items,
       });
     }

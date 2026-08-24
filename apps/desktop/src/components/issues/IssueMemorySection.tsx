@@ -128,13 +128,13 @@ export function IssueMemoryRail(props: IssueMemorySectionProps) {
           {memory.lastVerified ? (
             <div className="dossier-rail-row">
               <span className="dossier-rail-row-key">Verified</span>
-              <span className="dossier-rail-row-value text-emerald-300">
+              <span className="dossier-rail-row-value text-score-excellent">
                 {formatTimestamp(memory.lastVerified)}
               </span>
             </div>
           ) : null}
           {memory.regressedAfterDeploy ? (
-            <p className="text-meta text-amber-300 text-relaxed">
+            <p className="text-meta text-severity-medium text-relaxed">
               Regressed after {memory.regressedAfterDeploy.title}.
             </p>
           ) : null}

@@ -12,6 +12,8 @@ export type { FixEffort } from "../fix-guide-shared";
 export { getEffortLabel } from "../fix-guide-shared";
 
 export interface FixGuide extends FixGuideMeta {
+  /** Absent on catalog-resolved guides, which carry their own prose. */
+  lead?: string;
   steps: string[];
 }
 
@@ -80,5 +82,10 @@ export function getFixGuide(checkId: string): FixGuide | null {
 
   if (!entry) return null;
 
-  return { effort: entry.effort, effortMinutes: entry.effortMinutes, steps: entry.default };
+  return {
+    effort: entry.effort,
+    effortMinutes: entry.effortMinutes,
+    lead: entry.lead,
+    steps: entry.default,
+  };
 }

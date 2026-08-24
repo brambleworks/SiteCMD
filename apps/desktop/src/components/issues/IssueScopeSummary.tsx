@@ -4,7 +4,7 @@ import type { IssueScopeMeta } from "@/lib/issue-scope";
 const SCOPE_TEXT: Record<IssueScopeMeta["scope"], string> = {
   page: "text-primary",
   site: "text-muted-foreground",
-  code: "text-cyan-400",
+  code: "text-cat-code",
 };
 
 export function IssueScopeInline({

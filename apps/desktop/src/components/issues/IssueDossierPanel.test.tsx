@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Dialog } from "@/components/ui/dialog";
 import { IssueDossierPanel } from "./IssueDossierPanel";
 
 describe("IssueDossierPanel", () => {
@@ -46,10 +47,11 @@ describe("IssueDossierPanel", () => {
     );
 
     const panel = screen.getByRole("dialog", { name: "Missing canonical tag" });
-    const backdrop = document.querySelector(".dossier-backdrop");
 
+    // The native <dialog> is portaled straight to document.body, so it (and its
+    // native ::backdrop) always escapes a transformed or overflow-hidden ancestor.
+    expect(panel.tagName).toBe("DIALOG");
     expect(panel.parentElement).toBe(document.body);
-    expect(backdrop?.parentElement).toBe(document.body);
     expect(panel.closest("[data-testid='page-shell']")).toBeNull();
   });
 
@@ -66,10 +68,9 @@ describe("IssueDossierPanel", () => {
       </div>,
     );
 
-    const backdrop = document.querySelector(".dossier-backdrop");
-    expect(backdrop).toHaveClass("dossier-backdrop");
+    const dialog = screen.getByRole("dialog", { name: "Missing canonical tag" });
 
-    fireEvent.pointerDown(backdrop!);
+    fireEvent.pointerDown(dialog);
 
     act(() => {
       vi.advanceTimersByTime(180);
@@ -79,7 +80,10 @@ describe("IssueDossierPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("does not close when the user clicks another dossier switch target", () => {
+  it("closes on a row click even when the row carries a stale switch marker", () => {
+    // The one-click "switch dossier without closing" exemption was removed:
+    // showModal() makes the rest of the page inert, so that UX is impossible
+    // under a real modal dialog. A row click is now an ordinary outside click.
     const onClose = vi.fn();
 
     render(
@@ -94,6 +98,32 @@ describe("IssueDossierPanel", () => {
     );
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Another issue" }));
+
+    act(() => {
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores clicks on a different dialog stacked on top", () => {
+    const onClose = vi.fn();
+    const onCloseHandoff = vi.fn();
+
+    render(
+      <div>
+        <IssueDossierPanel title="Missing canonical tag" onClose={onClose}>
+          <div>Dossier content</div>
+        </IssueDossierPanel>
+        <Dialog label="Fix with your agent" onClose={onCloseHandoff}>
+          <button type="button">Close</button>
+        </Dialog>
+      </div>,
+    );
+
+    const handoff = screen.getByRole("dialog", { name: "Fix with your agent" });
+    fireEvent.pointerDown(handoff);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Close" }));
 
     act(() => {
       vi.advanceTimersByTime(180);

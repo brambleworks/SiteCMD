@@ -507,7 +507,9 @@
   .topbar-env-suffix {
     margin-left: 0.375rem;
     font-size: var(--text-xs);
-    color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+    /* 60% read 3.92:1 against the top bar in the dark theme, short of the 4.5:1 AA
+       floor for 11px text (axe color-contrast, e2e/smoke.spec.ts seeded navigation). */
+    color: color-mix(in oklab, var(--muted-foreground) 75%, transparent);
     text-transform: capitalize;
   }
   .topbar-env-host {

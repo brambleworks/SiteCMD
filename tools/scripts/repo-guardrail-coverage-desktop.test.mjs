@@ -3,6 +3,7 @@ import {
   GUARDRAIL_TEST_TIMEOUT_MS,
   ROOT,
   expectGuardrailFailure,
+  guardrailFailuresFor,
   mustMutate,
   read,
   readFixtureFile,
@@ -29,6 +30,7 @@ const {
   emptyTestBodyFailures,
   engineVocabFailures,
   eventFabricFailures,
+  handRolledDialogFailures,
   issueStateSafetyFailures,
   overlayIo,
   performanceGateFailures,
@@ -154,6 +156,62 @@ describe.concurrent(
         },
         "Desktop className strings with six or more utility-shaped classes must use shared component classes",
       );
+    });
+
+    it("rejects raw Tailwind palette classes in favor of semantic tokens", () => {
+      expectGuardrailFailure(
+        desktopStyleConsistencyFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenPalette.tsx",
+            'export function BrokenPalette() { return <p className="text-emerald-300">ok</p>; }\n',
+          );
+        },
+        "Desktop raw palette classes regressed",
+      );
+    });
+
+    it("rejects raw palette text classes left behind in colors.css", () => {
+      expectGuardrailFailure(
+        desktopStyleConsistencyFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/styles/colors.css",
+            `${readFixtureFile(fixtureRoot, "apps/desktop/src/styles/colors.css")}
+.text-cyan-300 {
+  color: var(--cyan-300);
+}
+`,
+          );
+        },
+        "Desktop raw palette text classes defined in colors.css",
+      );
+    });
+
+    it("points at token classes colors.css actually defines", () => {
+      const message = guardrailFailuresFor(desktopStyleConsistencyFailures, (fixtureRoot) => {
+        writeFixtureFile(
+          fixtureRoot,
+          "apps/desktop/src/components/dashboard/BrokenPalette.tsx",
+          'export function BrokenPalette() { return <p className="text-emerald-300">ok</p>; }\n',
+        );
+      });
+      const remediation = /Use ([^:]+) from styles\/colors\.css/.exec(message);
+      expect(remediation, `no remediation sentence in: ${message}`).not.toBeNull();
+      const colors = read("apps/desktop/src/styles/colors.css");
+      const named = remediation[1]
+        .split(/,|\bor\b/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      expect(named.length).toBeGreaterThan(2);
+      for (const className of named) {
+        // A prefix a person can grep for, so remediation that names a class shape
+        // the stylesheet never defines (text-category-*) fails here.
+        const selector = className.endsWith("*") ? `.${className.slice(0, -1)}` : `.${className} {`;
+        expect(colors, `${className} is not defined in colors.css`).toContain(selector);
+      }
     });
 
     it("rejects arbitrary pixel typography and spacing", () => {
@@ -290,6 +348,25 @@ describe.concurrent(
           );
         },
         "Desktop URL display labels must use lib/utils.ts URL display helpers instead of local regex, hostname, or pathname parsing",
+      );
+    });
+
+    it("rejects a scan overlay that loses its short-window scroll fallback", () => {
+      expectGuardrailFailure(
+        desktopFrontendDisplayFailures,
+        (fixtureRoot) => {
+          const layoutPath = "apps/desktop/src/styles/layout.css";
+          const source = readFixtureFile(fixtureRoot, layoutPath);
+          writeFixtureFile(
+            fixtureRoot,
+            layoutPath,
+            source.replace(
+              "       align-items alone, is what keeps the scrolled-to-top edge reachable. */\n    overflow-y: auto;\n  }\n  .dialog::backdrop {",
+              "       align-items alone, is what keeps the scrolled-to-top edge reachable. */\n  }\n  .dialog::backdrop {",
+            ),
+          );
+        },
+        "Scan overlay must stay reachable in short windows",
       );
     });
 
@@ -954,7 +1031,7 @@ describe.concurrent(
       expect(guardrails).toContain("Desktop scan logs must use log_safe_url_target");
       expect(guardrails).toContain("Desktop frontend logs must redact and truncate");
       expect(guardrails).toContain(
-        "Desktop issue dossier overlays must render through document.body",
+        "Desktop issue dossier overlays must render through the Dialog primitive",
       );
       expect(guardrails).toContain('window.open(..., "_blank") must include noopener,noreferrer');
       expect(guardrails).toContain(
@@ -988,19 +1065,17 @@ describe.concurrent(
       expectGuardrailFailure(
         desktopFrontendStateFailures,
         (fixtureRoot) => {
-          const panel = readFixtureFile(
+          const dialogPrimitive = readFixtureFile(
             fixtureRoot,
-            "apps/desktop/src/components/issues/IssueDossierPanel.tsx",
+            "apps/desktop/src/components/ui/dialog.tsx",
           );
           writeFixtureFile(
             fixtureRoot,
-            "apps/desktop/src/components/issues/IssueDossierPanel.tsx",
-            panel
-              .replace('import { createPortal } from "react-dom";\n', "")
-              .replace("return createPortal(panel, document.body);", "return panel;"),
+            "apps/desktop/src/components/ui/dialog.tsx",
+            dialogPrimitive.replace("document.body,", "document.getElementById('root'),"),
           );
         },
-        "Desktop issue dossier overlays must render through document.body",
+        "Desktop issue dossier overlays must render through the Dialog primitive",
       );
     });
 
@@ -1241,6 +1316,48 @@ fn category_str(category: &ScanCategory) -> &'static str {
       );
       expect(guardrails).toContain(
         "causal graph JSON must be parsed as unknown generated data before use",
+      );
+    });
+
+    it("rejects a new hand-rolled role=dialog outside the Dialog primitive", () => {
+      expectGuardrailFailure(
+        handRolledDialogFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenModal.tsx",
+            'export function BrokenModal() { return <div role="dialog" aria-modal="true" />; }\n',
+          );
+        },
+        'Hand-rolled role="dialog" count regressed',
+      );
+    });
+
+    it("rejects a new hand-rolled aria-modal without role=dialog", () => {
+      expectGuardrailFailure(
+        handRolledDialogFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenAriaModal.tsx",
+            'export function BrokenAriaModal() { return <div aria-modal="true" />; }\n',
+          );
+        },
+        'Hand-rolled role="dialog" count regressed',
+      );
+    });
+
+    it("rejects a raw <dialog> tag reached outside the Dialog primitive", () => {
+      expectGuardrailFailure(
+        handRolledDialogFailures,
+        (fixtureRoot) => {
+          writeFixtureFile(
+            fixtureRoot,
+            "apps/desktop/src/components/dashboard/BrokenRawDialog.tsx",
+            "export function BrokenRawDialog() { return <dialog open />; }\n",
+          );
+        },
+        'Hand-rolled role="dialog" count regressed',
       );
     });
 

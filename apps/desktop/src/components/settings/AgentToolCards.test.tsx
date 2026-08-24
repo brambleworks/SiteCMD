@@ -261,7 +261,7 @@ describe("AgentToolCards", () => {
     fireEvent.click(await screen.findByText("Claude Code"));
     fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
 
-    expect(await screen.findByText("Error: config write denied")).toBeInTheDocument();
+    expect(await screen.findByText("Config write denied.")).toBeInTheDocument();
     expect(screen.getByText(PLANNED_CHANGE)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeEnabled();
   });

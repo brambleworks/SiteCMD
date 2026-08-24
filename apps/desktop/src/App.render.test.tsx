@@ -38,6 +38,10 @@ const {
   getCurrentDeepLinksMock: vi.fn(),
 }));
 
+const { postScanSummaryOpenRef } = vi.hoisted(() => ({
+  postScanSummaryOpenRef: { current: false },
+}));
+
 vi.mock("@/lib/tauri-invoke", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
@@ -112,6 +116,30 @@ vi.mock("@/components/layout/NavSidebar", () => ({
 
 vi.mock("@/components/layout/CommandPalette", () => ({
   CommandPalette: () => null,
+}));
+
+vi.mock("@/app/usePostScanSummary", () => ({
+  usePostScanSummary: () => {
+    const [open, setOpen] = React.useState(postScanSummaryOpenRef.current);
+    return {
+      scanSummary: open ? ({ id: "test-summary" } as never) : null,
+      showScanSummary: open,
+      closeScanSummary: () => setOpen(false),
+    };
+  },
+}));
+
+vi.mock("@/components/scan/ScanSummaryOverlay", () => ({
+  ScanSummaryOverlay: ({ onReviewIssues }: { onReviewIssues: () => void }) =>
+    React.createElement(
+      "div",
+      { role: "dialog", "aria-label": "Scan summary" },
+      React.createElement("button", { type: "button", onClick: onReviewIssues }, "Review Issues"),
+    ),
+}));
+
+vi.mock("@/pages/IssuesPage", () => ({
+  IssuesPage: () => React.createElement("div", null, "Issues page"),
 }));
 
 vi.mock("@/hooks/useProject", () => ({
@@ -196,9 +224,13 @@ vi.mock("@/lib/update-priority", () => ({
   buildUpdateCampaignCopy: vi.fn(() => null),
 }));
 
-vi.mock("@/lib/onboarding-setup", () => ({
-  consumeOnboardingSetupStepForTarget: vi.fn(),
-}));
+vi.mock("@/lib/onboarding-setup", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/onboarding-setup")>();
+  return {
+    ...actual,
+    consumeOnboardingSetupStepForTarget: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/scan-completion-effects", () => ({
   handleCodeScanCompletion: vi.fn(),
@@ -313,6 +345,7 @@ function buildBadgeSnapshot(overrides: Record<string, unknown> = {}) {
 
 describe("App shell rendering", () => {
   beforeEach(() => {
+    postScanSummaryOpenRef.current = false;
     vi.useRealTimers();
     window.localStorage.clear();
     invokeMock.mockReset();
@@ -605,4 +638,42 @@ describe("App shell rendering", () => {
 
     expect(publishProjectNavBadgesMock).not.toHaveBeenCalledWith(1, alphaSnapshot);
   });
+
+  it("keeps the telemetry consent prompt behind the scan summary and the walkthrough", async () => {
+    postScanSummaryOpenRef.current = true;
+    window.localStorage.setItem("sitecmd:onboarding:first-scan-completed", "1");
+    window.localStorage.setItem("sitecmd_setup_pending:1", JSON.stringify(["baseline-review"]));
+    useScanMock.mockReturnValue({
+      ...useScanMock(),
+      state: "complete",
+      result: {
+        url: "https://alpha.test",
+        mode: "live",
+        scanType: "health",
+        overallScore: 82,
+        categories: [],
+        issues: [],
+        detectedStack: null,
+        durationMs: 900,
+        timestamp: "2026-08-22T09:00:00Z",
+      },
+    });
+    const { default: App } = await import("./App");
+
+    render(<App />);
+
+    expect(await screen.findByRole("dialog", { name: "Scan summary" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Help improve SiteCMD" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review Issues" }));
+
+    expect(await screen.findByLabelText("First run walkthrough")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Help improve SiteCMD" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close walkthrough" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Help improve SiteCMD" }),
+    ).toBeInTheDocument();
+  }, 20_000);
 });

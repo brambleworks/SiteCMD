@@ -11,6 +11,7 @@ import {
   verifyConnectedSiteProvider,
 } from "@/lib/commands";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface SiteOwnershipCardProps {
   projectId: number;
@@ -55,7 +56,10 @@ export function SiteOwnershipCard({
         toast.error("Not verified yet", "The challenge was not found where this method looks.");
       }
     } catch (error) {
-      toast.error("Verification failed", String(error));
+      toast.error(
+        "Verification failed",
+        userFacingError(error, "Publish the record, then run the verification again."),
+      );
     } finally {
       setVerifying(false);
     }
@@ -79,7 +83,10 @@ export function SiteOwnershipCard({
         );
       }
     } catch (error) {
-      toast.error("Provider verification failed", String(error));
+      toast.error(
+        "Provider verification failed",
+        userFacingError(error, "Publish the record, then run the verification again."),
+      );
     } finally {
       setVerifying(false);
     }

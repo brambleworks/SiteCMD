@@ -11,6 +11,7 @@ import {
 } from "@/lib/desktop-actions";
 import { queuePendingVerification } from "@/lib/pending-verification";
 import { useToast } from "@/hooks/useToast";
+import { userFacingError } from "@/lib/user-facing-error";
 
 /** Minimal file shape the open/reveal handlers need; FixLocation satisfies it. */
 interface DossierFileTarget {
@@ -131,7 +132,10 @@ export function useIssueDossierActions(config: IssueDossierActionsConfig): Issue
     } catch (err) {
       if (isProjectCommandCancelled(err)) return;
       setLastCommandResult(null);
-      toast.error("Command failed", String(err));
+      toast.error(
+        "Command failed",
+        userFacingError(err, "Check that the path still exists and SiteCMD can read it."),
+      );
     } finally {
       setRunningCommand(false);
     }
@@ -144,7 +148,13 @@ export function useIssueDossierActions(config: IssueDossierActionsConfig): Issue
       await queueWorkingState(reasons.openedPath, defaultFilePath);
       toast.success("Opened in editor", defaultRelativePath);
     } catch (err) {
-      toast.error("Could not open editor", String(err));
+      toast.error(
+        "Could not open editor",
+        userFacingError(
+          err,
+          "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
+        ),
+      );
     }
   };
 
@@ -154,7 +164,13 @@ export function useIssueDossierActions(config: IssueDossierActionsConfig): Issue
       await queueWorkingState(reasons.openedPath, file.absolutePath);
       toast.success("Opened in editor", file.relativePath ?? undefined);
     } catch (err) {
-      toast.error("Could not open editor", String(err));
+      toast.error(
+        "Could not open editor",
+        userFacingError(
+          err,
+          "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
+        ),
+      );
     }
   };
 
@@ -170,7 +186,10 @@ export function useIssueDossierActions(config: IssueDossierActionsConfig): Issue
         toast.success("Revealed file", defaultRelativePath);
       }
     } catch (err) {
-      toast.error(isProjectRoot ? "Could not reveal folder" : "Could not reveal file", String(err));
+      toast.error(
+        isProjectRoot ? "Could not reveal folder" : "Could not reveal file",
+        userFacingError(err, "SiteCMD could not open it. Open the file from your editor instead."),
+      );
     }
   };
 
@@ -180,7 +199,10 @@ export function useIssueDossierActions(config: IssueDossierActionsConfig): Issue
       await queueWorkingState(reasons.revealedPath, file.absolutePath);
       toast.success("Revealed file", file.relativePath ?? undefined);
     } catch (err) {
-      toast.error("Could not reveal file", String(err));
+      toast.error(
+        "Could not reveal file",
+        userFacingError(err, "SiteCMD could not open it. Open the file from your editor instead."),
+      );
     }
   };
 

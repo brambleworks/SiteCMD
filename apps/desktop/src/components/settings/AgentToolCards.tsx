@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ClaudeLogo, CodexLogo, CursorLogo, WindsurfLogo } from "@/components/icons/BrandLogos";
 import { IntegrationRow } from "./IntegrationRow";
 import { IntegrationModal } from "./IntegrationModal";
+import { AgentToolManualSetup } from "./AgentToolManualSetup";
 import {
   AGENT_TOOL_LABELS,
   detectAgentTools,
@@ -16,6 +17,7 @@ import {
 import { queryKeys } from "@/lib/query/query-keys";
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 import { useVisibilityRefresh } from "@/lib/useVisibilityRefresh";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const AGENT_TOOL_LOGOS: Record<AgentTool, ComponentType<{ className?: string }>> = {
   "claude-code": ClaudeLogo,
@@ -83,7 +85,10 @@ export function AgentToolCards() {
       setModalTool(null);
       toast.success(`${AGENT_TOOL_LABELS[tool]} ${wasRepair ? "repaired" : "connected"}`);
     } catch (error) {
-      setCardErrors((prev) => ({ ...prev, [tool]: String(error) }));
+      setCardErrors((prev) => ({
+        ...prev,
+        [tool]: userFacingError(error, "Your change was not saved. Try again."),
+      }));
     } finally {
       setToolBusy(tool, false);
     }
@@ -97,7 +102,10 @@ export function AgentToolCards() {
       setModalTool(null);
       toast.info(`${AGENT_TOOL_LABELS[tool]} disconnected`);
     } catch (error) {
-      setCardErrors((prev) => ({ ...prev, [tool]: String(error) }));
+      setCardErrors((prev) => ({
+        ...prev,
+        [tool]: userFacingError(error, "Your change was not saved. Try again."),
+      }));
     } finally {
       setToolBusy(tool, false);
     }
@@ -167,7 +175,8 @@ export function AgentToolCards() {
       return (
         <div className="subtle-divider-top integration-modal-body">
           <p className="text-13-muted text-relaxed">
-            Install {label} first, then come back here to connect it.
+            SiteCMD could not find {label} on this computer. Install it and come back, or use Manual
+            setup under the agent tool list to paste the config yourself.
           </p>
         </div>
       );
@@ -254,6 +263,7 @@ export function AgentToolCards() {
             </div>
           </>
         )}
+        <AgentToolManualSetup />
       </section>
 
       {modalItem ? (

@@ -10,7 +10,11 @@ import { useAppScanActions } from "@/app/useAppScanActions";
 import { useBaselineScanQueue } from "@/app/useBaselineScanQueue";
 import { FirstRunWalkthrough } from "@/app/lazy-pages";
 import { StartupShell } from "@/app/StartupShell";
-import { createProjectDeletedHandler, getProjectBootstrapState } from "@/app/app-shell-helpers";
+import {
+  createProjectDeletedHandler,
+  getProjectBootstrapState,
+  shouldShowTelemetryConsentPrompt,
+} from "@/app/app-shell-helpers";
 import { useAppKeyboardShortcuts } from "@/app/useAppKeyboardShortcuts";
 import { useDeepLinkTargets } from "@/app/useDeepLinkTargets";
 import { useDesktopNotificationActions } from "@/app/useDesktopNotificationActions";
@@ -29,7 +33,7 @@ import { ValidationStaleBanner } from "@/components/billing/ValidationStaleBanne
 import { TelemetryConsentPrompt } from "@/components/privacy/TelemetryConsentPrompt";
 import { useHasCompletedFirstScan } from "@/lib/onboarding-flags";
 import { useLicenseActivateDeepLink } from "@/hooks/useLicenseActivateDeepLink";
-import { NavSidebar, type NavPage } from "@/components/layout/NavSidebar";
+import { NavSidebar, type NavTarget } from "@/components/layout/NavSidebar";
 import { toNavPage } from "@/components/layout/nav-page";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ScanSummaryOverlay } from "@/components/scan/ScanSummaryOverlay";
@@ -326,11 +330,18 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
   }, [activeProjectId, firstRunWalkthroughKey]);
 
   const handleFirstRunWalkthroughNavigate = useCallback(
-    (target: NavPage) => {
+    (target: NavTarget) => {
       navigateTo(target);
     },
     [navigateTo],
   );
+
+  const showTelemetryConsentPrompt = shouldShowTelemetryConsentPrompt({
+    hasCompletedFirstScan,
+    projectCount: projects.length,
+    showScanSummary,
+    showFirstRunWalkthrough,
+  });
 
   const handleProjectDeleted = useMemo(
     () => createProjectDeletedHandler({ refreshProjects, navigateTo }),
@@ -493,7 +504,7 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
           onReviewIssues={reviewScanSummaryIssues}
         />
       ) : null}
-      {hasCompletedFirstScan && projects.length > 0 ? <TelemetryConsentPrompt /> : null}
+      {showTelemetryConsentPrompt ? <TelemetryConsentPrompt /> : null}
     </div>
   );
 }

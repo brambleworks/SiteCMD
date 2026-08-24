@@ -11,6 +11,7 @@ import {
   setTelemetryConsent,
   useTelemetryConsent,
 } from "@/lib/telemetry";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export function TelemetrySettingsSection() {
   const consent = useTelemetryConsent();
@@ -29,7 +30,10 @@ export function TelemetrySettingsSection() {
       });
       success("Privacy preferences saved", "SiteCMD will follow these choices immediately.");
     } catch (err) {
-      showError("Could not save privacy preferences", String(err));
+      showError(
+        "Could not save privacy preferences",
+        userFacingError(err, "Your change was not saved. Try again."),
+      );
     } finally {
       setSaving(false);
     }
@@ -61,7 +65,10 @@ export function TelemetrySettingsSection() {
         );
       }
     } catch (err) {
-      showError("Could not request uploaded telemetry deletion", String(err));
+      showError(
+        "Could not request uploaded telemetry deletion",
+        userFacingError(err, "Try again in a moment."),
+      );
     } finally {
       setDeletingUploaded(false);
     }

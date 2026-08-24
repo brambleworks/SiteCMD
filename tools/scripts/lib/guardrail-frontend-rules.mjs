@@ -26,6 +26,7 @@ export function desktopFrontendStateFailures(read, sourceFiles) {
   const issueDossierPanelTests = read(
     "apps/desktop/src/components/issues/IssueDossierPanel.test.tsx",
   );
+  const dialogPrimitiveSource = read("apps/desktop/src/components/ui/dialog.tsx");
   const scanPrefsSource = read("apps/desktop/src/hooks/useScanPrefs.tsx");
   const scanPrefsTests = read("apps/desktop/src/hooks/useScanPrefs.test.ts");
   const projectWorkSummarySource = read("apps/desktop/src/lib/project-work-summary.ts");
@@ -65,11 +66,12 @@ export function desktopFrontendStateFailures(read, sourceFiles) {
     "Rust web/code issue payloads must carry confidence fields so new issues intentionally inherit or set confidence.",
   );
   check(
-    issueDossierPanelSource.includes('import { createPortal } from "react-dom"') &&
-      issueDossierPanelSource.includes("return createPortal(panel, document.body)") &&
-      issueDossierPanelTests.includes("renders the fixed overlay through document.body") &&
-      !issueDossierPanelSource.includes("return (\n    <>"),
-    "Desktop issue dossier overlays must render through document.body so fixed backdrops cannot be clipped by page containers.",
+    issueDossierPanelSource.includes('import { Dialog } from "@/components/ui/dialog"') &&
+      /<Dialog\b/.test(issueDossierPanelSource) &&
+      dialogPrimitiveSource.includes("createPortal(") &&
+      dialogPrimitiveSource.includes("document.body") &&
+      issueDossierPanelTests.includes("renders the fixed overlay through document.body"),
+    "Desktop issue dossier overlays must render through the Dialog primitive, which portals to document.body so fixed backdrops cannot be clipped by page containers.",
   );
   check(
     scanPrefsSource.includes("TIMEOUT_MIN = 10") &&

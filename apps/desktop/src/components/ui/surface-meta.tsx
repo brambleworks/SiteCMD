@@ -8,9 +8,9 @@ type MetaTone = "neutral" | "info" | "success" | "warning";
 
 const TONE_CLASS: Record<MetaTone, string> = {
   neutral: "text-muted-foreground",
-  info: "text-blue-300",
-  success: "text-emerald-300",
-  warning: "text-amber-300",
+  info: "text-brand",
+  success: "text-score-excellent",
+  warning: "text-severity-medium",
 };
 
 function SurfaceMetaBadge({

@@ -471,6 +471,9 @@
     line-height: 1;
     font-variant-numeric: tabular-nums;
   }
+  .vitals-metric-plain {
+    margin-top: var(--space-hair);
+  }
   .vitals-metric-help {
     margin-top: var(--space-tight);
   }
@@ -989,6 +992,9 @@
     font-size: var(--text-xs);
     line-height: 1.5;
     margin-bottom: var(--space-base);
+  }
+  .baseline-lead {
+    margin-top: var(--space-tight);
   }
   .baseline-list {
     display: flex;

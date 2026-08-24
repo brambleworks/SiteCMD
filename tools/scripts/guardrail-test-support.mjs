@@ -18,6 +18,7 @@ import { commandWrapperFailures } from "./lib/guardrail-command-wrapper-rules.mj
 import { desktopLicensingSafetyFailures } from "./lib/guardrail-desktop-licensing-rules.mjs";
 import { desktopOAuthSafetyFailures } from "./lib/guardrail-desktop-oauth-rules.mjs";
 import { desktopProjectCommandSafetyFailures } from "./lib/guardrail-desktop-rules.mjs";
+import { handRolledDialogFailures } from "./lib/guardrail-dialog-rules.mjs";
 import { documentationSafetyFailures } from "./lib/guardrail-doc-rules.mjs";
 import { emDashFailures } from "./lib/guardrail-em-dash-rules.mjs";
 import { emptyTestBodyFailures } from "./lib/guardrail-empty-test-body-rules.mjs";
@@ -26,6 +27,7 @@ import { eventFabricFailures } from "./lib/guardrail-event-fabric-rules.mjs";
 import { fixGuideCspGuidanceFailures } from "./lib/guardrail-fix-guide-csp-rules.mjs";
 import { desktopFrontendDisplayFailures } from "./lib/guardrail-frontend-display-rules.mjs";
 import { desktopFrontendJsonSafetyFailures } from "./lib/guardrail-frontend-json-rules.mjs";
+import { frontendMaintainabilityFailures } from "./lib/guardrail-frontend-maintainability-rules.mjs";
 import { desktopFrontendStateFailures } from "./lib/guardrail-frontend-rules.mjs";
 import { integrationUrlSecretFailures } from "./lib/guardrail-integration-url-secrets.mjs";
 import { desktopIssueStatusFailures } from "./lib/guardrail-issue-rules.mjs";
@@ -239,6 +241,11 @@ const RULE_ARGUMENTS = new Map([
   [engineVocabFailures, (io) => [io.read]],
   [eventFabricFailures, (io) => [io.read, desktopSourceFiles(io)]],
   [fixGuideCspGuidanceFailures, (io) => [io.read, io.listFiles]],
+  [
+    frontendMaintainabilityFailures,
+    (io) => [io.read, io.listFiles, desktopSourceFiles(io), new Map()],
+  ],
+  [handRolledDialogFailures, (io) => [io.read, desktopSourceFiles(io)]],
   [integrationUrlSecretFailures, (io) => [io.read, io.exists, io.listFiles]],
   [issueStateSafetyFailures, (io) => [io.read, io.exists, desktopSourceFiles(io)]],
   [licenseCodeUnionFailures, (io) => [io.read]],
@@ -341,7 +348,9 @@ export const rules = Object.freeze({
   engineVocabFailures,
   eventFabricFailures,
   fixGuideCspGuidanceFailures,
+  frontendMaintainabilityFailures,
   guardrailScriptLineBudgets,
+  handRolledDialogFailures,
   integrationUrlSecretFailures,
   issueStateSafetyFailures,
   licenseActivationErrorFailures,

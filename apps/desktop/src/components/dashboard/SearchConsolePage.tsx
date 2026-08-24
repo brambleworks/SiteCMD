@@ -31,6 +31,7 @@ import {
 import { useSearchConsoleVerificationActions } from "@/components/dashboard/useSearchConsoleVerificationActions";
 import { Button } from "@/components/ui/button";
 import { useSearchScanQuery } from "./useSearchScanQuery";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export {
   buildSeoCategoryScore,
@@ -72,7 +73,15 @@ export function SearchConsolePage({
     if (!arrivalPrompt?.absolutePath) return;
     openPathInEditor(arrivalPrompt.absolutePath)
       .then(() => toast.success("Opened changed file", arrivalPrompt.relativePath))
-      .catch((err) => toast.error("Could not open editor", String(err)));
+      .catch((err) =>
+        toast.error(
+          "Could not open editor",
+          userFacingError(
+            err,
+            "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
+          ),
+        ),
+      );
   }, [arrivalPrompt, toast]);
   const [period, setPeriod] = useState<Period>("28d");
   // The shared query owns transport and persistence; this page derives search views.
@@ -292,7 +301,7 @@ export function SearchConsolePage({
       ) : (
         <div className="stack-base">
           {gscError ? (
-            <p className="text-body text-amber-300 text-relaxed">
+            <p className="text-body text-severity-medium text-relaxed">
               Your Google sign-in expired. Sign in again to reconnect Search Console.
             </p>
           ) : null}
@@ -312,7 +321,7 @@ export function SearchConsolePage({
       ) : (
         <div className="stack-base">
           {bingError ? (
-            <p className="text-body text-amber-300 text-relaxed">
+            <p className="text-body text-severity-medium text-relaxed">
               Bing Webmaster Tools stopped syncing. Reconnect to restore it.
             </p>
           ) : null}

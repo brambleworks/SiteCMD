@@ -15,6 +15,7 @@ describe("ShellPageHeader", () => {
 
     expect(screen.getByRole("button", { name: "Open Issues Guide" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Issues" })).toBeInTheDocument();
+    expect(screen.getByText(/ranked by what to fix first/)).toBeInTheDocument();
   });
 });
 

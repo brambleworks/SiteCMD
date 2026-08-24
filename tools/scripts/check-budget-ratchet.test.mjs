@@ -53,14 +53,25 @@ const SAMPLE_BUDGET_FILE = `export const guardrailScriptLineBudgets = new Map([
 
 describe("check-budget-ratchet", () => {
   let repo;
+  let extraWorktree;
 
   beforeEach(() => {
     repo = makeRepo();
+    extraWorktree = null;
     write(repo, "tools/scripts/lib/guardrail-script-budgets.mjs", SAMPLE_BUDGET_FILE);
     commit(repo, "initial budgets");
   });
 
   afterEach(() => {
+    if (extraWorktree) {
+      try {
+        git(repo, "worktree", "remove", "--force", extraWorktree);
+      } catch {
+        // Best effort: the temp-directory removal below still reclaims disk
+        // state even if the worktree metadata cleanup itself fails.
+      }
+      fs.rmSync(extraWorktree, { recursive: true, force: true });
+    }
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
@@ -330,5 +341,38 @@ export function rustLineBudgetFailures() {}
     const result = runScript(repo, ["--range", "HEAD~1..HEAD"]);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/120 -> 999/);
+  });
+
+  it("reads the bypass token from a worktree checkout, not the main gitdir", () => {
+    // In a worktree, ".git" is a file pointing at the shared gitdir, not a
+    // directory, so a naive path.join(".git", "COMMIT_EDITMSG") never
+    // resolves. This reproduces that layout: a real `git worktree add`
+    // off the fixture repo, with the pending commit message written to
+    // wherever `git rev-parse --git-path COMMIT_EDITMSG` says it lives
+    // (never `<worktree>/.git/COMMIT_EDITMSG`, which does not exist).
+    extraWorktree = fs.mkdtempSync(path.join(os.tmpdir(), "budget-ratchet-worktree-"));
+    git(repo, "worktree", "add", "-b", "budget-ratchet-worktree-branch", extraWorktree);
+
+    write(
+      extraWorktree,
+      "tools/scripts/lib/guardrail-script-budgets.mjs",
+      SAMPLE_BUDGET_FILE.replace(
+        '"tools/scripts/lib/guardrail-rust-rules.mjs", 120',
+        '"tools/scripts/lib/guardrail-rust-rules.mjs", 220',
+      ),
+    );
+    stageOnly(extraWorktree, "tools/scripts/lib/guardrail-script-budgets.mjs");
+
+    const messageFile = git(extraWorktree, "rev-parse", "--git-path", "COMMIT_EDITMSG").trim();
+    expect(messageFile).not.toBe(path.join(extraWorktree, ".git", "COMMIT_EDITMSG"));
+    fs.writeFileSync(
+      messageFile,
+      "refactor(guardrails): legitimate raise\n\n" +
+        "[budget-raised: needed to land the new ratchet helpers; split deferred (#42)]\n",
+    );
+
+    const result = runScript(extraWorktree);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toMatch(/authorized via \[budget-raised:\]/);
   });
 });

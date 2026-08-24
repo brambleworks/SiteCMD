@@ -7,6 +7,7 @@ import { blockIssue, getIssueState, ignoreIssue, reopenIssue } from "@/lib/issue
 import { ISSUE_TRIAGE_COPY, TRIAGE_SCORE_RECOVERY_NOTE } from "@/lib/issue-triage-copy";
 import type { WorkItemStatus } from "@/lib/project-summary-types";
 import { cn } from "@/lib/utils";
+import { userFacingError } from "@/lib/user-facing-error";
 
 type LifecycleAction = "ignored" | "blocked" | "reopened";
 
@@ -152,7 +153,10 @@ export function IssueActionBar({
       await cb?.();
       setStatus(nextStatus);
     } catch (err) {
-      error("Could not update issue status", String(err));
+      error(
+        "Could not update issue status",
+        userFacingError(err, "Your change was not saved. Try again."),
+      );
     } finally {
       setPending(null);
     }

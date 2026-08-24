@@ -14,6 +14,7 @@ import {
   IntegrationServiceIconBadge,
 } from "./IntegrationServicePanels";
 import { IntegrationModal } from "./IntegrationModal";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ApiKeyConnectService {
   type: string;
@@ -87,7 +88,10 @@ export function ApiKeyIntegrationConnect({
       onRefresh();
       toast.success(`${integrationDisplayName(service.type)} connected`, "Integration saved.");
     } catch (e) {
-      toast.error(`Failed to save ${integrationDisplayName(service.type)}`, String(e));
+      toast.error(
+        `Failed to save ${integrationDisplayName(service.type)}`,
+        userFacingError(e, "Your change was not saved. Try again."),
+      );
     }
     setSaving(false);
   };

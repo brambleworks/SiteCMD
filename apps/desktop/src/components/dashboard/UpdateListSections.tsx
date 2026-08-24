@@ -102,7 +102,6 @@ export function UpdateSection({
   );
 }
 
-// data-dossier-switch lets row clicks replace an open dossier without closing it.
 function UpdateRow({
   update,
   onOpenDossier,

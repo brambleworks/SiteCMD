@@ -18,9 +18,9 @@ export function MetricCard({
     tone === "success"
       ? "text-score-excellent"
       : tone === "warning"
-        ? "text-amber-400"
+        ? "text-severity-medium"
         : tone === "critical"
-          ? "text-red-400"
+          ? "text-severity-critical"
           : "text-primary";
 
   return (
@@ -65,7 +65,7 @@ export function BreakdownCard({
                   {formatNum(item.value)} <span className="text-meta">({pct}%)</span>
                 </span>
               </div>
-              <ProgressBar value={(item.value / max) * 100} tone="primary" />
+              <ProgressBar value={(item.value / max) * 100} tone="primary" label={item.label} />
             </div>
           );
         })}

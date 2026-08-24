@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
 
@@ -8,12 +9,15 @@ beforeAll(() => {
 });
 
 describe("CommandPalette navigation targets", () => {
-  it("sends Reports to the real Reports page, not a settings tab", () => {
+  it("sends Reports to the real Reports page, not a settings tab", async () => {
+    const user = userEvent.setup();
     const onNavigate = vi.fn();
     render(<CommandPalette open onClose={vi.fn()} onNavigate={onNavigate} />);
 
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Reports" } });
-    fireEvent.click(screen.getByText("Reports"));
+    const input = screen.getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "Reports");
+    await user.click(screen.getByText("Reports"));
 
     expect(onNavigate).toHaveBeenCalledWith("reports");
   });
@@ -28,14 +32,16 @@ describe("CommandPalette navigation targets", () => {
     expect(screen.getByText("⌘N")).toBeInTheDocument(); // Add Project
   });
 
-  it("never emits settings targets for tabs the settings page no longer has", () => {
+  it("never emits settings targets for tabs the settings page no longer has", async () => {
+    const user = userEvent.setup();
     const onNavigate = vi.fn();
     render(<CommandPalette open onClose={vi.fn()} onNavigate={onNavigate} />);
 
     const input = screen.getByRole("textbox");
     for (const label of ["Overview", "Dashboard", "Issues", "Integrations", "Settings"]) {
-      fireEvent.change(input, { target: { value: label } });
-      fireEvent.click(screen.getByText(label));
+      await user.clear(input);
+      await user.type(input, label);
+      await user.click(screen.getByText(label));
     }
 
     for (const call of onNavigate.mock.calls) {

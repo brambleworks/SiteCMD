@@ -49,6 +49,7 @@ describe("WebVitalsDetailModal", () => {
     expect(screen.getByText("Properly size images")).toBeInTheDocument();
     // LCP appears in both the lab and the field grids.
     expect(screen.getAllByText("LCP").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Largest content load").length).toBeGreaterThanOrEqual(2);
     expect(invokeMock).toHaveBeenCalledWith("get_pagespeed_report", {
       url: "https://example.com",
       strategy: "mobile",
@@ -96,7 +97,9 @@ describe("WebVitalsDetailModal", () => {
     );
 
     expect(await screen.findByText(/Couldn't load PageSpeed/i)).toBeInTheDocument();
-    expect(screen.getByText("Service unavailable")).toBeInTheDocument();
+    // The raw rejection has no closing punctuation; userFacingError renders it as a
+    // full sentence rather than showing the backend text verbatim.
+    expect(screen.getByText("Service unavailable.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Try again/i })).toBeInTheDocument();
     // Non-rate-limit errors do not show the key prompt.
     expect(screen.queryByLabelText("PageSpeed API key")).not.toBeInTheDocument();

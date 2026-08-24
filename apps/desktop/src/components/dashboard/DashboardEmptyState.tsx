@@ -179,7 +179,7 @@ export function DashboardEmptyState({
           className="dashboard-empty-action dashboard-empty-action--code">
           <div className="dash-action-row">
             <div className="dashboard-empty-action-icon dashboard-empty-action-icon--code">
-              <FileCode className="icon-xl text-emerald-300" />
+              <FileCode className="icon-xl text-score-excellent" />
             </div>
             <div className="dash-action-copy">
               <p className="text-lg-bold">Link your project folder</p>
@@ -188,7 +188,7 @@ export function DashboardEmptyState({
                 site, in one workspace.
               </p>
             </div>
-            <ChevronRight className="icon-lg dash-action-chevron text-emerald-300" />
+            <ChevronRight className="icon-lg dash-action-chevron text-score-excellent" />
           </div>
         </Button>
       )}

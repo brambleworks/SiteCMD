@@ -7,6 +7,7 @@ import { buildObservabilitySnapshotText } from "@/lib/observability";
 import { buildPerformanceSnapshotText } from "@/lib/performance-metrics";
 import { arch, platform, version } from "@tauri-apps/plugin-os";
 import { Check, Copy, FileText } from "lucide-react";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export function DiagnosticLogButtons() {
   const [copied, setCopied] = useState(false);
@@ -28,7 +29,7 @@ export function DiagnosticLogButtons() {
         "Diagnostic logs now include the latest local performance and observability snapshots.",
       );
     } catch (e) {
-      toast.error("Failed to copy logs", String(e));
+      toast.error("Failed to copy logs", userFacingError(e, "Nothing was written. Try again."));
     } finally {
       setLoading(false);
     }
@@ -39,7 +40,10 @@ export function DiagnosticLogButtons() {
       const path = await getLogPath();
       toast.info("Log file path", path);
     } catch (e) {
-      toast.error("Failed to get log path", String(e));
+      toast.error(
+        "Failed to get log path",
+        userFacingError(e, "Check that the path still exists and SiteCMD can read it."),
+      );
     }
   };
 
@@ -48,7 +52,7 @@ export function DiagnosticLogButtons() {
       <Button onClick={handleCopy} disabled={loading} variant="outline" size="sm">
         {copied ? (
           <>
-            <Check className="icon-sm text-emerald-400" /> Copied
+            <Check className="icon-sm text-score-excellent" /> Copied
           </>
         ) : (
           <>

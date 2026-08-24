@@ -24,6 +24,7 @@ import { AgentToolCards } from "./AgentToolCards";
 import { ApiKeyIntegrationConnect } from "./ApiKeyIntegrationConnect";
 import { JiraIntegrationConnect } from "./JiraIntegrationConnect";
 import { GoogleIntegrationConnect } from "./GoogleIntegrationConnect";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface IntegrationSettingsProps {
   projectId: number;
@@ -103,7 +104,7 @@ export function IntegrationSettings({
             integrationType: type,
             data: {},
             fetchedAt: new Date().toISOString(),
-            error: String(error),
+            error: userFacingError(error, "Try again in a moment."),
           },
         }));
       }
@@ -136,7 +137,10 @@ export function IntegrationSettings({
       await loadConfigs();
       toast.info(`${integrationDisplayName(type)} disconnected`, "Integration removed.");
     } catch (e) {
-      toast.error(`Failed to disconnect ${integrationDisplayName(type)}`, String(e));
+      toast.error(
+        `Failed to disconnect ${integrationDisplayName(type)}`,
+        userFacingError(e, "Your change was not saved. Try again."),
+      );
     }
   };
 

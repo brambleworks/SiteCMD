@@ -296,4 +296,21 @@ describe("NavSidebar", () => {
 
     expect(screen.queryByRole("button", { name: "Run Scan" })).not.toBeInTheDocument();
   });
+
+  it("marks the active page with aria-current for assistive technology", () => {
+    render(<NavSidebar activePage="issues" projectCount={2} onNavigate={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Issues" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Dashboard" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "Overview" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks Settings current when the settings page is open", () => {
+    render(<NavSidebar activePage="settings" projectCount={1} onNavigate={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
 });

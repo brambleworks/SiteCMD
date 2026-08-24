@@ -76,7 +76,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="toast-stack">
+      <div className="toast-stack" role="status" aria-live="polite">
         {toasts.map((t) => (
           <ToastItem key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
         ))}
@@ -110,8 +110,13 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         <p className="toast-title">{toast.title}</p>
         {toast.description && <p className="muted-text toast-desc">{toast.description}</p>}
       </div>
-      <Button unstyled type="button" onClick={onDismiss} className="text-hover toast-dismiss">
-        <X className="icon-sm" />
+      <Button
+        unstyled
+        type="button"
+        onClick={onDismiss}
+        className="text-hover toast-dismiss"
+        aria-label="Dismiss notification">
+        <X className="icon-sm" aria-hidden="true" />
       </Button>
     </div>
   );

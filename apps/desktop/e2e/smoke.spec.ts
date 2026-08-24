@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { installTauriStub } from "./fixtures/tauri-stub";
 import { seededProjectResponses } from "./fixtures/seeded-project";
 import { collectConsoleErrors } from "./fixtures/console-errors";
+import { expectNoAccessibilityViolations } from "./fixtures/accessibility";
 
 /** Browser smoke coverage for boot and navigation with stubbed Tauri IPC. */
 
@@ -13,6 +14,7 @@ test.describe("first-run boot", () => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     const heading = page.locator("h1, h2").filter({ visible: true }).first();
     await expect(heading).toBeVisible({ timeout: 15_000 });
+    await expectNoAccessibilityViolations(page, "welcome");
 
     expect(errors, `unexpected console errors:\n${errors.join("\n")}`).toHaveLength(0);
   });
@@ -74,6 +76,7 @@ test.describe("seeded navigation", () => {
       await expect(ready(page), `page "${nav}" must mount its content`).toBeVisible({
         timeout: 15_000,
       });
+      await expectNoAccessibilityViolations(page, `${nav} page`);
     }
 
     // Settings lives on the sidebar utility bar as an icon button.
@@ -83,6 +86,7 @@ test.describe("seeded navigation", () => {
       page.getByRole("button", { name: "Select Folder" }),
       "settings page must mount its content",
     ).toBeVisible({ timeout: 15_000 });
+    await expectNoAccessibilityViolations(page, "settings page");
 
     expect(errors, `unexpected console errors:\n${errors.join("\n")}`).toHaveLength(0);
   });

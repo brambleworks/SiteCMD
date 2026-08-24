@@ -7,6 +7,7 @@ import {
   isAttemptActive,
   type FixAttempt,
 } from "@/lib/fix-attempts";
+import { userFacingError } from "@/lib/user-facing-error";
 
 // Safety poll for events missed while the listener was attaching.
 const ACTIVE_POLL_INTERVAL_MS = 5_000;
@@ -128,7 +129,7 @@ export function useFixAttempt({
     try {
       await cancelFixAttempt(attempt.id);
     } catch (err) {
-      error("Could not cancel the fix attempt", String(err));
+      error("Could not cancel the fix attempt", userFacingError(err, "Try again in a moment."));
     }
     // Refetch even after a failed cancel: the attempt may have changed
     // server-side (e.g. it was already canceled or expired).

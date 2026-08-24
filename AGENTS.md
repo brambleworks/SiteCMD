@@ -166,7 +166,8 @@ Read the desktop guide and component guide before writing markup.
   them and is not the component source of truth.
 - Use the shared `Button`; do not hand-roll clickable buttons or reintroduce
   CVA.
-- No inline `style` attributes except the shared progress bar's runtime width.
+- No inline `style` attributes except the allowlisted `progress-bar`,
+  `score-ring`, and `ReportPDFSections` components (see the desktop guide).
 - No hardcoded hex colors. Use tokens.
 - Extract a pattern when it appears twice.
 - Spell out Accessibility. Never use the abbreviation `a11y`.

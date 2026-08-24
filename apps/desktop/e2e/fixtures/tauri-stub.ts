@@ -15,7 +15,26 @@ interface StubWindowApi {
   emit(event: string, payload: unknown): number;
   listenerCount(event: string): number;
   resolveDeferred(cmd: string, value: unknown): number;
+  /** Replace a canned response after boot. */
+  setResponse(cmd: string, value: unknown): void;
+  /** How many invokes of `cmd` are parked on DEFERRED. */
+  pendingCount(cmd: string): number;
 }
+
+export interface InstallTauriStubOptions {
+  /** "saved" suppresses the consent prompt (default); "unseen" lets it render. */
+  telemetryPrompt?: "saved" | "unseen";
+}
+
+const SAVED_TELEMETRY_CONSENT = {
+  usageAnalytics: false,
+  crashReports: false,
+  promptStatus: "saved",
+  subjectId: null,
+  deleteSecret: null,
+  consentVersion: 1,
+  updatedAt: null,
+};
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +100,11 @@ const DEFAULT_INVOKE_RESPONSES: InvokeResponses = {
   log_frontend: null,
 };
 
-export async function installTauriStub(page: Page, overrides: InvokeResponses = {}): Promise<void> {
+export async function installTauriStub(
+  page: Page,
+  overrides: InvokeResponses = {},
+  options: InstallTauriStubOptions = {},
+): Promise<void> {
   const responses = { ...DEFAULT_INVOKE_RESPONSES, ...overrides };
   const broker = brokerCommands();
   // Brokered logical commands are valid even though only their carriers are registered.
@@ -94,187 +117,195 @@ export async function installTauriStub(page: Page, overrides: InvokeResponses = 
     );
   }
 
-  await page.addInitScript((canned: InvokeResponses) => {
-    // Prevent the telemetry prompt from covering the tested surface.
-    try {
-      window.localStorage.setItem(
-        "sitecmd_telemetry_consent_v1",
-        JSON.stringify({
-          usageAnalytics: false,
-          crashReports: false,
-          promptStatus: "saved",
-          subjectId: null,
-          deleteSecret: null,
-          consentVersion: 1,
-          updatedAt: null,
-        }),
-      );
-    } catch {
-      // localStorage unavailable: the prompt may appear, tests will say so.
-    }
-
-    let nextCallbackId = 1;
-    const callbacks = new Map<number, (...args: unknown[]) => void>();
-    const listenersByEvent = new Map<string, Set<number>>();
-    const deferredResolvers = new Map<string, Array<(value: unknown) => void>>();
-
-    // Shared by the test API and privileged-bridge emulation.
-    const deliverEvent = (event: string, payload: unknown): number => {
-      const ids = listenersByEvent.get(event);
-      if (!ids) return 0;
-      for (const id of ids) callbacks.get(id)?.({ event, id, payload });
-      return ids.size;
-    };
-
-    const stub: StubWindowApi = {
-      emit: deliverEvent,
-      listenerCount(event) {
-        return listenersByEvent.get(event)?.size ?? 0;
-      },
-      resolveDeferred(cmd, value) {
-        const waiting = deferredResolvers.get(cmd) ?? [];
-        deferredResolvers.delete(cmd);
-        for (const resolveInvoke of waiting) resolveInvoke(value);
-        return waiting.length;
-      },
-    };
-    Object.defineProperty(window, "__E2E_TAURI_STUB__", { configurable: true, value: stub });
-
-    const isDeferredMarker = (value: unknown): boolean =>
-      typeof value === "object" &&
-      value !== null &&
-      (value as { __e2eDeferred?: boolean }).__e2eDeferred === true;
-
-    // Emulate the event handshake normally handled by privileged bridge windows.
-    const BRIDGE_WINDOW_LABELS = [
-      "main",
-      "data-admin",
-      "external-connectors",
-      "filesystem-access",
-      "filesystem-export",
-      "project-execution",
-    ];
-    const PING_EVENT = "sitecmd://privileged-ping";
-    const COMMAND_EVENT_PREFIX = "sitecmd://privileged-command/";
-    const pongEvent = (id: string) => `sitecmd://privileged-pong/${id}`;
-    const responseEvent = (id: string) => `sitecmd://privileged-command-response/${id}`;
-    const isTokenIssuer = (cmd: string) => /^issue_[a-z_]+_token$/.test(cmd);
-
-    // DEFERRED lets a spec control when a brokered command resolves.
-    const answerBrokeredCommand = (id: string, command: string) => {
-      const respond = (value: unknown) => deliverEvent(responseEvent(id), { ok: true, value });
-      // Background broker calls without fixtures resolve silently.
-      if (!(command in canned)) {
-        respond(null);
-        return;
+  await page.addInitScript(
+    (config: { canned: InvokeResponses; savedConsent: object | null }) => {
+      const canned = config.canned;
+      // Prevent the telemetry prompt from covering the tested surface unless a
+      // spec opts in to seeing it.
+      if (config.savedConsent) {
+        try {
+          window.localStorage.setItem(
+            "sitecmd_telemetry_consent_v1",
+            JSON.stringify(config.savedConsent),
+          );
+        } catch {
+          // localStorage unavailable: the prompt may appear, tests will say so.
+        }
       }
-      const value = canned[command];
-      if (isDeferredMarker(value)) {
-        if (!deferredResolvers.has(command)) deferredResolvers.set(command, []);
-        deferredResolvers.get(command)?.push(respond);
-        return;
-      }
-      respond(value);
-    };
 
-    // A frontend emit that targets a bridge window. Returns true when it was
-    // a handshake event this stub answered.
-    const handleBridgeEmit = (event: string, payload: unknown): boolean => {
-      const body = (payload ?? {}) as { id?: unknown; command?: unknown; target?: unknown };
-      const id = typeof body.id === "string" ? body.id : null;
-      if (!id) return false;
-      if (event === PING_EVENT) {
-        deliverEvent(pongEvent(id), { scope: body.target });
-        return true;
-      }
-      if (event.startsWith(COMMAND_EVENT_PREFIX) && typeof body.command === "string") {
-        answerBrokeredCommand(id, body.command);
-        return true;
-      }
-      return false;
-    };
+      let nextCallbackId = 1;
+      const callbacks = new Map<number, (...args: unknown[]) => void>();
+      const listenersByEvent = new Map<string, Set<number>>();
+      const deferredResolvers = new Map<string, Array<(value: unknown) => void>>();
 
-    // Direct broker invokes match the bridge's quiet timeout behavior.
-    const SILENT_NULL = new Set([
-      "run_data_admin_command",
-      "run_external_connector_command",
-      "run_filesystem_access_command",
-      "run_filesystem_export_command",
-      "run_project_execution_command",
-    ]);
+      // Shared by the test API and privileged-bridge emulation.
+      const deliverEvent = (event: string, payload: unknown): number => {
+        const ids = listenersByEvent.get(event);
+        if (!ids) return 0;
+        for (const id of ids) callbacks.get(id)?.({ event, id, payload });
+        return ids.size;
+      };
 
-    // Match the Tauri 2 API shape used by @tauri-apps/api internals.
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {
-        transformCallback: (cb?: (...args: unknown[]) => void) => {
-          const id = nextCallbackId++;
-          if (cb) callbacks.set(id, cb);
-          return id;
+      const stub: StubWindowApi = {
+        emit: deliverEvent,
+        listenerCount(event) {
+          return listenersByEvent.get(event)?.size ?? 0;
         },
-        invoke: (cmd: string, args?: Record<string, unknown>) => {
-          if (cmd === "plugin:event|listen") {
-            const event = String(args?.event);
-            const handler = Number(args?.handler);
-            if (!listenersByEvent.has(event)) listenersByEvent.set(event, new Set());
-            listenersByEvent.get(event)?.add(handler);
-            // listen() resolves to the eventId later passed to unlisten.
-            return Promise.resolve(handler);
-          }
-          if (cmd === "plugin:event|unlisten") {
-            const event = String(args?.event);
-            const eventId = Number(args?.eventId);
-            listenersByEvent.get(event)?.delete(eventId);
-            callbacks.delete(eventId);
-            return Promise.resolve(null);
-          }
-          // WebviewWindow.getByLabel() enumerates windows; the bridge
-          // startup fails fast unless its scope window is present.
-          if (cmd === "plugin:window|get_all_windows") {
-            return Promise.resolve(BRIDGE_WINDOW_LABELS);
-          }
-          // A frontend emit to a bridge window: answer the handshake in-page.
-          if (cmd === "plugin:event|emit" || cmd === "plugin:event|emit_to") {
-            handleBridgeEmit(String(args?.event), args?.payload);
-            return Promise.resolve(null);
-          }
-          if (cmd.startsWith("plugin:")) return Promise.resolve(null);
-          // Every elevated call mints a token first; the carrier windows
-          // above never run in-browser, so any issuer returns a stub token.
-          if (isTokenIssuer(cmd)) return Promise.resolve("e2e-privileged-token");
-          if (cmd in canned) {
-            const value = canned[cmd];
-            if (isDeferredMarker(value)) {
-              return new Promise((resolveInvoke) => {
-                if (!deferredResolvers.has(cmd)) deferredResolvers.set(cmd, []);
-                deferredResolvers.get(cmd)?.push(resolveInvoke);
-              });
+        resolveDeferred(cmd, value) {
+          const waiting = deferredResolvers.get(cmd) ?? [];
+          deferredResolvers.delete(cmd);
+          for (const resolveInvoke of waiting) resolveInvoke(value);
+          return waiting.length;
+        },
+        setResponse(cmd, value) {
+          canned[cmd] = value;
+        },
+        pendingCount(cmd) {
+          return deferredResolvers.get(cmd)?.length ?? 0;
+        },
+      };
+      Object.defineProperty(window, "__E2E_TAURI_STUB__", { configurable: true, value: stub });
+
+      const isDeferredMarker = (value: unknown): boolean =>
+        typeof value === "object" &&
+        value !== null &&
+        (value as { __e2eDeferred?: boolean }).__e2eDeferred === true;
+
+      // Emulate the event handshake normally handled by privileged bridge windows.
+      const BRIDGE_WINDOW_LABELS = [
+        "main",
+        "data-admin",
+        "external-connectors",
+        "filesystem-access",
+        "filesystem-export",
+        "project-execution",
+      ];
+      const PING_EVENT = "sitecmd://privileged-ping";
+      const COMMAND_EVENT_PREFIX = "sitecmd://privileged-command/";
+      const pongEvent = (id: string) => `sitecmd://privileged-pong/${id}`;
+      const responseEvent = (id: string) => `sitecmd://privileged-command-response/${id}`;
+      const isTokenIssuer = (cmd: string) => /^issue_[a-z_]+_token$/.test(cmd);
+
+      // DEFERRED lets a spec control when a brokered command resolves.
+      const answerBrokeredCommand = (id: string, command: string) => {
+        const respond = (value: unknown) => deliverEvent(responseEvent(id), { ok: true, value });
+        // Background broker calls without fixtures resolve silently.
+        if (!(command in canned)) {
+          respond(null);
+          return;
+        }
+        const value = canned[command];
+        if (isDeferredMarker(value)) {
+          if (!deferredResolvers.has(command)) deferredResolvers.set(command, []);
+          deferredResolvers.get(command)?.push(respond);
+          return;
+        }
+        respond(value);
+      };
+
+      // A frontend emit that targets a bridge window. Returns true when it was
+      // a handshake event this stub answered.
+      const handleBridgeEmit = (event: string, payload: unknown): boolean => {
+        const body = (payload ?? {}) as { id?: unknown; command?: unknown; target?: unknown };
+        const id = typeof body.id === "string" ? body.id : null;
+        if (!id) return false;
+        if (event === PING_EVENT) {
+          deliverEvent(pongEvent(id), { scope: body.target });
+          return true;
+        }
+        if (event.startsWith(COMMAND_EVENT_PREFIX) && typeof body.command === "string") {
+          answerBrokeredCommand(id, body.command);
+          return true;
+        }
+        return false;
+      };
+
+      // Direct broker invokes match the bridge's quiet timeout behavior.
+      const SILENT_NULL = new Set([
+        "run_data_admin_command",
+        "run_external_connector_command",
+        "run_filesystem_access_command",
+        "run_filesystem_export_command",
+        "run_project_execution_command",
+      ]);
+
+      // Match the Tauri 2 API shape used by @tauri-apps/api internals.
+      Object.defineProperty(window, "__TAURI_INTERNALS__", {
+        configurable: true,
+        value: {
+          transformCallback: (cb?: (...args: unknown[]) => void) => {
+            const id = nextCallbackId++;
+            if (cb) callbacks.set(id, cb);
+            return id;
+          },
+          invoke: (cmd: string, args?: Record<string, unknown>) => {
+            if (cmd === "plugin:event|listen") {
+              const event = String(args?.event);
+              const handler = Number(args?.handler);
+              if (!listenersByEvent.has(event)) listenersByEvent.set(event, new Set());
+              listenersByEvent.get(event)?.add(handler);
+              // listen() resolves to the eventId later passed to unlisten.
+              return Promise.resolve(handler);
             }
-            return Promise.resolve(value);
-          }
-          if (SILENT_NULL.has(cmd)) return Promise.resolve(null);
-          console.error(`[tauri-stub] unstubbed invoke: ${cmd}`);
-          return Promise.resolve(null);
+            if (cmd === "plugin:event|unlisten") {
+              const event = String(args?.event);
+              const eventId = Number(args?.eventId);
+              listenersByEvent.get(event)?.delete(eventId);
+              callbacks.delete(eventId);
+              return Promise.resolve(null);
+            }
+            // WebviewWindow.getByLabel() enumerates windows; the bridge
+            // startup fails fast unless its scope window is present.
+            if (cmd === "plugin:window|get_all_windows") {
+              return Promise.resolve(BRIDGE_WINDOW_LABELS);
+            }
+            // A frontend emit to a bridge window: answer the handshake in-page.
+            if (cmd === "plugin:event|emit" || cmd === "plugin:event|emit_to") {
+              handleBridgeEmit(String(args?.event), args?.payload);
+              return Promise.resolve(null);
+            }
+            if (cmd.startsWith("plugin:")) return Promise.resolve(null);
+            // Every elevated call mints a token first; the carrier windows
+            // above never run in-browser, so any issuer returns a stub token.
+            if (isTokenIssuer(cmd)) return Promise.resolve("e2e-privileged-token");
+            if (cmd in canned) {
+              const value = canned[cmd];
+              if (isDeferredMarker(value)) {
+                return new Promise((resolveInvoke) => {
+                  if (!deferredResolvers.has(cmd)) deferredResolvers.set(cmd, []);
+                  deferredResolvers.get(cmd)?.push(resolveInvoke);
+                });
+              }
+              return Promise.resolve(value);
+            }
+            if (SILENT_NULL.has(cmd)) return Promise.resolve(null);
+            console.error(`[tauri-stub] unstubbed invoke: ${cmd}`);
+            return Promise.resolve(null);
+          },
+          unregisterListener: (_event: string, id: number) => {
+            callbacks.delete(id);
+            return Promise.resolve();
+          },
+          metadata: {
+            currentWindow: { label: "main" },
+            currentWebview: { label: "main" },
+          },
         },
-        unregisterListener: (_event: string, id: number) => {
-          callbacks.delete(id);
-          return Promise.resolve();
-        },
-        metadata: {
-          currentWindow: { label: "main" },
-          currentWebview: { label: "main" },
-        },
-      },
-    });
+      });
 
-    // Event plugin stores its registry on a separate global in Tauri 2.
-    Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
-      configurable: true,
-      value: {
-        unregisterListener: () => {},
-      },
-    });
-  }, responses);
+      // Event plugin stores its registry on a separate global in Tauri 2.
+      Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
+        configurable: true,
+        value: {
+          unregisterListener: () => {},
+        },
+      });
+    },
+    {
+      canned: responses,
+      savedConsent: options.telemetryPrompt === "unseen" ? null : SAVED_TELEMETRY_CONSENT,
+    },
+  );
 }
 
 type StubWindow = Window & { __E2E_TAURI_STUB__?: StubWindowApi };
@@ -319,4 +350,28 @@ export async function resolveDeferredInvoke(
   if (resolved === 0) {
     throw new Error(`resolveDeferredInvoke("${cmd}"): no pending invoke to resolve`);
   }
+}
+
+/** Replace a canned response after boot, for flows whose backend state changes mid-test. */
+export async function setInvokeResponse(page: Page, cmd: string, value: unknown): Promise<void> {
+  const known = new Set([...appCommands(), ...brokerCommands().keys()]);
+  if (!known.has(cmd)) {
+    throw new Error(`setInvokeResponse("${cmd}"): not a registered command`);
+  }
+  await page.evaluate(
+    ([command, commandValue]) => {
+      const stub = (window as StubWindow).__E2E_TAURI_STUB__;
+      if (!stub) throw new Error("tauri stub is not installed on this page");
+      stub.setResponse(command as string, commandValue);
+    },
+    [cmd, value] as const,
+  );
+}
+
+/** Wait until the app has an invoke of `cmd` parked on DEFERRED. */
+export async function waitForDeferredInvoke(page: Page, cmd: string): Promise<void> {
+  await page.waitForFunction(
+    (command) => ((window as StubWindow).__E2E_TAURI_STUB__?.pendingCount(command) ?? 0) > 0,
+    cmd,
+  );
 }

@@ -14,6 +14,7 @@ import { openUrl } from "@/lib/open-url";
 import type { CheckResult, IssueLink } from "@/lib/types";
 import { useIntegrationsQuery } from "@/hooks/useIntegrationsQuery";
 import { queryKeys } from "@/lib/query/query-keys";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface SendToTrackerActionProps {
   projectId: number;
@@ -77,7 +78,7 @@ export function SendToTrackerAction({
       );
       onLinkCreated?.(created);
     } catch (err) {
-      toastError("Could not create the ticket", String(err));
+      toastError("Could not create the ticket", userFacingError(err, "Try again in a moment."));
     } finally {
       if (!disposedRef.current) setSending(null);
     }

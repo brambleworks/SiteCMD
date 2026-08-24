@@ -12,6 +12,7 @@ import {
 import { Bell, FolderSync, Monitor, PlayCircle, RefreshCw } from "lucide-react";
 import { queryKeys } from "@/lib/query/query-keys";
 import { InlineSkeleton } from "@/components/ui/skeleton";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export function GeneralSection() {
   const { prefs: desktopPrefs, updatePrefs: updateDesktopPrefs } = useDesktopPrefs();
@@ -40,7 +41,10 @@ export function GeneralSection() {
         toast.success("Launch at login enabled");
       }
     } catch (error) {
-      toast.error("Could not update launch at login", String(error));
+      toast.error(
+        "Could not update launch at login",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setSavingLaunchAtLogin(false);
     }

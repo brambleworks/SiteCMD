@@ -101,11 +101,15 @@ export function frontendMaintainabilityFailures(read, listFiles, sourceFiles, li
     "apps/desktop/e2e/issues-flow.spec.ts must assert SEEDED_SCORE inside the SiteCMD Score tile so a blank-but-titled dashboard cannot pass.",
   );
 
-  const markdownSource = read("apps/desktop/src/components/ui/markdown.tsx");
+  const markdownLanguagesSource = read("apps/desktop/src/components/ui/markdown-languages.ts");
+  const markdownRendererSource = read("apps/desktop/src/components/ui/markdown-renderer.tsx");
+  const markdownEntrySource = read("apps/desktop/src/components/ui/markdown.tsx");
   check(
-    /languages\s*:\s*LANGUAGES/.test(markdownSource) &&
-      /highlight\.js\/lib\/languages\//.test(markdownSource),
-    "apps/desktop/src/components/ui/markdown.tsx must register a curated highlight.js subset (`languages: LANGUAGES`) instead of falling back to lowlight's default `common` set.",
+    /import\("highlight\.js\/lib\/languages\//.test(markdownLanguagesSource) &&
+      !/^import .* from "highlight\.js\/lib\/languages\//m.test(markdownLanguagesSource) &&
+      /\{\s*languages,\s*aliases:\s*ALIASES\s*\}/.test(markdownRendererSource) &&
+      /lazy\(\(\) => import\("\.\/markdown-renderer"\)\)/.test(markdownEntrySource),
+    "apps/desktop/src/components/ui/markdown.tsx must lazy-load markdown-renderer.tsx, and markdown-languages.ts must import each highlight.js grammar dynamically so first issue click does not pay for react-markdown plus twelve grammars.",
   );
 
   const oversizeFiles = [];

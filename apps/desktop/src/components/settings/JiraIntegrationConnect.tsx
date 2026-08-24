@@ -12,6 +12,7 @@ import {
   type JiraFormValue,
 } from "./IntegrationServicePanels";
 import { IntegrationModal } from "./IntegrationModal";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface JiraIntegrationConnectProps {
   open: boolean;
@@ -103,7 +104,10 @@ export function JiraIntegrationConnect({
       handleClose();
       await onReloadConfigs();
     } catch (e) {
-      toast.error("Failed to save Jira config", String(e));
+      toast.error(
+        "Failed to save Jira config",
+        userFacingError(e, "Your change was not saved. Try again."),
+      );
     }
     setSaving(false);
   };

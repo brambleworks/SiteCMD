@@ -11,6 +11,7 @@ import {
   type ReportHistoryEntry,
   type SectionConfig,
 } from "@/components/reports/reports-page-model";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ReportsHistoryToast {
   error: (title: string, message?: string) => void;
@@ -90,7 +91,10 @@ export function useReportsHistory({
         await queryClient.invalidateQueries({ queryKey });
         toast.success("Report deleted", "Removed from history");
       } catch (error) {
-        toast.error("Delete failed", String(error));
+        toast.error(
+          "Delete failed",
+          userFacingError(error, "Your change was not saved. Try again."),
+        );
       }
     },
     [queryClient, queryKey, toast],

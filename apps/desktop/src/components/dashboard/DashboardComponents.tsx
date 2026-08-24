@@ -37,7 +37,7 @@ export function FirstScanBanner({
 
   if (criticalCount > 0) {
     nextSteps.push({
-      icon: <AlertTriangle className="icon-md text-red-400" />,
+      icon: <AlertTriangle className="icon-md text-severity-critical" />,
       title: `Fix ${criticalCount} critical issue${criticalCount > 1 ? "s" : ""}`,
       desc: "These are the highest priority - security or performance problems that need immediate attention.",
       action: () => onNavigate("issues"),
@@ -169,7 +169,12 @@ export function CategoryScoreCard({
         </p>
         <span className="category-score-value">{score}%</span>
       </div>
-      <ProgressBar percent={score} color={cssVar} trackClassName="progress-bar--thin" />
+      <ProgressBar
+        percent={score}
+        color={cssVar}
+        label={`${label} score`}
+        trackClassName="progress-bar--thin"
+      />
     </Button>
   );
 }

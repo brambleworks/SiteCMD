@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopBar } from "./TopBar";
@@ -61,6 +62,7 @@ describe("TopBar", () => {
   });
 
   it("starts a native window drag from empty top bar space", async () => {
+    const user = userEvent.setup();
     const alpha = buildProject(1, "Alpha", "Astro");
     const { container } = render(
       <TopBar
@@ -74,12 +76,13 @@ describe("TopBar", () => {
       />,
     );
 
-    fireEvent.mouseDown(container.querySelector(".app-topbar")!, { button: 0 });
+    await user.pointer({ keys: "[MouseLeft>]", target: container.querySelector(".app-topbar")! });
 
     await waitFor(() => expect(startDraggingMock).toHaveBeenCalledTimes(1));
   });
 
   it("does not start a window drag from top bar controls", async () => {
+    const user = userEvent.setup();
     const alpha = buildProject(1, "Alpha", "Astro");
     render(
       <TopBar
@@ -93,13 +96,16 @@ describe("TopBar", () => {
       />,
     );
 
-    fireEvent.mouseDown(screen.getByRole("button", { name: /alpha/i }), { button: 0 });
+    await user.pointer({
+      keys: "[MouseLeft>]",
+      target: screen.getByRole("button", { name: /alpha/i }),
+    });
 
-    await Promise.resolve();
     expect(startDraggingMock).not.toHaveBeenCalled();
   });
 
-  it("opens project settings from the dropdown without selecting the project", () => {
+  it("opens project settings from the dropdown without selecting the project", async () => {
+    const user = userEvent.setup();
     const alpha = buildProject(1, "Alpha", "Astro");
     const beta = buildProject(2, "Beta", "Drupal");
     const onSelectProject = vi.fn();
@@ -117,18 +123,19 @@ describe("TopBar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    await user.click(screen.getByRole("button", { name: /alpha/i }));
 
     expect(screen.queryByText("Astro")).not.toBeInTheDocument();
     expect(screen.queryByText("Drupal")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit Beta project settings" }));
+    await user.click(screen.getByRole("button", { name: "Edit Beta project settings" }));
 
     expect(onOpenProjectSettings).toHaveBeenCalledWith(beta);
     expect(onSelectProject).not.toHaveBeenCalled();
   });
 
-  it("still selects a project from the main row action", () => {
+  it("still selects a project from the main row action", async () => {
+    const user = userEvent.setup();
     const alpha = buildProject(1, "Alpha", "Astro");
     const beta = buildProject(2, "Beta", "Drupal");
     const onSelectProject = vi.fn();
@@ -145,13 +152,14 @@ describe("TopBar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
-    fireEvent.click(screen.getAllByRole("menuitemradio")[1]!);
+    await user.click(screen.getByRole("button", { name: /alpha/i }));
+    await user.click(screen.getAllByRole("menuitemradio")[1]!);
 
     expect(onSelectProject).toHaveBeenCalledWith(beta);
   });
 
-  it("does not show raw environment artifact scores in the environment selector", () => {
+  it("does not show raw environment artifact scores in the environment selector", async () => {
+    const user = userEvent.setup();
     const alpha = buildProject(1, "Alpha", "Astro");
     alpha.environments = [
       { ...buildEnv(11, "https://alpha.test"), latestScore: 82 },
@@ -170,7 +178,7 @@ describe("TopBar", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /alpha.test/i }));
+    await user.click(screen.getByRole("button", { name: /alpha.test/i }));
 
     expect(screen.queryByText("82")).not.toBeInTheDocument();
     expect(screen.queryByText("91")).not.toBeInTheDocument();
@@ -194,7 +202,8 @@ describe("TopBar", () => {
     expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
   });
 
-  it("renders Run Scan as the top bar primary action", () => {
+  it("renders Run Scan as the top bar primary action", async () => {
+    const user = userEvent.setup();
     const alpha = buildProject(1, "Alpha", "Astro");
     const onRunScan = vi.fn();
 
@@ -215,7 +224,7 @@ describe("TopBar", () => {
     expect(runScanButton.querySelector("svg")).toHaveAttribute("fill", "currentColor");
     expect(runScanButton.querySelector("svg")).toHaveAttribute("stroke-width", "0");
 
-    fireEvent.click(runScanButton);
+    await user.click(runScanButton);
 
     expect(onRunScan).toHaveBeenCalledTimes(1);
   });
@@ -240,7 +249,8 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Scanning..." })).toBeDisabled();
   });
 
-  it("renders a configure-scan cog beside Run Scan when onOpenScanConfig is provided", () => {
+  it("renders a configure-scan cog beside Run Scan when onOpenScanConfig is provided", async () => {
+    const user = userEvent.setup();
     const alpha = buildProject(1, "Alpha", "Astro");
     const onOpenScanConfig = vi.fn();
 
@@ -259,7 +269,7 @@ describe("TopBar", () => {
     );
 
     const cog = screen.getByRole("button", { name: "Configure scan" });
-    fireEvent.click(cog);
+    await user.click(cog);
     expect(onOpenScanConfig).toHaveBeenCalledTimes(1);
   });
 

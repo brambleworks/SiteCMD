@@ -99,3 +99,32 @@
     display: none;
   }
 }
+
+/* Honor the OS reduced-motion setting for every keyframe and transition.
+   Wrapped in the base layer on purpose: !important declarations sort in reverse
+   cascade-layer order, so an unlayered copy of this block is the weakest author
+   rule there is and loses to every `@layer components` !important, whatever its
+   specificity. Measured in Chromium: unlayered, .scan-run-button kept its 180ms
+   transition under reduce; from the first layer it resolves to 0.01ms. */
+@layer base {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-delay: -1ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-delay: 0s !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+    /* cards.css declares these two at class specificity with !important, so the
+       reset answers at matching specificity as well as from an earlier layer.
+       reduced-motion.test.ts fails if any rule outside this block declares
+       !important motion for a selector this block does not name. */
+    .scan-run-button {
+      transition-property: background-color, color, border-color !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

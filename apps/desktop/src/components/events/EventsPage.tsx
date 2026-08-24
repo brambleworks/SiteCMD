@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query/query-keys";
 import { normalizeAppUrlForKey } from "@/lib/app-targets";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export { buildEventScanTarget, humanizeEventDetail } from "./event-presentation";
 export {
@@ -165,7 +166,7 @@ export function EventsPage({ projectId, onOpenTarget }: EventsPageProps) {
         `${filteredEvents.length} events saved to ${filePath.split("/").pop()}`,
       );
     } catch (e) {
-      toast.error("Export failed", String(e));
+      toast.error("Export failed", userFacingError(e, "Nothing was written. Try again."));
     }
   };
 
@@ -184,7 +185,7 @@ export function EventsPage({ projectId, onOpenTarget }: EventsPageProps) {
         `${filteredEvents.length} events saved to ${filePath.split("/").pop()}`,
       );
     } catch (e) {
-      toast.error("Export failed", String(e));
+      toast.error("Export failed", userFacingError(e, "Nothing was written. Try again."));
     }
   };
 
@@ -259,19 +260,33 @@ export function EventsPage({ projectId, onOpenTarget }: EventsPageProps) {
               <div className="date-view-separator" />
             </>
           )}
-          <Button unstyled onClick={handleExportJSON} title="Export JSON" className="icon-btn-sm">
-            <FileJson className="icon-muted-sm" />
+          <Button
+            unstyled
+            onClick={handleExportJSON}
+            title="Export JSON"
+            aria-label="Export JSON"
+            className="icon-btn-sm">
+            <FileJson className="icon-muted-sm" aria-hidden="true" />
           </Button>
-          <Button unstyled onClick={handleExportCSV} title="Export CSV" className="icon-btn-sm">
-            <FileSpreadsheet className="icon-muted-sm" />
+          <Button
+            unstyled
+            onClick={handleExportCSV}
+            title="Export CSV"
+            aria-label="Export CSV"
+            className="icon-btn-sm">
+            <FileSpreadsheet className="icon-muted-sm" aria-hidden="true" />
           </Button>
           <Button
             unstyled
             onClick={handleRefresh}
             disabled={refreshing}
             title="Refresh"
+            aria-label="Refresh"
             className="icon-btn-sm">
-            <RefreshCw className={`icon-muted-sm ${refreshing ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`icon-muted-sm ${refreshing ? "animate-spin" : ""}`}
+              aria-hidden="true"
+            />
           </Button>
           <span className="meta-num events-toolbar-trail">
             {filteredEvents.length} event{filteredEvents.length !== 1 ? "s" : ""}

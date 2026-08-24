@@ -293,6 +293,28 @@ describe("AccountSettings commercial boundary", () => {
     expect(toastSuccessMock).not.toHaveBeenCalled();
   });
 
+  it("keeps one red in the deactivate card, on the action not the sentence", async () => {
+    tierState.tier = "core";
+    tierState.licenseInfo.tier = "core";
+    tierState.licenseInfo.status = "active";
+    tierState.licenseInfo.planName = "Plus";
+    tierState.licenseInfo.isActive = true;
+
+    render(<AccountSettings />, { wrapper: withQueryClient() });
+    const deactivate = await screen.findByRole("button", {
+      name: "Deactivate license on this device",
+    });
+    expect(deactivate).toHaveClass("text-destructive");
+
+    fireEvent.click(deactivate);
+
+    // The sentence stays muted: a second red said the same thing twice, and
+    // --destructive is 2.27:1 on --card in the shipped dark theme, under AA.
+    const warning = await screen.findByText(/This will unlink your license/);
+    expect(warning).toHaveClass("text-body-muted");
+    expect(warning.className).not.toMatch(/text-(?:severity|score)-|text-destructive/);
+  });
+
   it("converges the display when deactivation reports failure", async () => {
     tierState.tier = "core";
     tierState.licenseInfo.tier = "core";

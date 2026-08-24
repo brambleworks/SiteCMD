@@ -193,10 +193,10 @@ describe("FixWithAgentAction setup modal", () => {
     await screen.findByRole("radio", { name: "Claude Code" });
     fireEvent.click(screen.getByRole("button", { name: /Start fix/ }));
 
-    expect(await screen.findByText(/brief generation failed/)).toBeInTheDocument();
+    expect(await screen.findByText("Brief generation failed.")).toBeInTheDocument();
     expect(toastErrorMock).toHaveBeenCalledWith(
       "Could not start the fix",
-      expect.stringContaining("brief generation failed"),
+      "Brief generation failed.",
     );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(launchCalls()).toHaveLength(0);
@@ -272,6 +272,23 @@ describe("one-click handoff with a remembered tool", () => {
     // No tool picker in the one-click path; the steps render instead.
     expect(screen.queryByRole("radio", { name: "Claude Code" })).not.toBeInTheDocument();
     expect(await screen.findByText("Fix brief prepared")).toBeInTheDocument();
+  });
+
+  it("takes the one-click path for a remembered Windsurf choice", async () => {
+    window.localStorage.setItem("sitecmd:agent-tool", "windsurf");
+    mockInvoke({ tools: [toolStatus("windsurf", true)] });
+    render(<FixWithAgentAction {...baseProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fix with your agent" }));
+
+    await waitFor(() => expect(createCalls()).toHaveLength(1));
+    // No tool picker in the one-click path; Windsurf has no deep link, so the
+    // handoff lands directly on the manual copy-paste guidance.
+    expect(screen.queryByRole("radio", { name: "Windsurf" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("Fix prompt copied - paste it into Windsurf and send it"),
+    ).toBeInTheDocument();
+    expect(launchCalls()).toHaveLength(0);
   });
 
   it("falls back to the setup modal when the remembered tool is not registered", async () => {
@@ -423,9 +440,8 @@ describe("one-click handoff with a remembered tool", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fix with your agent" }));
     await screen.findByText("Your agent is on it");
 
-    const backdrop = document.querySelector(".fix-prompt-modal-backdrop");
-    expect(backdrop).not.toBeNull();
-    fireEvent.pointerDown(backdrop as Element);
+    const dialog = screen.getByRole("dialog", { name: "Your agent is on it" });
+    fireEvent.click(dialog);
     expect(screen.getByText("Your agent is on it")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));

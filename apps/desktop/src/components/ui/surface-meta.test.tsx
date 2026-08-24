@@ -20,12 +20,12 @@ describe("FreshnessBadge", () => {
       />,
     );
 
-    expect(screen.getByText("Updated 29m ago")).toHaveClass("text-emerald-300");
+    expect(screen.getByText("Updated 29m ago")).toHaveClass("text-score-excellent");
 
     act(() => {
       vi.advanceTimersByTime(2 * MS_PER_MINUTE);
     });
 
-    expect(screen.getByText("Updated 31m ago")).toHaveClass("text-amber-300");
+    expect(screen.getByText("Updated 31m ago")).toHaveClass("text-severity-medium");
   });
 });

@@ -6,6 +6,7 @@ import { ExtLink } from "@/components/ui/external-link";
 import { useToast } from "@/hooks/useToast";
 import { queryKeys } from "@/lib/query/query-keys";
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
+import { userFacingError } from "@/lib/user-facing-error";
 
 /** Optional keychain-backed PageSpeed API key; its value is never read into the UI. */
 export function PageSpeedKeyCard() {
@@ -31,7 +32,10 @@ export function PageSpeedKeyCard() {
       setKeyInput("");
       toast.success("PageSpeed API key saved");
     } catch (error) {
-      toast.error("Could not save key", String(error));
+      toast.error(
+        "Could not save key",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setSaving(false);
     }
@@ -46,7 +50,10 @@ export function PageSpeedKeyCard() {
       setKeyInput("");
       toast.success("PageSpeed API key removed");
     } catch (error) {
-      toast.error("Could not remove key", String(error));
+      toast.error(
+        "Could not remove key",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setSaving(false);
     }

@@ -34,6 +34,7 @@ import type { WorkItemStatus } from "@/lib/project-summary-types";
 import { AsyncFixGuideSteps } from "@/components/ui/AsyncFixGuideSteps";
 import { getIssueConfidence, getIssueConfidenceLabel } from "@/lib/issue-confidence";
 import { DossierConfidenceRow } from "@/components/issues/DossierConfidenceRow";
+import { userFacingError } from "@/lib/user-facing-error";
 
 function codeIssueToFile(issue: CodeIssue, isPrimary: boolean): IssueAffectedFile {
   return {
@@ -117,7 +118,13 @@ export function CodeIssueDossier({
         queueCodePending("Opened code file from Code Scan", target);
         success("Opened in editor", target.relativePath);
       } catch (err) {
-        error("Could not open editor", String(err));
+        error(
+          "Could not open editor",
+          userFacingError(
+            err,
+            "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
+          ),
+        );
       }
     },
     [error, queueCodePending, success],
@@ -130,7 +137,13 @@ export function CodeIssueDossier({
         queueCodePending("Revealed code file from Code Scan", target);
         success("Revealed file", target.relativePath);
       } catch (err) {
-        error("Could not reveal file", String(err));
+        error(
+          "Could not reveal file",
+          userFacingError(
+            err,
+            "SiteCMD could not open it. Open the file from your editor instead.",
+          ),
+        );
       }
     },
     [error, projectPath, queueCodePending, success],

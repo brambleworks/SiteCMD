@@ -8,12 +8,12 @@ const SECURITY_FOCUS_META = {
     patterns: ["ssl.validity", "ssl"],
   },
   "sec.headers": {
-    label: "CSP header",
+    label: "Content Security Policy (CSP) header",
     patterns: ["headers.csp", "csp", "content security policy"],
     watchImpact: "This could affect security headers, hardening, or exposed infrastructure.",
   },
   "sec.hsts": {
-    label: "HSTS header",
+    label: "HTTPS-only (HSTS) header",
     patterns: ["headers.hsts", "hsts"],
   },
   "sec.cors": {

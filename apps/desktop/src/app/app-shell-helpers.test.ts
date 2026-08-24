@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProjectDeletedHandler } from "./app-shell-helpers";
+import { createProjectDeletedHandler, shouldShowTelemetryConsentPrompt } from "./app-shell-helpers";
 
 describe("createProjectDeletedHandler", () => {
   it("refreshes projects, then lands on the dashboard so the switch is visible", async () => {
@@ -14,5 +14,29 @@ describe("createProjectDeletedHandler", () => {
     await createProjectDeletedHandler({ refreshProjects, navigateTo })();
 
     expect(order).toEqual(["refresh", "navigate:dashboard"]);
+  });
+});
+
+describe("shouldShowTelemetryConsentPrompt", () => {
+  const ready = {
+    hasCompletedFirstScan: true,
+    projectCount: 1,
+    showScanSummary: false,
+    showFirstRunWalkthrough: false,
+  };
+
+  it("waits for the first scan and at least one project", () => {
+    expect(shouldShowTelemetryConsentPrompt({ ...ready, hasCompletedFirstScan: false })).toBe(
+      false,
+    );
+    expect(shouldShowTelemetryConsentPrompt({ ...ready, projectCount: 0 })).toBe(false);
+    expect(shouldShowTelemetryConsentPrompt(ready)).toBe(true);
+  });
+
+  it("never covers the scan summary or the first-run walkthrough", () => {
+    expect(shouldShowTelemetryConsentPrompt({ ...ready, showScanSummary: true })).toBe(false);
+    expect(shouldShowTelemetryConsentPrompt({ ...ready, showFirstRunWalkthrough: true })).toBe(
+      false,
+    );
   });
 });

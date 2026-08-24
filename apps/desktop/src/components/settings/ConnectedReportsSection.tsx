@@ -8,6 +8,7 @@ import { createConnectedReport, listConnectedReports, revokeConnectedReport } fr
 import { formatRelativeTime } from "@/lib/format";
 import { queryKeys } from "@/lib/query/query-keys";
 import { useCurrentTime } from "@/lib/useCurrentTime";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface ConnectedReportsSectionProps {
   projectId: number;
@@ -53,7 +54,10 @@ export function ConnectedReportsSection({
       await queryClient.invalidateQueries({ queryKey });
       toast.success("Report link created", "Copy it now. The registry never shows it again.");
     } catch (error) {
-      toast.error("Could not create the report link", String(error));
+      toast.error(
+        "Could not create the report link",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setCreating(false);
     }
@@ -67,7 +71,10 @@ export function ConnectedReportsSection({
       await queryClient.invalidateQueries({ queryKey });
       toast.success("Report link revoked", "The link stops opening immediately.");
     } catch (error) {
-      toast.error("Could not revoke the report link", String(error));
+      toast.error(
+        "Could not revoke the report link",
+        userFacingError(error, "Your change was not saved. Try again."),
+      );
     } finally {
       setRevoking(null);
     }

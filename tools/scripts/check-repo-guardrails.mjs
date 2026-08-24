@@ -94,6 +94,7 @@ import { codeOwnerSafetyFailures } from "./lib/guardrail-codeowners-rules.mjs";
 import { frontendMaintainabilityFailures } from "./lib/guardrail-frontend-maintainability-rules.mjs";
 import { desktopBoundaryFailures } from "./lib/guardrail-desktop-boundary-rules.mjs";
 import { crossSurfaceContractFailures } from "./lib/guardrail-cross-surface-contract-rules.mjs";
+import { handRolledDialogFailures } from "./lib/guardrail-dialog-rules.mjs";
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ROOT = process.env.SITECMD_GUARDRAILS_ROOT
   ? path.resolve(process.env.SITECMD_GUARDRAILS_ROOT)
@@ -480,6 +481,7 @@ export function repoGuardrailFailures({ root, read, readJson, exists, listFiles 
   failures.push(...mcpSchemaParityFailures(read, listFiles));
   failures.push(...desktopDefensiveEmptyStatesFailures(read));
   failures.push(...desktopStyleConsistencyFailures(read, sourceFiles));
+  failures.push(...handRolledDialogFailures(read, sourceFiles));
   failures.push(...desktopIssueStatusFailures(read, sourceFiles));
   failures.push(...reportScoreConsistencyFailures(read));
   failures.push(...desktopScanLabelFailures(read, sourceFiles));

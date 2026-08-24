@@ -6,6 +6,8 @@ type ProgressBarTone = "primary" | "success" | "warning" | "destructive" | "mute
 interface ProgressBarPropsBase {
   className?: string;
   trackClassName?: string;
+  /** Accessible name for the `role="progressbar"` element; screen readers have no other way to know what is progressing. */
+  label: string;
 }
 
 interface ProgressBarToneProps extends ProgressBarPropsBase {
@@ -50,6 +52,7 @@ export function ProgressBar(props: ProgressBarProps) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(clamped)}
+        aria-label={props.label}
         data-tone={tone}>
         <div
           className={cn("progress-bar__fill", TONE_FILL_CLASS[tone], props.className)}
@@ -71,7 +74,8 @@ export function ProgressBar(props: ProgressBarProps) {
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={Math.round(clamped)}>
+      aria-valuenow={Math.round(clamped)}
+      aria-label={props.label}>
       <div
         className={cn("progress-bar__fill progress-bar__fill--custom", props.className)}
         style={customStyle}

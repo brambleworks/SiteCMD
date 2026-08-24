@@ -18,6 +18,7 @@ const {
   desktopFrontendJsonSafetyFailures,
   desktopFrontendStateFailures,
   documentationSafetyFailures,
+  frontendMaintainabilityFailures,
   guardrailScriptLineBudgets,
   publicationRecordFailures,
   releaseArtifactSafetyFailures,
@@ -1023,6 +1024,22 @@ describe.concurrent(
           );
         },
         "must never commit, tag, or permit a main-branch override",
+      );
+    });
+
+    it("fails when a highlight grammar is imported statically again", () => {
+      expectGuardrailFailure(
+        frontendMaintainabilityFailures,
+        (fixtureRoot) => {
+          const file = "apps/desktop/src/components/ui/markdown-languages.ts";
+          const source = readFixtureFile(fixtureRoot, file);
+          writeFixtureFile(
+            fixtureRoot,
+            file,
+            `import rust from "highlight.js/lib/languages/rust";\n${source}`,
+          );
+        },
+        "must lazy-load markdown-renderer.tsx",
       );
     });
   },

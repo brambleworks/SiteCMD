@@ -43,6 +43,7 @@ describe("SiteBaselineCard", () => {
     expect(screen.getByText("Security headers")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /accept as baseline/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /dismiss/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/What SiteCMD expects this site to keep doing/)).toBeInTheDocument();
   });
 
   it("keeps a matching family to one line, so the card is about what changed", () => {

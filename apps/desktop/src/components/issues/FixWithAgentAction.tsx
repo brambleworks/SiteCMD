@@ -34,6 +34,7 @@ import {
   subscribeFixHandoff,
 } from "@/lib/fix-handoff-store";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const AGENT_TOOL_STORAGE_KEY = "sitecmd:agent-tool";
 // The kickoff prompt lets this fallback fetch its brief without registration.
@@ -68,9 +69,7 @@ interface FixWithAgentActionProps {
 function readRememberedAgentTool(): AgentTool | null {
   try {
     const value = window.localStorage.getItem(AGENT_TOOL_STORAGE_KEY);
-    return value !== null && value in { "claude-code": 1, codex: 1, cursor: 1 }
-      ? (value as AgentTool)
-      : null;
+    return value !== null && value in AGENT_TOOL_LABELS ? (value as AgentTool) : null;
   } catch {
     return null;
   }
@@ -222,7 +221,7 @@ export function FixWithAgentAction({
       await copyToClipboard(attempt.kickoffPrompt);
       return attempt;
     } catch (err) {
-      const message = String(err);
+      const message = userFacingError(err, "Try again in a moment.");
       setCreateError(message);
       toastError("Could not start the fix", message);
       return null;
@@ -397,7 +396,10 @@ export function FixWithAgentAction({
       await copyToClipboard(liveAttempt.kickoffPrompt);
       success("Fix prompt copied", "Paste it into your agent in this project.");
     } catch (err) {
-      toastError("Could not copy the fix prompt", String(err));
+      toastError(
+        "Could not copy the fix prompt",
+        userFacingError(err, "Nothing was written. Try again."),
+      );
     }
   };
 

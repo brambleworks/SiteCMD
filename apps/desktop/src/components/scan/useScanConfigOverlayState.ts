@@ -10,8 +10,8 @@ import {
   setScanScope,
   syncConnectedScanScope,
 } from "@/lib/commands";
-import { errorMessage } from "@/lib/error-message";
 import { getProjectCapabilities } from "@/lib/project-capabilities";
+import { userFacingError } from "@/lib/user-facing-error";
 import { queryKeys } from "@/lib/query/query-keys";
 
 import {
@@ -28,7 +28,6 @@ interface UseScanConfigOverlayStateOptions {
   canUseAccessibilityDeepScan: boolean;
   initialAxeEnabled: boolean;
   initialScanType: ScanMode;
-  onCancel: () => void;
   onStart: (config: ScanConfig) => void;
   projectPath?: string | null;
   projectId?: number;
@@ -40,7 +39,6 @@ export function useScanConfigOverlayState({
   canUseAccessibilityDeepScan,
   initialAxeEnabled,
   initialScanType,
-  onCancel,
   onStart,
   projectPath,
   projectId,
@@ -72,14 +70,6 @@ export function useScanConfigOverlayState({
   const scanType: ScanMode =
     requestedScanType !== "code" && !hasSite && canUseCodeScan ? "code" : requestedScanType;
   const axeEnabled = scanType === "code" ? false : initialAxeEnabled && canUseAccessibilityDeepScan;
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onCancel]);
 
   const resolveThenLoad = useCallback(
     async (options?: { force?: boolean }) => {
@@ -197,7 +187,7 @@ export function useScanConfigOverlayState({
         }
         setScopeError(null);
       } catch (error) {
-        setScopeError(error instanceof Error ? error.message : String(error));
+        setScopeError(userFacingError(error, "Your change was not saved. Try again."));
         return;
       }
     }
@@ -221,7 +211,10 @@ export function useScanConfigOverlayState({
           ]);
         })
         .catch((error) => {
-          toast.warning("Local scope saved; connected scope still needs sync", errorMessage(error));
+          toast.warning(
+            "Local scope saved; connected scope still needs sync",
+            userFacingError(error, "Try again in a moment."),
+          );
         });
     }
   }, [

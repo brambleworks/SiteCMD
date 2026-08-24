@@ -58,7 +58,7 @@ export function ScanHistory({ executions, onOpenScanConfig }: ScanHistoryProps) 
         kind="empty"
         icon={<Activity className="empty-state-icon" />}
         title="No scans yet"
-        description="Run your first scan to establish a SiteCMD Score and issue baseline."
+        description="Run your first scan to get a SiteCMD Score and a starting list of issues to fix."
         primaryAction={
           onOpenScanConfig ? { label: "Run First Scan", onClick: onOpenScanConfig } : undefined
         }

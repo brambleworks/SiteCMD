@@ -1,22 +1,5 @@
 @layer components {
   /* Dossier overlay (full-width, slide-up) */
-  .dossier-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 55;
-    background-color: var(--background);
-    transition: opacity 200ms ease-out;
-    pointer-events: none;
-  }
-  .dossier-backdrop-visible {
-    opacity: 0.72;
-    pointer-events: auto;
-  }
-  .dossier-backdrop-hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-
   .details-panel {
     display: flex;
     flex-direction: column;
@@ -536,22 +519,6 @@
       display: inline;
     }
   }
-  .page-guide-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 63;
-    background-color: var(--background);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 180ms ease-out;
-  }
-  .page-guide-backdrop-visible {
-    opacity: 0.54;
-    pointer-events: auto;
-  }
-  .page-guide-backdrop-hidden {
-    opacity: 0;
-  }
   .page-guide-panel {
     position: fixed;
     right: 0;
@@ -623,28 +590,10 @@
     margin-top: var(--space-tight);
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .page-guide-backdrop,
-    .page-guide-panel {
-      transition: none;
-    }
-  }
   .dossier-actions .issue-action-extra > * {
     width: 100%;
   }
 
-  .fix-prompt-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: rgba(0, 0, 0, 0.7);
-    padding: var(--space-section) var(--space-card);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-    z-index: 75;
-  }
   .fix-prompt-modal {
     display: flex;
     max-height: 84vh;

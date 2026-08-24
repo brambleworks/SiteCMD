@@ -72,6 +72,9 @@ function BaselineTitle() {
         <ShieldCheck className="card__icon icon-md" aria-hidden="true" />
         <span>Baseline</span>
       </span>
+      <p className="text-meta baseline-lead">
+        What SiteCMD expects this site to keep doing. Confirm each line so changes stand out.
+      </p>
     </div>
   );
 }

@@ -62,6 +62,7 @@ export function CodeScanHeaderSection({
             <ProgressBar
               percent={currentResult.overallScore}
               color={getScoreCssVar(currentResult.overallScore)}
+              label={presentation.scoreLabel}
               trackClassName="code-scan-score-bar bg-background"
             />
           </div>

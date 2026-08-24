@@ -61,6 +61,7 @@ import { useUpdatesVerificationActions } from "./useUpdatesVerificationActions";
 import { Button } from "@/components/ui/button";
 import { queryKeys } from "@/lib/query/query-keys";
 import { useCurrentTime } from "@/lib/useCurrentTime";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export { buildAiTask, buildCommand } from "./update-commands";
 export { buildUpdateRefreshHistoryDraft } from "./update-history";
@@ -131,7 +132,15 @@ export function UpdatesPage({
     if (!arrivalPrompt?.absolutePath) return;
     openPathInEditor(arrivalPrompt.absolutePath)
       .then(() => toast.success("Opened changed file", arrivalPrompt.relativePath))
-      .catch((err) => toast.error("Could not open editor", String(err)));
+      .catch((err) =>
+        toast.error(
+          "Could not open editor",
+          userFacingError(
+            err,
+            "SiteCMD could not open your editor. Open the file yourself and paste the prompt.",
+          ),
+        ),
+      );
   }, [arrivalPrompt, toast]);
   const handleReviewArrivalWork = useCallback(() => {
     updatesSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });

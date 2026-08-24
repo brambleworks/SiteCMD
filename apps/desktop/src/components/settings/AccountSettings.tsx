@@ -17,6 +17,7 @@ import {
   parseLicenseActivationError,
 } from "@/lib/license-activation-error";
 import { getTierBadgeLabel, normalizePlanDisplayName } from "@/lib/tier-labels";
+import { userFacingError } from "@/lib/user-facing-error";
 
 const BILLING_INTERVAL_LABEL: Record<BillingInterval, string> = {
   monthly: "MONTHLY",
@@ -150,7 +151,10 @@ export function AccountSection() {
         void refreshLicense();
         return;
       }
-      toast.error("Deactivation failed", message);
+      toast.error(
+        "Deactivation failed",
+        userFacingError(e, "Your account is still active. Try again."),
+      );
       // Local unlinking may have completed before a later backend failure.
       void refreshLicense();
     } finally {
@@ -271,7 +275,7 @@ export function AccountSection() {
                 </Button>
               ) : (
                 <div className="danger-callout-row">
-                  <p className="text-body-muted text-red-400 account-deactivate-warning">
+                  <p className="text-body-muted account-deactivate-warning">
                     This will unlink your license from this device. You can reactivate it anytime.
                   </p>
                   <Button
@@ -363,7 +367,7 @@ export function AccountSection() {
               <ul className="plan-card-features">
                 {FOUNDER_BETA_FEATURES.map((feature) => (
                   <li key={feature} className="plan-card-feature body-muted">
-                    <Check className="icon-sm plan-card-feature-icon text-emerald-400" />
+                    <Check className="icon-sm plan-card-feature-icon text-score-excellent" />
                     {feature}
                   </li>
                 ))}

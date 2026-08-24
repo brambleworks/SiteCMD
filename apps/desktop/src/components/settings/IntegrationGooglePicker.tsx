@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import {
   filterGooglePickerData,
   googleIntegrationLabel,
@@ -46,17 +46,6 @@ export function GooglePicker({
   const canConnect =
     hasAnyItems && ((showGa4 && selectedGa4 !== "") || (showGsc && selectedGsc !== ""));
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
-
   const handleConnect = () => {
     if (showGa4 && selectedGa4) {
       onPick("googleanalytics", selectedGa4);
@@ -75,88 +64,84 @@ export function GooglePicker({
     return "No properties or sites found for this Google account.";
   };
 
-  return createPortal(
-    <div className="fix-prompt-modal-backdrop" onClick={onClose}>
-      <section
-        className="fix-prompt-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="google-picker-title"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="fix-prompt-modal-header">
-          <h3 id="google-picker-title" className="fix-prompt-modal-title">
-            {title}
-          </h3>
-          <Button
-            unstyled
-            type="button"
-            className="details-close"
-            aria-label="Close"
-            onClick={onClose}>
-            <X />
+  return (
+    <Dialog
+      labelledBy="google-picker-title"
+      onClose={onClose}
+      backdropClassName="dialog--soft"
+      className="fix-prompt-modal">
+      <div className="fix-prompt-modal-header">
+        <h3 id="google-picker-title" className="fix-prompt-modal-title">
+          {title}
+        </h3>
+        <Button
+          unstyled
+          type="button"
+          className="details-close"
+          aria-label="Close"
+          onClick={onClose}>
+          <X />
+        </Button>
+      </div>
+
+      <div className="agent-handoff-body">
+        {hasAnyItems ? (
+          <>
+            {showGa4 && (
+              <div className="google-picker-field">
+                <label htmlFor="ga4-property-select" className="section-label-mid">
+                  Google Analytics property
+                </label>
+                <select
+                  id="ga4-property-select"
+                  className="field-control field-control--select"
+                  value={selectedGa4}
+                  onChange={(e) => setSelectedGa4(e.target.value)}>
+                  <option value="">Do not connect</option>
+                  {visibleData.ga4_properties.map((prop) => (
+                    <option key={prop.property_id} value={prop.property_id}>
+                      {prop.display_name} ({prop.account_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {showGsc && (
+              <div className="google-picker-field">
+                <label htmlFor="gsc-site-select" className="section-label-mid">
+                  Search Console site
+                </label>
+                <select
+                  id="gsc-site-select"
+                  className="field-control field-control--select"
+                  value={selectedGsc}
+                  onChange={(e) => setSelectedGsc(e.target.value)}>
+                  <option value="">Do not connect</option>
+                  {sortedGsc.map((site) => (
+                    <option key={site.site_url} value={site.site_url}>
+                      {site.site_url}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="body-muted">{emptyMessage()}</p>
+        )}
+      </div>
+
+      <div className="fix-prompt-modal-footer">
+        <Button variant="outline" type="button" onClick={onClose}>
+          Cancel
+        </Button>
+        {hasAnyItems && (
+          <Button type="button" onClick={handleConnect} disabled={!canConnect}>
+            Connect
           </Button>
-        </div>
-
-        <div className="agent-handoff-body">
-          {hasAnyItems ? (
-            <>
-              {showGa4 && (
-                <div className="google-picker-field">
-                  <label htmlFor="ga4-property-select" className="section-label-mid">
-                    Google Analytics property
-                  </label>
-                  <select
-                    id="ga4-property-select"
-                    className="field-control field-control--select"
-                    value={selectedGa4}
-                    onChange={(e) => setSelectedGa4(e.target.value)}>
-                    <option value="">Do not connect</option>
-                    {visibleData.ga4_properties.map((prop) => (
-                      <option key={prop.property_id} value={prop.property_id}>
-                        {prop.display_name} ({prop.account_name})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {showGsc && (
-                <div className="google-picker-field">
-                  <label htmlFor="gsc-site-select" className="section-label-mid">
-                    Search Console site
-                  </label>
-                  <select
-                    id="gsc-site-select"
-                    className="field-control field-control--select"
-                    value={selectedGsc}
-                    onChange={(e) => setSelectedGsc(e.target.value)}>
-                    <option value="">Do not connect</option>
-                    {sortedGsc.map((site) => (
-                      <option key={site.site_url} value={site.site_url}>
-                        {site.site_url}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="body-muted">{emptyMessage()}</p>
-          )}
-        </div>
-
-        <div className="fix-prompt-modal-footer">
-          <Button variant="outline" type="button" onClick={onClose}>
-            Cancel
-          </Button>
-          {hasAnyItems && (
-            <Button type="button" onClick={handleConnect} disabled={!canConnect}>
-              Connect
-            </Button>
-          )}
-        </div>
-      </section>
-    </div>,
-    document.body,
+        )}
+      </div>
+    </Dialog>
   );
 }

@@ -25,7 +25,7 @@ interface SurfaceStateProps {
 function getDefaultIcon(kind: SurfaceStateKind): ReactNode {
   switch (kind) {
     case "error":
-      return <AlertTriangle className="empty-state-icon text-amber-400" />;
+      return <AlertTriangle className="empty-state-icon text-severity-medium" />;
     case "empty":
     default:
       return <Inbox className="empty-state-icon" />;

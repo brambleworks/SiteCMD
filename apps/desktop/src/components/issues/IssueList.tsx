@@ -219,7 +219,7 @@ export function IssueList({
   if (showsScanQueue && rankedIssues.length === 0) {
     return (
       <div className="issue-empty-row">
-        <CheckCircle className="icon-lg text-emerald-400" />
+        <CheckCircle className="icon-lg text-score-excellent" />
         <div>
           <p className="row-title-md">No web or code issues open</p>
           <p className="text-meta text-foreground">No issues to fix right now.</p>

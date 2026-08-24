@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { CircleHelp, X } from "lucide-react";
 import type { NavPage } from "@/components/layout/NavSidebar";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 
 interface PageGuideContent {
   title: string;
@@ -14,7 +23,10 @@ interface PageGuideContent {
   proTip: string;
 }
 
-const PAGE_GUIDES: Record<NavPage, PageGuideContent> = {
+/** Nav pages plus the score strip, which has a guide without being a page. */
+export type PageGuideKey = NavPage | "score";
+
+const PAGE_GUIDES: Record<PageGuideKey, PageGuideContent> = {
   dashboard: {
     title: "Site Dashboard Guide",
     subtitle: "A quick daily read on this site's condition and next move.",
@@ -291,16 +303,38 @@ const PAGE_GUIDES: Record<NavPage, PageGuideContent> = {
     proTip:
       "A good report should answer: what is the state, why does it matter, and what happens next?",
   },
+  score: {
+    title: "SiteCMD Score Guide",
+    subtitle: "One number for the whole site, and exactly how it is computed.",
+    purpose:
+      "The SiteCMD Score is a 0 to 100 reading of the live site and its code together. It starts at 100 and loses points for every open issue, weighted by severity and by how sure SiteCMD is that the finding is real, so one critical problem costs more than a handful of low ones.",
+    lookFirst: [
+      "Open the breakdown under the ring to see the starting 100 and the points each severity band took away.",
+      "A capped score means a confirmed-exploitable critical issue was found; no amount of low-severity cleanup lifts it until that is fixed.",
+      "Watch the checked time. A score from last week describes last week's site.",
+    ],
+    useWell: [
+      "Fix the band that took the most points first; that is where the score moves fastest.",
+      "Rescan after a fix so the score reflects the site as it is now, not as it was.",
+      "Ignore only issues you have genuinely accepted. Ignoring to raise the number hides risk from you, not from visitors.",
+    ],
+    takeAction: [
+      "The score drops after a deploy, a content change, or a dependency update.",
+      "The breakdown shows critical or high points and you did not expect either.",
+      "The score is capped and the confirmed-exploitable issue is still open.",
+    ],
+    proTip:
+      "Treat the Excellent band as healthy and anything below Good as needing a plan this week. The bands are the same in every report, dashboard, and scan summary.",
+  },
 };
 
-export function PageGuideButton({ page, className }: { page: NavPage; className?: string }) {
+export function PageGuideButton({ page, className }: { page: PageGuideKey; className?: string }) {
   const guide = PAGE_GUIDES[page];
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const handleClose = useCallback(() => {
     setOpen(false);
-    requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
   return (
@@ -316,14 +350,21 @@ export function PageGuideButton({ page, className }: { page: NavPage; className?
         <CircleHelp className="icon-md" aria-hidden="true" />
         <span className="page-guide-trigger__label">Guide</span>
       </Button>
-      {open ? <PageGuidePanel guide={guide} onClose={handleClose} /> : null}
+      {open ? <PageGuidePanel guide={guide} onClose={handleClose} triggerRef={triggerRef} /> : null}
     </>
   );
 }
 
-function PageGuidePanel({ guide, onClose }: { guide: PageGuideContent; onClose: () => void }) {
+function PageGuidePanel({
+  guide,
+  onClose,
+  triggerRef,
+}: {
+  guide: PageGuideContent;
+  onClose: () => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
   const [visible, setVisible] = useState(false);
-  const panelRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<number | null>(null);
   const onCloseRef = useRef(onClose);
@@ -348,85 +389,62 @@ function PageGuidePanel({ guide, onClose }: { guide: PageGuideContent; onClose: 
       setVisible(true);
       closeButtonRef.current?.focus();
     });
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") requestClose();
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      const targetNode = event.target instanceof Node ? event.target : null;
-      if (panelRef.current && targetNode && !panelRef.current.contains(targetNode)) {
-        requestClose();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       window.cancelAnimationFrame(frame);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("pointerdown", onPointerDown, true);
       if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
     };
-  }, [requestClose]);
+  }, []);
 
   return (
-    <>
-      <div
-        className={cn(
-          "page-guide-backdrop",
-          visible ? "page-guide-backdrop-visible" : "page-guide-backdrop-hidden",
-        )}
-        aria-hidden="true"
-      />
-      <aside
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={subtitleId}
-        className={cn(
-          "page-guide-panel",
-          visible ? "page-guide-panel-visible" : "page-guide-panel-hidden",
-        )}>
-        <div className="page-guide-header">
-          <div className="flex-fill">
-            <p className="details-eyebrow">Page Guide</p>
-            <h2 id={titleId} className="details-title">
-              {guide.title}
-            </h2>
-            <p id={subtitleId} className="details-subtitle">
-              {guide.subtitle}
-            </p>
-          </div>
-          <Button
-            unstyled
-            ref={closeButtonRef}
-            type="button"
-            onClick={requestClose}
-            aria-label="Close page guide"
-            className="details-close">
-            <X aria-hidden="true" />
-          </Button>
+    <Dialog
+      labelledBy={titleId}
+      describedBy={subtitleId}
+      onClose={requestClose}
+      restoreFocusTo={triggerRef}
+      className={cn(
+        "page-guide-panel",
+        visible ? "page-guide-panel-visible" : "page-guide-panel-hidden",
+      )}>
+      <div className="page-guide-header">
+        <div className="flex-fill">
+          <p className="details-eyebrow">Page Guide</p>
+          <h2 id={titleId} className="details-title">
+            {guide.title}
+          </h2>
+          <p id={subtitleId} className="details-subtitle">
+            {guide.subtitle}
+          </p>
         </div>
+        <Button
+          unstyled
+          ref={closeButtonRef}
+          type="button"
+          onClick={requestClose}
+          aria-label="Close page guide"
+          className="details-close">
+          <X aria-hidden="true" />
+        </Button>
+      </div>
 
-        <div className="page-guide-body">
-          <GuideSection index={1} label="What this page is for" tone="attention">
-            <p className="page-guide-paragraph">{guide.purpose}</p>
-          </GuideSection>
-          <GuideSection index={2} label="Look at first" tone="action">
-            <GuideList items={guide.lookFirst} />
-          </GuideSection>
-          <GuideSection index={3} label="Use it well" tone="supporting">
-            <GuideList items={guide.useWell} />
-          </GuideSection>
-          <GuideSection index={4} label="When to take action" tone="verify">
-            <GuideList items={guide.takeAction} />
-          </GuideSection>
-          <section className="page-guide-tip">
-            <p className="details-section-label">Operator tip</p>
-            <p>{guide.proTip}</p>
-          </section>
-        </div>
-      </aside>
-    </>
+      <div className="page-guide-body">
+        <GuideSection index={1} label="What this page is for" tone="attention">
+          <p className="page-guide-paragraph">{guide.purpose}</p>
+        </GuideSection>
+        <GuideSection index={2} label="Look at first" tone="action">
+          <GuideList items={guide.lookFirst} />
+        </GuideSection>
+        <GuideSection index={3} label="Use it well" tone="supporting">
+          <GuideList items={guide.useWell} />
+        </GuideSection>
+        <GuideSection index={4} label="When to take action" tone="verify">
+          <GuideList items={guide.takeAction} />
+        </GuideSection>
+        <section className="page-guide-tip">
+          <p className="details-section-label">Operator tip</p>
+          <p>{guide.proTip}</p>
+        </section>
+      </div>
+    </Dialog>
   );
 }
 

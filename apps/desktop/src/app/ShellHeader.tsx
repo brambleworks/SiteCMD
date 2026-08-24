@@ -16,7 +16,8 @@ const PAGE_HEADERS: Partial<Record<NavPage, { title: string; subtitle: string }>
   },
   issues: {
     title: "Issues",
-    subtitle: "The work list: active issues, regressions, paused fixes, and scan history.",
+    subtitle:
+      "Everything the scans found, ranked by what to fix first, plus what got worse, what is on hold, and past scans.",
   },
   deploys: {
     title: "Deployments",
@@ -52,7 +53,8 @@ const PAGE_HEADERS: Partial<Record<NavPage, { title: string; subtitle: string }>
   },
   alerts: {
     title: "Alerts",
-    subtitle: "Interruptions worth noticing: outages, regressions, threats, and service failures.",
+    subtitle:
+      "Things that changed for the worse: outages, drops, new threats, and services that stopped working.",
   },
 };
 
@@ -72,7 +74,8 @@ export function ShellPageHeader({
         <div>
           <h1 className="page-title-lg">Issues</h1>
           <p className="text-13-muted shell-page-subtitle">
-            The work list: active issues, regressions, paused fixes, and scan history.
+            Everything the scans found, ranked by what to fix first, plus what got worse, what is on
+            hold, and past scans.
           </p>
         </div>
         <PageGuideButton page="issues" />

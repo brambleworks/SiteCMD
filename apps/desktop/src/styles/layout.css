@@ -302,11 +302,21 @@
     transform: scale(1);
   }
   .btn-action.bg-primary:hover,
-  .btn-action.bg-primary:focus-visible,
   .btn-action.bg-primary:active {
     background-color: var(--brand-button-hover);
     color: var(--brand-button-foreground);
     box-shadow: none;
+  }
+  /* Explicit ring (fix-round-2 review): .btn-action never carries the .btn
+     class, so there is no .btn:focus-visible ring to fall through to on
+     this selector; not suppressing box-shadow here was not enough by
+     itself, since there was nothing to leave unsuppressed. */
+  .btn-action.bg-primary:focus-visible {
+    background-color: var(--brand-button-hover);
+    color: var(--brand-button-foreground);
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
   }
   /* Inline skeleton loader (pulse animation) */
   .skeleton-inline {
@@ -1036,35 +1046,53 @@
     background-color: rgba(0, 0, 0, 0.6);
     padding: var(--space-card);
   }
-  .overlay-backdrop--soft {
-    background-color: rgba(0, 0, 0, 0.5);
-  }
-  .overlay-backdrop--scan {
-    /* Start below the fixed top bar and allow short windows to scroll. */
-    top: 3rem;
-    z-index: 80;
-    overflow-y: auto;
-    background-color: color-mix(in oklab, var(--background) 95%, transparent);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-  }
-  .overlay-backdrop--config {
-    background-color: rgba(0, 0, 0, 0.65);
-    padding: var(--space-section) var(--space-card);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
-  }
-  .overlay-backdrop--add-project {
-    align-items: flex-start;
-    background-color: rgba(0, 0, 0, 0.5);
-    padding-top: 4rem;
-  }
   .overlay-backdrop--command {
     align-items: flex-start;
     padding-top: 15vh;
   }
   .overlay-backdrop--guided {
     background-color: color-mix(in oklab, var(--background) 85%, transparent);
+  }
+  /* Native modal dialog: the element fills the viewport so backdrop clicks hit it. */
+  .dialog {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: var(--space-card);
+    border: 0;
+    background: transparent;
+    color: inherit;
+  }
+  .dialog[open] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* A panel with no bounded height of its own (the scan overlay) must stay
+       scrollable in a short window; margin: auto on the panel itself, not
+       align-items alone, is what keeps the scrolled-to-top edge reachable. */
+    overflow-y: auto;
+  }
+  .dialog::backdrop {
+    background-color: rgba(0, 0, 0, 0.6);
+  }
+  .dialog--soft::backdrop {
+    background-color: rgba(0, 0, 0, 0.5);
+  }
+  .dialog--blur::backdrop {
+    background-color: rgba(0, 0, 0, 0.65);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+  .dialog--top {
+    align-items: flex-start;
+    padding-top: 4rem;
+  }
+  .dialog-panel {
+    max-width: 100%;
   }
   .toast-item {
     pointer-events: auto;

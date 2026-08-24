@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/useToast";
 import type { EnvironmentRecord } from "@/hooks/useProject";
 import { queryKeys } from "@/lib/query/query-keys";
 import { InlineSkeleton } from "@/components/ui/skeleton";
+import { userFacingError } from "@/lib/user-facing-error";
 
 interface DataSectionProps {
   view?: "site-setup" | "data";
@@ -102,7 +103,10 @@ export function DataSection({
         `Removed ${deleted} scan${deleted !== 1 ? "s" : ""} and all associated issues.`,
       );
     } catch (e) {
-      showError("Failed to clear history", String(e));
+      showError(
+        "Failed to clear history",
+        userFacingError(e, "Your change was not saved. Try again."),
+      );
     } finally {
       setClearing(false);
     }
@@ -123,7 +127,7 @@ export function DataSection({
       const sizeStr = await exportDatabase({ destPath: filePath });
       success("Backup exported", `Database saved (${sizeStr})`);
     } catch (e) {
-      showError("Export failed", String(e));
+      showError("Export failed", userFacingError(e, "Nothing was written. Try again."));
     } finally {
       setExporting(false);
     }
@@ -146,7 +150,10 @@ export function DataSection({
         `Database imported (${sizeStr}). SiteCMD is now using the restored data.`,
       );
     } catch (e) {
-      showError("Import failed", String(e));
+      showError(
+        "Import failed",
+        userFacingError(e, "Check that the path still exists and SiteCMD can read it."),
+      );
     } finally {
       setImporting(false);
     }
@@ -160,7 +167,7 @@ export function DataSection({
       success("Project renamed", `Now called "${editName.trim()}"`);
       await Promise.resolve(onProjectChanged?.());
     } catch (e) {
-      showError("Rename failed", String(e));
+      showError("Rename failed", userFacingError(e, "Your change was not saved. Try again."));
     } finally {
       setRenaming(false);
     }
@@ -181,7 +188,10 @@ export function DataSection({
       success("Project folder updated", "Code Scan and dependency checks will use this folder.");
       await Promise.resolve(onProjectChanged?.());
     } catch (e) {
-      showError("Could not update project folder", String(e));
+      showError(
+        "Could not update project folder",
+        userFacingError(e, "Check that the path still exists and SiteCMD can read it."),
+      );
     } finally {
       setChangingProjectPath(false);
     }
@@ -195,7 +205,10 @@ export function DataSection({
       success("Project folder unlinked", "Code Scan is disabled until another folder is linked.");
       await Promise.resolve(onProjectChanged?.());
     } catch (e) {
-      showError("Could not unlink project folder", String(e));
+      showError(
+        "Could not unlink project folder",
+        userFacingError(e, "Your change was not saved. Try again."),
+      );
     } finally {
       setUnlinkingProjectPath(false);
     }
@@ -225,7 +238,7 @@ export function DataSection({
       setEnvironmentTypeTouched(false);
       await Promise.resolve(onProjectChanged?.());
     } catch (e) {
-      showError("Could not add URL", String(e));
+      showError("Could not add URL", userFacingError(e, "Your change was not saved. Try again."));
     } finally {
       setAddingEnvironment(false);
     }
@@ -239,7 +252,10 @@ export function DataSection({
       success("Environment removed", `${environment.url} was removed from this project.`);
       await Promise.resolve(onProjectChanged?.());
     } catch (e) {
-      showError("Could not remove URL", String(e));
+      showError(
+        "Could not remove URL",
+        userFacingError(e, "Your change was not saved. Try again."),
+      );
     } finally {
       setDeletingEnvironmentId(null);
     }
@@ -265,6 +281,7 @@ export function DataSection({
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleRename()}
+                aria-label="Display name"
                 className="field-control field-control--card field-control--compact settings-name-input"
               />
               <Button
@@ -370,6 +387,7 @@ export function DataSection({
                   value={newEnvironmentUrl}
                   onChange={(e) => handleNewEnvironmentUrlChange(e.target.value)}
                   placeholder="https://staging.example.com"
+                  aria-label="Environment URL"
                   className="field-control field-control--muted settings-add-env-input"
                 />
                 <select
@@ -378,6 +396,7 @@ export function DataSection({
                     setNewEnvironmentType(e.target.value as ProjectEnvironment);
                     setEnvironmentTypeTouched(true);
                   }}
+                  aria-label="Environment type"
                   className="field-control field-control--muted field-control--select settings-add-env-select">
                   <option value="production">Production</option>
                   <option value="staging">Staging</option>
@@ -473,7 +492,7 @@ export function DataSection({
           <div className="settings-stack">
             <div className="row-between">
               <div>
-                <p className="text-body settings-danger-label text-red-400">
+                <p className="text-body settings-danger-label text-severity-critical">
                   Clear all scan history
                 </p>
                 <p className="subtitle-xs">
@@ -553,7 +572,7 @@ export function DeleteProjectCard({
       success("Project deleted", `"${projectName}" has been removed.`);
       await Promise.resolve(onProjectDeleted?.());
     } catch (e) {
-      showError("Delete failed", String(e));
+      showError("Delete failed", userFacingError(e, "Your change was not saved. Try again."));
     } finally {
       setDeleting(false);
       closeConfirm();

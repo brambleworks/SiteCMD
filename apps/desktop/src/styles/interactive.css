@@ -19,14 +19,26 @@
     transform: scale(1);
   }
   button.bg-primary.text-primary-foreground:hover,
-  button.bg-primary.text-primary-foreground:focus-visible,
   button.bg-primary.text-primary-foreground:active,
   a.bg-primary.text-primary-foreground:hover,
-  a.bg-primary.text-primary-foreground:focus-visible,
   a.bg-primary.text-primary-foreground:active {
     background-color: var(--brand-button-hover);
     color: var(--brand-button-foreground);
     box-shadow: none;
+  }
+  /* Explicit ring (fix-round-2 review): the base rule above out-specifies
+     .btn:focus-visible even without !important (an element selector plus two
+     classes beats one class plus a pseudo-class), and its one real element
+     (ReportsPage's primary action, rendered with `Button unstyled`) never
+     carries the .btn class in the first place, so there is no ring to
+     inherit here without declaring one directly. */
+  button.bg-primary.text-primary-foreground:focus-visible,
+  a.bg-primary.text-primary-foreground:focus-visible {
+    background-color: var(--brand-button-hover);
+    color: var(--brand-button-foreground);
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
   }
 
   /* Interactive: icon-only button */
@@ -560,6 +572,10 @@
   /* Keep primary copy actions visible without hover. */
   .code-copy-button--persistent {
     opacity: 1;
+  }
+  .fix-guide-lead {
+    margin-bottom: var(--space-snug);
+    color: var(--foreground);
   }
   .fix-guide-steps {
     list-style: none;
