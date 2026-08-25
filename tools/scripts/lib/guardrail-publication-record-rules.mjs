@@ -4,6 +4,7 @@ const README = "README.md";
 const CONTRIBUTING = "CONTRIBUTING.md";
 const SECURITY = "SECURITY.md";
 const CONNECTED_SPEC_DIRECTORY = "docs/engineering/connected-service";
+const SECURITY_CONTACT_KEY = ".github/security-contact-key.asc";
 
 const RETIRED_LOCAL_CONTRACT =
   /Tier::has_feature|Feature::IssueRichDetail|detailsUnlocked|locked on this tier|unlock details|unlock this finding|Code Scan (?:requires (?:Core or Pro|a paid license)|is a paid Core feature)|paid features are off|Cached features are still active|features will downgrade to Free/i;
@@ -239,6 +240,49 @@ export function publicationRecordFailures(read, exists, listFiles) {
       if (!security.includes(page)) {
         failures.push(`${SECURITY} must point at ${page}, where the boundaries it protects live.`);
       }
+    }
+    // The advisories URL must be a markdown link target, parentheses and all:
+    // bare substring containment would accept the URL embedded inside another
+    // host's URL (CodeQL js/incomplete-url-substring-sanitization), and a
+    // mention that is not a link does not give a reporter anything to click.
+    if (
+      !/\(https:\/\/github\.com\/brambleworks\/SiteCMD\/security\/advisories\/new\)/.test(security)
+    ) {
+      failures.push(
+        `${SECURITY} must link GitHub private vulnerability reporting as the first channel; protection:check:live proves it is enabled.`,
+      );
+    }
+    if (
+      !security.includes("security@sitecmd.com") ||
+      !security.includes(`(${SECURITY_CONTACT_KEY})`) ||
+      !exists(SECURITY_CONTACT_KEY)
+    ) {
+      failures.push(
+        `${SECURITY} must name security@sitecmd.com and the committed OpenPGP key at ${SECURITY_CONTACT_KEY} for reports that cannot use GitHub.`,
+      );
+    }
+    const advisories = security.indexOf("/security/advisories/new");
+    const mailbox = security.indexOf("security@sitecmd.com");
+    if (advisories !== -1 && mailbox !== -1 && mailbox < advisories) {
+      failures.push(
+        `${SECURITY} must list GitHub private vulnerability reporting before the email channel; the report that can stay on GitHub should.`,
+      );
+    }
+    if (exists(SECURITY_CONTACT_KEY)) {
+      const key = read(SECURITY_CONTACT_KEY);
+      if (
+        !key.startsWith("-----BEGIN PGP PUBLIC KEY BLOCK-----") ||
+        !key.includes("-----END PGP PUBLIC KEY BLOCK-----")
+      ) {
+        failures.push(
+          `${SECURITY_CONTACT_KEY} must be an armored OpenPGP public key block; a truncated or malformed key prevents encrypted reporting.`,
+        );
+      }
+    }
+    if (/when (?:it is )?available/i.test(security)) {
+      failures.push(
+        `${SECURITY} must not hedge about private vulnerability reporting; it is enabled, and a reporter who reads "when available" assumes it is not.`,
+      );
     }
   }
 
