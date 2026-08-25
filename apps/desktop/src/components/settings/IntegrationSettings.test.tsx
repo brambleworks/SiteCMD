@@ -436,8 +436,10 @@ describe("IntegrationSettings", () => {
     await waitFor(() => {
       expect(screen.getByText("Choose a Search Console site")).toBeInTheDocument();
     });
-    // The connect modal closed; only the picker dialog remains.
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // The connect modal closed; only the picker dialog remains. The picker
+    // opens via an effect after its content renders, so wait for exactly one
+    // open dialog instead of sampling the gap between close and showModal.
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
     expect(screen.getByRole("option", { name: "https://example.com/" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "https://other.test/" })).toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith("save_google_integration", expect.anything());

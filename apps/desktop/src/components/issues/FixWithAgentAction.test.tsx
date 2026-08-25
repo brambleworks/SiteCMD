@@ -2,6 +2,17 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTool, AgentToolStatus, FixAttempt } from "@/lib/fix-attempts";
 
+/** The prompt renders through the lazy Markdown code renderer, so exact
+ *  findByText matches only after that chunk resolves; asserting on the block's
+ *  text content holds during the raw-text Suspense fallback too. */
+async function expectPromptShown(body: string) {
+  await waitFor(() => {
+    const block = document.querySelector(".fix-prompt-block");
+    expect(block).not.toBeNull();
+    expect(block).toHaveTextContent(body);
+  });
+}
+
 const { invokeMock, copyToClipboardMock, toastSuccessMock, toastErrorMock, safeListenMock } =
   vi.hoisted(() => ({
     invokeMock: vi.fn(),
@@ -170,7 +181,7 @@ describe("FixWithAgentAction setup modal", () => {
     });
     // The modal stays open showing the prompt itself - never a copy button
     // for invisible content - and keeps tracking the manual paste loop.
-    expect(await screen.findByText("KICKOFF PROMPT BODY")).toBeInTheDocument();
+    await expectPromptShown("KICKOFF PROMPT BODY");
     expect(
       screen.getByText("Fix prompt copied - paste it into your agent and send it"),
     ).toBeInTheDocument();
@@ -333,7 +344,7 @@ describe("one-click handoff with a remembered tool", () => {
 
     expect(await screen.findByText(/Could not open Claude Code/)).toBeInTheDocument();
     // The prompt is shown in full next to the copy button, not copy-only.
-    expect(await screen.findByText("KICKOFF PROMPT BODY")).toBeInTheDocument();
+    await expectPromptShown("KICKOFF PROMPT BODY");
 
     fireEvent.click(screen.getByRole("button", { name: "Copy fix prompt" }));
     await waitFor(() => {
@@ -359,7 +370,7 @@ describe("one-click handoff with a remembered tool", () => {
     expect(
       await screen.findByText("Fix prompt copied - paste it into Windsurf and send it"),
     ).toBeInTheDocument();
-    expect(await screen.findByText("KICKOFF PROMPT BODY")).toBeInTheDocument();
+    await expectPromptShown("KICKOFF PROMPT BODY");
     expect(screen.queryByText(/Could not open Windsurf/)).not.toBeInTheDocument();
     expect(launchCalls()).toHaveLength(0);
     expect(copyToClipboardMock).toHaveBeenCalledWith("KICKOFF PROMPT BODY");
