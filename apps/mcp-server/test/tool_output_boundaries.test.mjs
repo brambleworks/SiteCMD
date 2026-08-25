@@ -9,7 +9,6 @@ const UNFENCED = new Set([
   "get_scan_score",
   "get_scan_history",
   "request_verification",
-  "run_scan",
 ]);
 
 function registrations(file) {

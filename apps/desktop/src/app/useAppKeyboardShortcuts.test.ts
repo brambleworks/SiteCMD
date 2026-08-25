@@ -11,6 +11,12 @@ vi.mock("@tauri-apps/plugin-global-shortcut", () => ({
   unregisterAll: vi.fn(() => Promise.resolve()),
 }));
 
+// The global scan shortcut summons the window before deciding whether to open
+// scan config; stub the window handle so invoking it needs no live backend.
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ unminimize: vi.fn(), show: vi.fn(), setFocus: vi.fn() }),
+}));
+
 function setup(overrides: Partial<Parameters<typeof useAppKeyboardShortcuts>[0]> = {}) {
   const props = {
     activeEnvUrl: "https://acme.test" as string | null,
@@ -98,6 +104,46 @@ describe("useAppKeyboardShortcuts", () => {
     press(PAGE_SHORTCUTS.issues!.key, { metaKey: false });
     expect(openCommandPalette).not.toHaveBeenCalled();
     expect(navigateTo).not.toHaveBeenCalled();
+  });
+
+  it("ignores shortcuts while a modal dialog is open", () => {
+    // The telemetry consent prompt is a modal dialog that deliberately cannot
+    // be dismissed; no shortcut may stack a second surface on top of it.
+    const { navigateTo, openAddProject, openCommandPalette } = setup();
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    document.body.appendChild(dialog);
+    press(ACTION_SHORTCUTS.commandPalette.key);
+    press(ACTION_SHORTCUTS.addProject.key);
+    press(PAGE_SHORTCUTS.issues!.key);
+    expect(openCommandPalette).not.toHaveBeenCalled();
+    expect(openAddProject).not.toHaveBeenCalled();
+    expect(navigateTo).not.toHaveBeenCalled();
+  });
+
+  it("keeps the global scan shortcut from stacking onto a modal dialog", async () => {
+    const { register } = await import("@tauri-apps/plugin-global-shortcut");
+    // Registrations from earlier tests linger on the shared mock; clear them so
+    // the trigger below is the one bound to this test's openScanConfig.
+    vi.mocked(register).mockClear();
+    const { openScanConfig } = setup();
+    await vi.waitFor(() => {
+      expect(vi.mocked(register).mock.calls.some(([combo]) => combo === "CmdOrCtrl+Shift+S")).toBe(
+        true,
+      );
+    });
+    const trigger = vi
+      .mocked(register)
+      .mock.calls.filter(([combo]) => combo === "CmdOrCtrl+Shift+S")
+      .at(-1)![1] as () => void;
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    document.body.appendChild(dialog);
+    trigger();
+    expect(openScanConfig).not.toHaveBeenCalled();
+    dialog.remove();
+    trigger();
+    expect(openScanConfig).toHaveBeenCalledTimes(1);
   });
 
   it("ignores shortcuts while typing in a form field", () => {

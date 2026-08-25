@@ -1118,3 +1118,60 @@ jobs:
             payload/*/*.zip
             payload/*/*.dmg
             payload/SHA256SUMS
+
+      - name: Smoke test the public release surface
+        env:
+          VERSION: ${{ needs.prepare-candidate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Every planned object must be publicly served with exactly the
+          # bytes the plan hashed, and update discovery must answer for every
+          # shipped OS, before the run may go green.
+          fail=0
+          while IFS=$'\t' read -r _ object_key expected_hash; do
+            url="https://releases.sitecmd.com/${object_key}"
+            got=$(curl -fsSL --retry 5 --retry-delay 3 "$url" | sha256sum | awk '{print $1}') \
+              || got="fetch-failed"
+            if [ "$got" != "$expected_hash" ]; then
+              echo "::error::${url} served ${got}, expected ${expected_hash}"
+              fail=1
+            fi
+          done < publication/upload-plan.tsv
+          latest=$(curl -fsSL --retry 5 --retry-delay 3 https://releases.sitecmd.com/ \
+            | jq -r '.latest_version')
+          if [ "$latest" != "$VERSION" ]; then
+            echo "::error::Worker reports latest_version ${latest}, expected ${VERSION}"
+            fail=1
+          fi
+          # The desktop updater substitutes the OS alone into
+          # /{{target}}/{{current_version}}: an out-of-date client must be
+          # offered this version with its platform keys, a current one 204.
+          for target in darwin linux windows; do
+            case "$target" in
+              darwin) keys="darwin-aarch64 darwin-x86_64" ;;
+              linux) keys="linux-x86_64" ;;
+              windows) keys="windows-x86_64" ;;
+            esac
+            manifest=$(curl -fsSL --retry 5 --retry-delay 3 \
+              "https://releases.sitecmd.com/${target}/0.0.0") || manifest=""
+            offered=$(printf '%s' "$manifest" | jq -r '.version' 2>/dev/null || echo "none")
+            if [ "$offered" != "$VERSION" ]; then
+              echo "::error::/${target}/0.0.0 offers ${offered}, expected ${VERSION}"
+              fail=1
+            fi
+            for key in $keys; do
+              if ! printf '%s' "$manifest" | jq -e --arg k "$key" \
+                   '.platforms | has($k)' >/dev/null 2>&1; then
+                echo "::error::/${target}/0.0.0 is missing platform ${key}"
+                fail=1
+              fi
+            done
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --retry 5 --retry-delay 3 \
+              "https://releases.sitecmd.com/${target}/${VERSION}")
+            if [ "$code" != "204" ]; then
+              echo "::error::/${target}/${VERSION} returned ${code}, expected 204 no-update"
+              fail=1
+            fi
+          done
+          exit "$fail"

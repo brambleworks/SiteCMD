@@ -114,5 +114,29 @@ export function releasePublicationSafetyFailures(read) {
     "release.yml publish-release must run a SHA-pinned actions/attest-build-provenance over every published artifact glob and the SHA256SUMS manifest, after the GitHub Release step, with id-token and attestations write scoped to that job alone.",
   );
 
+  // Publication ends with a public smoke test: every upload-plan object
+  // re-fetched and hash-matched, the advertised latest version correct, and
+  // update discovery answering for every shipped OS (an offer on 0.0.0 with
+  // the OS's platform keys, 204 on the released version).
+  check(
+    publisherJob.includes("- name: Smoke test the public release surface") &&
+      publisherJob.includes("done < publication/upload-plan.tsv") &&
+      publisherJob.includes(
+        "got=$(curl -fsSL --retry 5 --retry-delay 3 \"$url\" | sha256sum | awk '{print $1}')",
+      ) &&
+      publisherJob.includes(`jq -r '.latest_version'`) &&
+      publisherJob.includes("for target in darwin linux windows; do") &&
+      publisherJob.includes('"https://releases.sitecmd.com/${target}/0.0.0"') &&
+      publisherJob.includes("'.platforms | has($k)'") &&
+      publisherJob.includes('"https://releases.sitecmd.com/${target}/${VERSION}"') &&
+      publisherJob.includes('if [ "$code" != "204" ]; then') &&
+      orderedBefore(
+        publisherJob,
+        "uses: actions/attest-build-provenance@",
+        "- name: Smoke test the public release surface",
+      ),
+    "release.yml publish-release must end with a public smoke test that re-downloads every upload-plan object from releases.sitecmd.com and hash-matches it, confirms the advertised latest version, and exercises updater discovery for darwin, linux, and windows: /{os}/0.0.0 offers the released version with that OS's platform keys, and /{os}/{version} answers 204.",
+  );
+
   return failures;
 }

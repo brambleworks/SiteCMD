@@ -34,6 +34,7 @@
     "tauri:dev:attach": "node ./tools/scripts/tauri-attach.mjs",
     "tauri:build:debug": "pnpm --filter @sitecmd/desktop run tauri:build:debug",
     "tauri:build:release": "pnpm --filter @sitecmd/desktop run tauri:build:release",
+    "tauri:build:contributor": "pnpm --filter @sitecmd/desktop run tauri:build:contributor",
     "sitecmd": "node ./tools/scripts/sitecmd.mjs",
     "test": "pnpm run test:desktop && pnpm run test:mcp && pnpm run guardrails:repo:test",
     "test:desktop": "pnpm --filter @sitecmd/desktop run test",

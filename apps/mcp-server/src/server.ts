@@ -1017,13 +1017,14 @@ function registerCoreTools(server: McpServer): void {
             );
           }
           if (settled.status !== "fulfilled") {
-            throw new Error(
-              `SiteCMD could not start the fix: ${
-                settled.failure_detail
-                  ? quoteUntrustedText(settled.failure_detail, 2000)
-                  : settled.status
-              }`,
-            );
+            // failure_detail is watcher-written scan-derived text; fence it the
+            // same way get_fix_status does, even on this thrown error path.
+            const failureNote = settled.failure_detail
+              ? `\n\n${UNTRUSTED_DATA_INSTRUCTION}\n\n${untrustedScanData(
+                  `Failure detail: ${quoteUntrustedText(settled.failure_detail, 2000)}`,
+                )}`
+              : "";
+            throw new Error(`SiteCMD could not start the fix: ${settled.status}.${failureNote}`);
           }
           const attemptId = parseFulfilledAttemptId(
             settled.result_json,
@@ -1152,13 +1153,14 @@ function registerCoreTools(server: McpServer): void {
             );
           }
           if (settled.status !== "fulfilled") {
-            throw new Error(
-              `SiteCMD could not run the scan: ${
-                settled.failure_detail
-                  ? quoteUntrustedText(settled.failure_detail, 2000)
-                  : settled.status
-              }`,
-            );
+            // failure_detail is watcher-written scan-derived text; fence it the
+            // same way get_scan_status does, even on this thrown error path.
+            const failureNote = settled.failure_detail
+              ? `\n\n${UNTRUSTED_DATA_INSTRUCTION}\n\n${untrustedScanData(
+                  `Failure detail: ${quoteUntrustedText(settled.failure_detail, 2000)}`,
+                )}`
+              : "";
+            throw new Error(`SiteCMD could not run the scan: ${settled.status}.${failureNote}`);
           }
           const { executionId, status } = parseFulfilledExecution(
             settled.result_json,

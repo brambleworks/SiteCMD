@@ -13,6 +13,7 @@
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build:debug": "tauri build --debug",
     "tauri:build:release": "tauri build",
+    "tauri:build:contributor": "tauri build --config src-tauri/tauri.contributor.conf.json",
     "test": "vitest run",
     "test:ci": "vitest run",
     "test:push": "vitest run src/App.render.test.tsx src/components/checklist src/lib/project-nav-badges.test.ts src/lib/project-selection-state.test.ts",
