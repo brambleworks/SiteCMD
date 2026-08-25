@@ -11,6 +11,41 @@ public repository history.
 
 ## [Unreleased]
 
+### Added
+
+- The MCP server can now drive the whole fix loop: `start_fix` opens a fix
+  attempt, `run_scan` triggers a scan, and a desktop heartbeat tells the agent
+  whether the app is running. `request_scan` is now `how_to_rescan` (the old
+  name still works).
+- The CLI gained unified gate flags across `audit`, `scan`, `check`, and
+  `gate`, SARIF output for code-scanning integrations, and audit baselines.
+- A false-positive report form and accuracy labels, so a wrong finding can be
+  reported from the issue itself.
+- Every release now publishes signed checksums and build provenance: a
+  minisign-signed `SHA256SUMS` beside the artifacts and on the GitHub
+  Release, with verification steps in the README.
+- The first run walks through connecting an AI editor, with manual MCP setup
+  instructions for every supported editor.
+- The Issues page explains how each issue affects the SiteCMD Score.
+
+### Changed
+
+- Backend errors shown in the app are now plain-language messages with a next
+  step, instead of raw error text.
+- Fix guides and first screens open with plain-English leads.
+- Dialogs, toasts, and navigation follow accessibility expectations: correct
+  focus handling, screen-reader announcements, visible focus rings, and
+  reduced-motion support across the app.
+
+### Fixed
+
+- The installer script refuses truncated downloads and version downgrades,
+  and compares release versions strictly.
+- Scan traffic is harder to abuse: the analyzer blocks private-network
+  subresources, API responses are size-bounded, git metadata is read with
+  hostile repository configuration neutralized, and credentials that never
+  migrated to the OS keychain are refused instead of silently used.
+
 ## [1.0.0] - 2026-08-21
 
 ### Added
