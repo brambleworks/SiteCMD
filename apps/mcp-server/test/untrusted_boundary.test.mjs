@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { dirname, join } from "node:path";
+import { writeFileSync } from "node:fs";
 
 import {
   quoteUntrustedText,
@@ -163,6 +165,53 @@ test("every tool that prints scan data fences it", async () => {
     assert.equal(mismatch.isError, true, "run_scan must reject a url the project does not own");
     assertFenced(mismatch.content[0].text, "run_scan (env url mismatch)");
   } finally {
+    await session.close();
+  }
+});
+
+// start_fix defaults to wait=true, so a request the desktop settles as failed
+// while the tool is still polling surfaces failure_detail on the thrown-error
+// path. That path must fence the detail exactly like get_fix_status and
+// get_scan_status fence the same column on the asynchronous path.
+test("synchronous-wait failures fence the failure detail", async () => {
+  const projectId = 904;
+  const waitUrl = "https://hostile-wait.test";
+  ensureProject(fixtureDb, projectId);
+  fixtureDb
+    .prepare(
+      `INSERT OR IGNORE INTO environments (project_id, url, label, environment) VALUES (?, ?, 'Production', 'production')`,
+    )
+    .run(projectId, waitUrl);
+  addWorkItem({
+    projectId,
+    envUrl: waitUrl,
+    checkId: "security.xfo",
+    severity: "medium",
+    title: "Missing X-Frame-Options",
+  });
+  writeFileSync(
+    join(dirname(process.env.SITECMD_DB_PATH), "desktop-heartbeat.json"),
+    JSON.stringify({ pid: 1, version: "1.0.0", updated_at_ms: Date.now() }),
+  );
+  const fail = setInterval(() => {
+    fixtureDb
+      .prepare(
+        `UPDATE agent_requests SET status = 'failed', failure_detail = ?, updated_at = ? WHERE status = 'requested' AND project_id = ?`,
+      )
+      .run(HOSTILE, Date.now(), projectId);
+  }, 50);
+  const session = await connectInMemory();
+  try {
+    for (const [name, args] of [
+      ["start_fix", { url: waitUrl, check_id: "security.xfo", wait: true }],
+      ["run_scan", { url: waitUrl, scope: "web", wait: true }],
+    ]) {
+      const result = await session.client.callTool({ name, arguments: args });
+      assert.equal(result.isError, true, `${name} must report the failed request`);
+      assertFenced(result.content[0].text, `${name} (wait failure)`);
+    }
+  } finally {
+    clearInterval(fail);
     await session.close();
   }
 });
