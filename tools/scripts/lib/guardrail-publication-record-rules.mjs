@@ -241,7 +241,13 @@ export function publicationRecordFailures(read, exists, listFiles) {
         failures.push(`${SECURITY} must point at ${page}, where the boundaries it protects live.`);
       }
     }
-    if (!security.includes("https://github.com/brambleworks/SiteCMD/security/advisories/new")) {
+    // The advisories URL must be a markdown link target, parentheses and all:
+    // bare substring containment would accept the URL embedded inside another
+    // host's URL (CodeQL js/incomplete-url-substring-sanitization), and a
+    // mention that is not a link does not give a reporter anything to click.
+    if (
+      !/\(https:\/\/github\.com\/brambleworks\/SiteCMD\/security\/advisories\/new\)/.test(security)
+    ) {
       failures.push(
         `${SECURITY} must link GitHub private vulnerability reporting as the first channel; protection:check:live proves it is enabled.`,
       );
