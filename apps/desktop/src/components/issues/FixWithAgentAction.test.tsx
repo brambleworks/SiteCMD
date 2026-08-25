@@ -2,9 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTool, AgentToolStatus, FixAttempt } from "@/lib/fix-attempts";
 
-/** The prompt renders through the lazy Markdown code renderer, so exact
- *  findByText matches only after that chunk resolves; asserting on the block's
- *  text content holds during the raw-text Suspense fallback too. */
+/** Holds before and after the lazy Markdown renderer resolves. */
 async function expectPromptShown(body: string) {
   await waitFor(() => {
     const block = document.querySelector(".fix-prompt-block");
