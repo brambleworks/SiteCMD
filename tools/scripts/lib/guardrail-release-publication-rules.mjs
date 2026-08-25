@@ -114,5 +114,24 @@ export function releasePublicationSafetyFailures(read) {
     "release.yml publish-release must run a SHA-pinned actions/attest-build-provenance over every published artifact glob and the SHA256SUMS manifest, after the GitHub Release step, with id-token and attestations write scoped to that job alone.",
   );
 
+  // Publication ends with a public smoke test: every object in the upload
+  // plan must be re-fetched from releases.sitecmd.com and hash-matched, and
+  // the worker must advertise the released version. v1.0.0 shipped with eight
+  // planned objects missing and nothing noticed.
+  check(
+    publisherJob.includes("- name: Smoke test the public release surface") &&
+      publisherJob.includes("done < publication/upload-plan.tsv") &&
+      publisherJob.includes(
+        "got=$(curl -fsSL --retry 5 --retry-delay 3 \"$url\" | sha256sum | awk '{print $1}')",
+      ) &&
+      publisherJob.includes(`jq -r '.latest_version'`) &&
+      orderedBefore(
+        publisherJob,
+        "uses: actions/attest-build-provenance@",
+        "- name: Smoke test the public release surface",
+      ),
+    "release.yml publish-release must end with a public smoke test that re-downloads every upload-plan object from releases.sitecmd.com, compares its hash against the plan, and confirms the worker advertises the released version, after the provenance attestation.",
+  );
+
   return failures;
 }
