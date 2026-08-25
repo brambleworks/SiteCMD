@@ -56,7 +56,7 @@ Run commands from the repository root.
 ```bash
 pnpm install
 pnpm tauri:dev
-pnpm tauri:build:release
+pnpm tauri:build:contributor
 
 pnpm test
 pnpm test:desktop
@@ -191,7 +191,10 @@ Read the desktop guide and component guide before writing markup.
 
 ## Build constraints
 
-- Test production changes to Vite chunking with `pnpm tauri:build:release`.
+- Test production changes to Vite chunking with `pnpm tauri:build:contributor`.
+  It skips updater artifacts, so it finishes without the updater signing key;
+  `pnpm tauri:build:release` needs `TAURI_SIGNING_PRIVATE_KEY` and is for
+  official release operators only.
 - `whoami` v2 returns `Result<String, Error>`.
 - RustCrypto `hmac` and `sha2` version changes require an explicit decision and
   re-verification of the OpenSSL webhook reference vectors.
