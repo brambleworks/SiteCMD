@@ -65,13 +65,14 @@ The source-publication decision record, maintained privately, owns the boundary.
 `,
     "SECURITY.md": `# Security Policy
 
-Use [private vulnerability reporting](https://github.com/brambleworks/SiteCMD/security/advisories/new), or email security@sitecmd.com.
+Use [private vulnerability reporting](https://github.com/brambleworks/SiteCMD/security/advisories/new), or email security@sitecmd.com with the key at [.github/security-contact-key.asc](.github/security-contact-key.asc).
 
 The connected service is in scope: its API, hosted scanner, and delivery paths.
 
 Boundaries live at [trust](https://sitecmd.com/trust) and [privacy](https://sitecmd.com/privacy).
 `,
-    ".github/security-contact-key.asc": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n",
+    ".github/security-contact-key.asc":
+      "-----BEGIN PGP PUBLIC KEY BLOCK-----\nmDMEbase64\n-----END PGP PUBLIC KEY BLOCK-----\n",
     "AGENTS.md": `# Agent guidance
 
 Free/Core redaction is applied in Rust before payloads reach the frontend.
@@ -329,5 +330,45 @@ describe("the security intake", () => {
         files["SECURITY.md"] = files["SECURITY.md"].replace("/security/advisories/new", "/issues");
       }),
     ).toContain("first channel");
+  });
+});
+
+describe("the security intake relationships", () => {
+  it("fails when the email channel is listed before GitHub reporting", () => {
+    expect(
+      failures((files) => {
+        files["SECURITY.md"] = files["SECURITY.md"].replace(
+          "Use [private vulnerability reporting](https://github.com/brambleworks/SiteCMD/security/advisories/new), or email security@sitecmd.com",
+          "Email security@sitecmd.com, or use [private vulnerability reporting](https://github.com/brambleworks/SiteCMD/security/advisories/new)",
+        );
+      }),
+    ).toContain("before the email channel");
+  });
+
+  it("fails when SECURITY.md stops linking the key path", () => {
+    expect(
+      failures((files) => {
+        files["SECURITY.md"] = files["SECURITY.md"].replace(
+          "[.github/security-contact-key.asc](.github/security-contact-key.asc)",
+          "our key",
+        );
+      }),
+    ).toContain("committed OpenPGP key");
+  });
+
+  it("fails when the committed key is truncated", () => {
+    expect(
+      failures((files) => {
+        files[".github/security-contact-key.asc"] = "-----BEGIN PGP PUBLIC KEY BLOCK-----\n";
+      }),
+    ).toContain("armored OpenPGP public key block");
+  });
+
+  it("fails on hedge variants, not only the exact sentence", () => {
+    expect(
+      failures((files) => {
+        files["SECURITY.md"] += "\nUse GitHub reporting When Available.\n";
+      }),
+    ).toContain("must not hedge");
   });
 });

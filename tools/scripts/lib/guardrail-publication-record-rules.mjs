@@ -252,12 +252,34 @@ export function publicationRecordFailures(read, exists, listFiles) {
         `${SECURITY} must link GitHub private vulnerability reporting as the first channel; protection:check:live proves it is enabled.`,
       );
     }
-    if (!security.includes("security@sitecmd.com") || !exists(SECURITY_CONTACT_KEY)) {
+    if (
+      !security.includes("security@sitecmd.com") ||
+      !security.includes(`(${SECURITY_CONTACT_KEY})`) ||
+      !exists(SECURITY_CONTACT_KEY)
+    ) {
       failures.push(
         `${SECURITY} must name security@sitecmd.com and the committed OpenPGP key at ${SECURITY_CONTACT_KEY} for reports that cannot use GitHub.`,
       );
     }
-    if (/when it is available for this repository/.test(security)) {
+    const advisories = security.indexOf("/security/advisories/new");
+    const mailbox = security.indexOf("security@sitecmd.com");
+    if (advisories !== -1 && mailbox !== -1 && mailbox < advisories) {
+      failures.push(
+        `${SECURITY} must list GitHub private vulnerability reporting before the email channel; the report that can stay on GitHub should.`,
+      );
+    }
+    if (exists(SECURITY_CONTACT_KEY)) {
+      const key = read(SECURITY_CONTACT_KEY);
+      if (
+        !key.startsWith("-----BEGIN PGP PUBLIC KEY BLOCK-----") ||
+        !key.includes("-----END PGP PUBLIC KEY BLOCK-----")
+      ) {
+        failures.push(
+          `${SECURITY_CONTACT_KEY} must be an armored OpenPGP public key block; a truncated or malformed key prevents encrypted reporting.`,
+        );
+      }
+    }
+    if (/when (?:it is )?available/i.test(security)) {
       failures.push(
         `${SECURITY} must not hedge about private vulnerability reporting; it is enabled, and a reporter who reads "when available" assumes it is not.`,
       );
