@@ -134,8 +134,9 @@ export function releasePublicationSafetyFailures(read) {
         publisherJob,
         "uses: actions/attest-build-provenance@",
         "- name: Smoke test the public release surface",
-      ),
-    "release.yml publish-release must end with a public smoke test that re-downloads every upload-plan object from releases.sitecmd.com and hash-matches it, confirms the advertised latest version, and exercises updater discovery for darwin, linux, and windows: /{os}/0.0.0 offers the released version with that OS's platform keys, and /{os}/{version} answers 204.",
+      ) &&
+      publisherJob.trimEnd().endsWith('exit "$fail"'),
+    "release.yml publish-release must end with a public smoke test that re-downloads every upload-plan object from releases.sitecmd.com and hash-matches it, confirms the advertised latest version, and exercises updater discovery for darwin, linux, and windows: /{os}/0.0.0 offers the released version with that OS's platform keys, and /{os}/{version} answers 204; the job's last line must exit with the accumulated failure flag.",
   );
 
   return failures;

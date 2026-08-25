@@ -303,6 +303,15 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("must repair an existing Release");
   });
 
+  it("catches a smoke test whose terminal failure exit is dropped", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace('          done\n          exit "$fail"\n', "          done\n")
+        : source,
+    );
+    expect(failures.join("\n")).toContain("public smoke test");
+  });
+
   it("catches a README that dropped the manifest-signature check the notes promise", () => {
     const failures = run((file, source) =>
       file === "README.md"
