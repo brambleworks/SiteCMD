@@ -1129,7 +1129,7 @@ jobs:
           # bytes the plan hashed, and update discovery must answer for every
           # shipped OS, before the run may go green.
           fail=0
-          while IFS=$'\t' read -r local_path object_key expected_hash; do
+          while IFS=$'\t' read -r _ object_key expected_hash; do
             url="https://releases.sitecmd.com/${object_key}"
             got=$(curl -fsSL --retry 5 --retry-delay 3 "$url" | sha256sum | awk '{print $1}') \
               || got="fetch-failed"
