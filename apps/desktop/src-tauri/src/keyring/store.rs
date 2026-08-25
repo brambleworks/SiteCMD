@@ -98,7 +98,9 @@ static READ_FAILURES: LazyLock<ReadFailureCache> = LazyLock::new(ReadFailureCach
 /// Debug builds opt into the plaintext `dev-secrets.json` store by setting
 /// this variable to `1` before launch. Without it a debug build uses the OS
 /// keychain exactly like a release build. Tests always use the in-memory
-/// debug store and never touch the keychain.
+/// debug store and never touch the keychain. Release builds have no consumer,
+/// so the constant is debug-gated to keep them warning-free.
+#[cfg(debug_assertions)]
 pub(crate) const DEV_PLAINTEXT_SECRETS_ENV: &str = "SITECMD_DEV_PLAINTEXT_SECRETS";
 
 #[cfg(debug_assertions)]
