@@ -11,6 +11,8 @@ public repository history.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-25
+
 ### Added
 
 - The MCP server can now drive the whole fix loop: `start_fix` opens a fix
