@@ -312,6 +312,24 @@ describe("release pipeline probe and CRLF rules", () => {
     expect(failures.join("\n")).toContain("public smoke test");
   });
 
+  it("catches a smoke-test curl that stops announcing the monitor User-Agent", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace("-w '%{http_code}' -A \"$SMOKE_UA\" ", "-w '%{http_code}' ")
+        : source,
+    );
+    expect(failures.join("\n")).toContain('-A "$SMOKE_UA" on every curl request');
+  });
+
+  it("catches a smoke test whose User-Agent literal drifts", () => {
+    const failures = run((file, source) =>
+      file.includes("release.yml")
+        ? source.replace('SMOKE_UA="SiteCMD-Release-Smoke/1"', 'SMOKE_UA="curl/8"')
+        : source,
+    );
+    expect(failures.join("\n")).toContain("SiteCMD-Release-Smoke/1");
+  });
+
   it("catches a README that dropped the manifest-signature check the notes promise", () => {
     const failures = run((file, source) =>
       file === "README.md"
