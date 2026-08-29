@@ -16035,7 +16035,7 @@ Apache License
    limitations under the License.
 ================================================================================
 SHA-256: a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5
-Packages: cargo:block-buffer@0.10.4, cargo:block-buffer@0.12.1, cargo:chacha20@0.10.1, cargo:const-oid@0.10.2, cargo:cpufeatures@0.2.17, cargo:cpufeatures@0.3.0, cargo:crypto-common@0.1.7, cargo:crypto-common@0.2.2, cargo:digest@0.10.7, cargo:digest@0.11.3, cargo:hmac@0.13.0, cargo:hybrid-array@0.4.14, cargo:md-5@0.11.0, cargo:sha2@0.10.9, cargo:sha2@0.11.0
+Packages: cargo:block-buffer@0.10.4, cargo:block-buffer@0.12.1, cargo:chacha20@0.10.2, cargo:const-oid@0.10.2, cargo:cpufeatures@0.2.17, cargo:cpufeatures@0.3.0, cargo:crypto-common@0.1.7, cargo:crypto-common@0.2.2, cargo:digest@0.10.7, cargo:digest@0.11.3, cargo:hmac@0.13.0, cargo:hybrid-array@0.4.14, cargo:md-5@0.11.0, cargo:sha2@0.10.9, cargo:sha2@0.11.0
 Upstream files: LICENSE-APACHE
 ================================================================================
                               Apache License
@@ -17905,7 +17905,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ================================================================================
 SHA-256: b8c6939380a400f53e11923d50fcc4dd2fa1ba8339fd9d04cda38a0251b6c9b0
-Packages: cargo:chacha20@0.10.1, cargo:zeroize_derive@1.5.0
+Packages: cargo:chacha20@0.10.2, cargo:zeroize_derive@1.5.0
 Upstream files: LICENSE-MIT
 ================================================================================
 Copyright (c) 2019-2026 The RustCrypto Project Developers

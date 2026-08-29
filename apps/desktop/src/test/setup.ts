@@ -1,6 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
+
+// waitFor's 1s default fails tests that await a lazy chunk (the Markdown
+// renderer) whenever the machine is under gate load. The budget only caps
+// how long a wait may poll; passing tests stay as fast as before.
+configure({ asyncUtilTimeout: 10_000 });
 
 // Tauri APIs need browser-global stubs in jsdom. Tests may override them with
 // hoisted `vi.mock` calls.

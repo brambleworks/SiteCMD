@@ -14,6 +14,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // Must exceed the asyncUtilTimeout set in src/test/setup.ts, or vitest
+    // cuts a slow waitFor off before it can report what it waited for.
+    testTimeout: 20_000,
     maxWorkers: process.env.CI ? "50%" : 4,
     globals: false,
     setupFiles: ["./src/test/setup.ts"],
