@@ -122,7 +122,7 @@ export function releasePublicationSafetyFailures(read) {
     publisherJob.includes("- name: Smoke test the public release surface") &&
       publisherJob.includes("done < publication/upload-plan.tsv") &&
       publisherJob.includes(
-        "got=$(curl -fsSL --retry 5 --retry-delay 3 \"$url\" | sha256sum | awk '{print $1}')",
+        'got=$(curl -fsSL -A "$SMOKE_UA" --retry 5 --retry-delay 3 "$url" | sha256sum | awk \'{print $1}\')',
       ) &&
       publisherJob.includes(`jq -r '.latest_version'`) &&
       publisherJob.includes("for target in darwin linux windows; do") &&
@@ -137,6 +137,19 @@ export function releasePublicationSafetyFailures(read) {
       ) &&
       publisherJob.trimEnd().endsWith('exit "$fail"'),
     "release.yml publish-release must end with a public smoke test that re-downloads every upload-plan object from releases.sitecmd.com and hash-matches it, confirms the advertised latest version, and exercises updater discovery for darwin, linux, and windows: /{os}/0.0.0 offers the released version with that OS's platform keys, and /{os}/{version} answers 204; the job's last line must exit with the accumulated failure flag.",
+  );
+
+  // The releases worker keeps monitor User-Agents out of download and
+  // update-check analytics, so every smoke-test request must announce one.
+  const smokeStep = publisherJob.slice(
+    publisherJob.indexOf("- name: Smoke test the public release surface"),
+  );
+  const smokeCurls = smokeStep.split("\n").filter((line) => line.includes("curl "));
+  check(
+    smokeStep.includes('SMOKE_UA="SiteCMD-Release-Smoke/1"') &&
+      smokeCurls.length > 0 &&
+      smokeCurls.every((line) => line.includes('-A "$SMOKE_UA"')),
+    'release.yml\'s public smoke test must define SMOKE_UA="SiteCMD-Release-Smoke/1" and pass -A "$SMOKE_UA" on every curl request, so the releases worker keeps this synthetic traffic out of download and update-check analytics.',
   );
 
   return failures;

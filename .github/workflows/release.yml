@@ -1127,18 +1127,21 @@ jobs:
           set -euo pipefail
           # Every planned object must be publicly served with exactly the
           # bytes the plan hashed, and update discovery must answer for every
-          # shipped OS, before the run may go green.
+          # shipped OS, before the run may go green. The User-Agent announces
+          # this probe so the releases worker keeps it out of download and
+          # update-check analytics.
+          SMOKE_UA="SiteCMD-Release-Smoke/1"
           fail=0
           while IFS=$'\t' read -r _ object_key expected_hash; do
             url="https://releases.sitecmd.com/${object_key}"
-            got=$(curl -fsSL --retry 5 --retry-delay 3 "$url" | sha256sum | awk '{print $1}') \
+            got=$(curl -fsSL -A "$SMOKE_UA" --retry 5 --retry-delay 3 "$url" | sha256sum | awk '{print $1}') \
               || got="fetch-failed"
             if [ "$got" != "$expected_hash" ]; then
               echo "::error::${url} served ${got}, expected ${expected_hash}"
               fail=1
             fi
           done < publication/upload-plan.tsv
-          latest=$(curl -fsSL --retry 5 --retry-delay 3 https://releases.sitecmd.com/ \
+          latest=$(curl -fsSL -A "$SMOKE_UA" --retry 5 --retry-delay 3 https://releases.sitecmd.com/ \
             | jq -r '.latest_version')
           if [ "$latest" != "$VERSION" ]; then
             echo "::error::Worker reports latest_version ${latest}, expected ${VERSION}"
@@ -1153,7 +1156,7 @@ jobs:
               linux) keys="linux-x86_64" ;;
               windows) keys="windows-x86_64" ;;
             esac
-            manifest=$(curl -fsSL --retry 5 --retry-delay 3 \
+            manifest=$(curl -fsSL -A "$SMOKE_UA" --retry 5 --retry-delay 3 \
               "https://releases.sitecmd.com/${target}/0.0.0") || manifest=""
             offered=$(printf '%s' "$manifest" | jq -r '.version' 2>/dev/null || echo "none")
             if [ "$offered" != "$VERSION" ]; then
@@ -1167,7 +1170,7 @@ jobs:
                 fail=1
               fi
             done
-            code=$(curl -sS -o /dev/null -w '%{http_code}' --retry 5 --retry-delay 3 \
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -A "$SMOKE_UA" --retry 5 --retry-delay 3 \
               "https://releases.sitecmd.com/${target}/${VERSION}")
             if [ "$code" != "204" ]; then
               echo "::error::/${target}/${VERSION} returned ${code}, expected 204 no-update"
