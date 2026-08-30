@@ -14,7 +14,11 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { missingBrowserPaths, resolveRepositoryRoot } from "./verify-push-lib.mjs";
+import {
+  classifyBindError,
+  missingBrowserPaths,
+  resolveRepositoryRoot,
+} from "./verify-push-lib.mjs";
 
 const ROOT = resolveRepositoryRoot(import.meta.url);
 
@@ -240,17 +244,27 @@ async function runTier(tier, tierIndex) {
 const E2E_HOST = "127.0.0.1";
 const E2E_PORT = 5183;
 
-// Return whether Playwright can bind the exact IPv4 endpoint.
-function canBind(host, port) {
+// Return the bind error for Playwright's exact IPv4 endpoint, if any.
+function bindError(host, port) {
   return new Promise((resolve) => {
     const server = net.createServer();
-    server.once("error", () => resolve(false));
-    server.listen(port, host, () => server.close(() => resolve(true)));
+    server.once("error", (error) => resolve(error));
+    server.listen(port, host, () => server.close(() => resolve(null)));
   });
 }
 
 async function preflightPortCheck() {
-  if (await canBind(E2E_HOST, E2E_PORT)) return; // free - Playwright spawns its own
+  const error = await bindError(E2E_HOST, E2E_PORT);
+  if (error === null) return;
+
+  if (classifyBindError(error) !== "occupied") {
+    const code = typeof error.code === "string" ? ` (${error.code})` : "";
+    process.stderr.write(
+      `${RED}${BOLD}verify-push: could not bind ${E2E_HOST}:${E2E_PORT}${code}.${RESET}\n` +
+        `Playwright needs permission to open that local endpoint for its preview server.\n`,
+    );
+    process.exit(1);
+  }
 
   const probe = spawnSync("bash", [
     "-lc",

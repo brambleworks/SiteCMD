@@ -27,6 +27,7 @@ impl PageScanOutput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PageLoopStatus {
     Complete,
+    Partial,
     Failed,
     Cancelled,
 }
@@ -132,6 +133,10 @@ where
                     persist_page(completed_page_count, url, result, browser_runtime.clone())
                         .await?;
 
+                if browser_runtime.failure.is_some() && outcome.status == PageLoopStatus::Complete {
+                    outcome.status = PageLoopStatus::Partial;
+                }
+
                 if let Some(mut facts) = site_facts {
                     facts.scan_id = Some(scan_id);
                     outcome.session_site_facts.push(facts);
@@ -175,6 +180,9 @@ where
                 break;
             }
             Err(e) => {
+                if outcome.status == PageLoopStatus::Complete {
+                    outcome.status = PageLoopStatus::Partial;
+                }
                 tracing::error!(
                     "Multi-scan error for {}: {}",
                     crate::log_sanitizer::log_safe_url_target(url),
@@ -203,8 +211,10 @@ where
         }
     }
 
-    if outcome.status == PageLoopStatus::Complete
-        && outcome.completed_scores.is_empty()
+    if matches!(
+        outcome.status,
+        PageLoopStatus::Complete | PageLoopStatus::Partial
+    ) && outcome.completed_scores.is_empty()
         && !outcome.page_results.is_empty()
     {
         outcome.status = PageLoopStatus::Failed;
@@ -258,7 +268,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_pages_are_excluded_from_the_session_average() {
+    async fn failed_pages_make_the_session_partial_without_affecting_the_average() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let persisted = Arc::new(Mutex::new(Vec::<(usize, String)>::new()));
 
@@ -297,7 +307,7 @@ mod tests {
         // The failed page appears in the summaries (score 0, no scan row)
         // but must not drag the session average down as a zero.
         assert_eq!(outcome.completed_scores, vec![80, 60]);
-        assert_eq!(outcome.status, PageLoopStatus::Complete);
+        assert_eq!(outcome.status, PageLoopStatus::Partial);
         assert_eq!(session_average(&outcome.completed_scores), Some(70));
         assert_eq!(outcome.page_results.len(), 3);
         assert_eq!(outcome.page_results[1].score, 0);
@@ -543,6 +553,7 @@ mod tests {
                             ran: true,
                             axe_ran: true,
                             build: Some("test-browser".into()),
+                            failure: None,
                         },
                     })
                 }
@@ -563,6 +574,36 @@ mod tests {
         assert!(runtime.ran);
         assert!(runtime.axe_ran);
         assert_eq!(runtime.build.as_deref(), Some("test-browser"));
+    }
+
+    #[tokio::test]
+    async fn browser_failure_makes_a_transport_success_partial() {
+        let outcome = run_page_loop(
+            &["https://example.com/page-0".to_string()],
+            7,
+            || false,
+            |_, url, _| {
+                let url = url.to_string();
+                async move {
+                    Ok(PageScanOutput {
+                        result: scan_result(&url, 90),
+                        browser_runtime: super::super::web_scan::BrowserRuntime {
+                            ran: false,
+                            axe_ran: false,
+                            build: None,
+                            failure: Some("Failed to create webview: unavailable".into()),
+                        },
+                    })
+                }
+            },
+            |_, _, _, _| async { Ok(100) },
+            |_| {},
+        )
+        .await
+        .expect("transport result persists");
+
+        assert_eq!(outcome.status, PageLoopStatus::Partial);
+        assert_eq!(outcome.completed_scores, vec![90]);
     }
 
     #[tokio::test]

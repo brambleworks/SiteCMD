@@ -3,6 +3,11 @@ import { fileURLToPath } from "node:url";
 
 const INSTALL_LOCATION_PATTERN = /^[ \t]*Install location:[ \t]*(.+)$/gm;
 
+/** Classify a socket bind failure without treating permission errors as port conflicts. */
+export function classifyBindError(error) {
+  return error?.code === "EADDRINUSE" ? "occupied" : "unavailable";
+}
+
 /** Resolve the repository root without leaving URL-encoded path segments intact. */
 export function resolveRepositoryRoot(moduleUrl) {
   return path.resolve(path.dirname(fileURLToPath(moduleUrl)), "../..");

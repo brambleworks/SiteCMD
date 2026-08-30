@@ -45,3 +45,12 @@ fn component_failure_classification_is_typed_at_the_execution_boundary() {
         ScanComponentStatus::Failed
     );
 }
+
+#[test]
+fn incomplete_page_scope_produces_a_partial_execution_detail() {
+    assert_eq!(
+        incomplete_page_scope_detail(2, 3).as_deref(),
+        Some("2 of 3 selected pages completed.")
+    );
+    assert_eq!(incomplete_page_scope_detail(3, 3), None);
+}

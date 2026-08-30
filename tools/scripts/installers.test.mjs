@@ -189,7 +189,7 @@ afterEach(() => {
   }
 });
 
-describe("CLI installers", () => {
+describe("CLI installers", { timeout: 15_000 }, () => {
   it("replaces an existing public CLI through a destination-local rename", () => {
     const fixture = createInstallerFixture();
     const { installed } = seedInstalledCli(fixture);

@@ -144,6 +144,24 @@ describe("scan completion copy", () => {
     expect(copy.jobDetail).toBe("61/100 • 2 issues • 1 of 2 pages");
   });
 
+  it("explains partial scheduled coverage when every page was scanned", () => {
+    const copy = buildScheduledScanCompletionCopy({
+      scanType: "health",
+      status: "partial",
+      completedPages: 2,
+      totalPages: 2,
+      incompleteDetail: "Browser analysis failed: browser unavailable",
+      score: 61,
+      issueCount: 2,
+      host: "example.com",
+      scoreMessage: "Needs attention.",
+    });
+
+    expect(copy.body).toContain("Browser analysis failed: browser unavailable.");
+    expect(copy.body).not.toContain("2 of 2 pages scanned");
+    expect(copy.jobDetail).toContain("Browser analysis failed: browser unavailable");
+  });
+
   it("maps scheduled scan labels consistently", () => {
     expect(getScheduledScanLabel("code")).toBe("Scheduled Code Scan");
     expect(getScheduledScanLabel("full")).toBe("Scheduled Full Scan");

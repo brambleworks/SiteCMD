@@ -78,11 +78,18 @@ Verify the manifest signature first, on macOS, Windows, or Linux:
 minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -P RWTtzNh0gmMU/8O1AJBbQbUEy9oD5lpqL/dV0qRqlpsCldfWNWgxr5kE
 ```
 
-Then check the file you downloaded against the manifest you just trusted
-(macOS and Linux):
+Then check the file you downloaded against the manifest you just trusted.
+
+On macOS:
 
 ```bash
 shasum -a 256 -c --ignore-missing SHA256SUMS
+```
+
+On Linux:
+
+```bash
+sha256sum -c --ignore-missing SHA256SUMS
 ```
 
 The macOS DMG is Apple-signed as well, and its checksum is listed in the same

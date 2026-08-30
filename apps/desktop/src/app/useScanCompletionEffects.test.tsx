@@ -97,6 +97,7 @@ const multiResult: MultiScanResult = {
   completedPages: 3,
   overallScore: 80,
   durationMs: 4200,
+  incompleteDetail: null,
   newIssueCount: null,
   resolvedIssueCount: null,
   pageResults: [
@@ -122,6 +123,9 @@ interface RenderCompletionHookOptions {
   multiResult?: MultiScanResult | null;
   state?: "complete" | "error";
   error?: string | null;
+  executionIncompleteDetail?: string | null;
+  codeResultFromBackground?: boolean;
+  currentExecutionMode?: "full" | "web" | "code";
   scanJobContext?: ScanJobContext | null;
 }
 
@@ -132,6 +136,9 @@ function renderCompletionHook({
   multiResult: scanMultiResult = null,
   state = "complete",
   error = null,
+  executionIncompleteDetail = null,
+  codeResultFromBackground = false,
+  currentExecutionMode = scanRunStep?.mode ?? "web",
   scanJobContext = null,
 }: RenderCompletionHookOptions) {
   const loadHistory = vi.fn();
@@ -143,17 +150,19 @@ function renderCompletionHook({
     useScanCompletionEffects({
       state,
       currentScanType: "health",
+      currentExecutionMode,
       result,
       codeResult: scanCodeResult,
       multiResult: scanMultiResult,
       error,
+      executionIncompleteDetail,
+      codeResultFromBackground,
       activeEnvUrl: "https://example.com",
       activeProjectId: 1,
       activeProjectName: "Example",
       activeScanScope: "Example",
       history: [],
       codeHistory: [],
-      scanRunStep,
       scanBackgroundedRef: { current: false },
       scanJobContextRef: { current: scanJobContext },
       desktopNotificationsEnabled: false,
@@ -305,5 +314,62 @@ describe("useScanCompletionEffects", () => {
 
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(failJobMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports incomplete results without running a successful completion path", () => {
+    const { toast } = renderCompletionHook({
+      scanRunStep: null,
+      executionIncompleteDetail: "Web Scan: Browser analysis failed: unavailable",
+    });
+
+    expect(handleWebScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleCodeScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleFullScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleFullMultiScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleMultiScanCompletionMock).not.toHaveBeenCalled();
+    expect(failJobMock).toHaveBeenCalledWith(
+      "scan",
+      expect.objectContaining({ detail: "Web Scan: Browser analysis failed: unavailable" }),
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      "Web Scan completed partially",
+      "Web Scan: Browser analysis failed: unavailable",
+    );
+  });
+
+  it("keeps a partial Full Scan labeled as a Full Scan when one result is missing", () => {
+    const { toast } = renderCompletionHook({
+      scanRunStep: null,
+      currentExecutionMode: "full",
+      result: null,
+      codeResult,
+      executionIncompleteDetail: "Web Scan: Network error: Failed to fetch",
+    });
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Full Scan completed partially",
+      "Web Scan: Network error: Failed to fetch",
+    );
+  });
+
+  it("does not replay foreground completion effects for a background code refresh", () => {
+    const { toast } = renderCompletionHook({
+      scanRunStep: null,
+      currentExecutionMode: "full",
+      result: webResult,
+      codeResult,
+      codeResultFromBackground: true,
+      executionIncompleteDetail: "Web Scan: Browser analysis failed: unavailable",
+    });
+
+    expect(handleWebScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleCodeScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleFullScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleFullMultiScanCompletionMock).not.toHaveBeenCalled();
+    expect(handleMultiScanCompletionMock).not.toHaveBeenCalled();
+    expect(failJobMock).not.toHaveBeenCalled();
+    expect(completeJobMock).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

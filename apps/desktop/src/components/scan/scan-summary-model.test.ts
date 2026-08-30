@@ -408,6 +408,7 @@ describe("buildScanSummaryModel", () => {
       completedPages: 3,
       overallScore: 88,
       durationMs: 2300,
+      incompleteDetail: null,
       newIssueCount: null,
       resolvedIssueCount: null,
       siteIssues: [],
@@ -454,6 +455,91 @@ describe("buildScanSummaryModel", () => {
     expect(summary?.estimatedNewIssues).toBeNull();
     // No project score supplied for this page scan, so the single score is null.
     expect(summary?.siteCmdScore).toBeNull();
+
+    const partialSummary = buildScanSummaryModel({
+      result: null,
+      codeResult: null,
+      multiResult: {
+        ...multiResult,
+        completedPages: 2,
+        incompleteDetail: "2 of 3 selected pages completed.",
+      },
+      sitecmdScore: null,
+      history: [],
+      codeHistory: [],
+      sessions,
+      scopeLabel: "Example",
+    });
+    expect(partialSummary?.title).toBe("Page scan partially complete");
+  });
+
+  it("labels a single web result with incomplete collector coverage", () => {
+    const summary = buildScanSummaryModel({
+      result: webResult(),
+      codeResult: null,
+      multiResult: null,
+      incompleteDetail: "Web Scan: Browser analysis failed: unavailable",
+      sitecmdScore: 82,
+      history: [],
+      codeHistory: [],
+      sessions: [],
+      scopeLabel: "Example",
+    });
+
+    expect(summary?.title).toBe("Web scan partially complete");
+    expect(summary?.incompleteDetail).toBe("Web Scan: Browser analysis failed: unavailable");
+  });
+
+  it("does not infer resolutions or regressions from incomplete evidence", () => {
+    const summary = buildScanSummaryModel({
+      result: webResult({ overallScore: 55 }),
+      codeResult: null,
+      multiResult: null,
+      incompleteDetail: "Web Scan: Browser analysis failed: unavailable",
+      sitecmdScore: 82,
+      history: [
+        {
+          id: 11,
+          url: "https://example.com",
+          mode: "live",
+          scanType: "health",
+          overallScore: 80,
+          issuesTotal: 5,
+          issuesCritical: 0,
+          issuesHigh: 2,
+          issuesMedium: 2,
+          issuesLow: 1,
+          durationMs: 900,
+          timestamp: "2026-05-12T10:00:00Z",
+          sessionId: null,
+          pageUrl: null,
+        },
+      ],
+      codeHistory: [],
+      sessions: [],
+      scopeLabel: "Example",
+    });
+
+    expect(summary?.estimatedNewIssues).toBeNull();
+    expect(summary?.resolvedIssues).toBeNull();
+    expect(summary?.regressionCount).toBe(0);
+  });
+
+  it("retains the requested Full Scan identity when one collector has no result", () => {
+    const summary = buildScanSummaryModel({
+      result: null,
+      codeResult: codeResult(),
+      multiResult: null,
+      requestedMode: "full",
+      incompleteDetail: "Web Scan: Network error: Failed to fetch",
+      sitecmdScore: 82,
+      history: [],
+      codeHistory: [],
+      sessions: [],
+      scopeLabel: "Example",
+    });
+
+    expect(summary?.title).toBe("Full scan partially complete");
   });
 
   it("keeps the persisted active issue total authoritative for multi-page scans", () => {
@@ -466,6 +552,7 @@ describe("buildScanSummaryModel", () => {
         completedPages: 2,
         overallScore: 84,
         durationMs: 1_500,
+        incompleteDetail: null,
         newIssueCount: 2,
         resolvedIssueCount: 1,
         siteIssues: [],

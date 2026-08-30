@@ -318,15 +318,16 @@ describe("useAppShellOrchestration listener stability", () => {
           issues: 2,
           scanType: "health",
           status: "partial",
-          completedPages: 1,
+          completedPages: 2,
           totalPages: 2,
+          incompleteDetail: "Browser analysis failed: browser unavailable",
         },
       });
     });
 
     expect(toast.warning).toHaveBeenCalledWith(
       "Scheduled Web Scan Partially Complete - 61/100",
-      "1 of 2 pages scanned. 2 issues found on project-1.example.com. Some issues to address.",
+      "Browser analysis failed: browser unavailable. 2 issues found on project-1.example.com. Some issues to address.",
     );
     expect(toast.success).not.toHaveBeenCalled();
   });

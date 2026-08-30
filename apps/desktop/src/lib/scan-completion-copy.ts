@@ -51,6 +51,7 @@ interface ScheduledScanCompletionCopyInput {
   status?: "complete" | "partial";
   completedPages?: number | null;
   totalPages?: number | null;
+  incompleteDetail?: string | null;
   score: number;
   issueCount: number;
   host: string;
@@ -232,13 +233,20 @@ export function buildScheduledScanCompletionCopy(
   const coverageLabel = hasPageCounts
     ? `${input.completedPages} of ${input.totalPages} pages`
     : "Partial coverage";
-  const coverageSentence = hasPageCounts
-    ? `${coverageLabel} scanned.`
-    : "The scheduled scan finished with incomplete coverage.";
+  const incompleteDetail = input.incompleteDetail?.trim();
+  const coverageSentence = incompleteDetail
+    ? /[.!?]$/.test(incompleteDetail)
+      ? incompleteDetail
+      : `${incompleteDetail}.`
+    : hasPageCounts
+      ? `${coverageLabel} scanned.`
+      : "The scheduled scan finished with incomplete coverage.";
+  const incompletePageCount =
+    hasPageCounts && input.completedPages !== input.totalPages ? coverageLabel : null;
 
   return {
     ...copy,
     body: `${coverageSentence} ${copy.body}`,
-    jobDetail: joinDetail([copy.jobDetail, coverageLabel]),
+    jobDetail: joinDetail([copy.jobDetail, incompleteDetail, incompletePageCount]),
   };
 }

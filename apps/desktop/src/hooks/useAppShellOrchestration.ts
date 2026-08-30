@@ -195,6 +195,7 @@ export function useAppShellOrchestration({
       status: payload.status,
       completedPages: payload.completedPages,
       totalPages: payload.totalPages,
+      incompleteDetail: payload.incompleteDetail,
       score: scheduledCompletionScore.score,
       issueCount: scheduledCompletionScore.issueCount,
       host: hostname,

@@ -363,7 +363,7 @@ export type McpServerSpec = { command: string, args: Array<string>, env: { [key 
 /**
  * Multi-page scan session result.
  */
-export type MultiScanResult = { sessionId: number, totalPages: number, completedPages: number, overallScore: number, durationMs: number, pageResults: Array<PageScanSummary>,
+export type MultiScanResult = { sessionId: number, totalPages: number, completedPages: number, overallScore: number, durationMs: number, incompleteDetail: string | null, pageResults: Array<PageScanSummary>,
 /**
  * Canonical issue groups activated during this session.
  */

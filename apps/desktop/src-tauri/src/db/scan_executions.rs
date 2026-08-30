@@ -354,16 +354,25 @@ impl Database {
                 )));
             }
 
-            let (web_status, code_status): (Option<String>, Option<String>) = tx.query_row(
-                "SELECT web_status, code_status
+            let (web_status, web_detail, code_status, code_detail): (
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = tx.query_row(
+                "SELECT web_status, web_detail, code_status, code_detail
                  FROM scan_executions
                  WHERE id = :execution_id",
                 named_params! { ":execution_id": execution_id },
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )?;
-            let statuses = [web_status.as_deref(), code_status.as_deref()]
+            let components = [
+                (web_status.as_deref(), web_detail.as_deref()),
+                (code_status.as_deref(), code_detail.as_deref()),
+            ];
+            let statuses = components
                 .into_iter()
-                .flatten()
+                .filter_map(|(status, _)| status)
                 .collect::<Vec<_>>();
             let unsettled = statuses
                 .iter()
@@ -381,8 +390,15 @@ impl Database {
                     .iter()
                     .filter(|status| **status == "cancelled")
                     .count();
+                let incomplete_coverage = components
+                    .iter()
+                    .any(|(status, detail)| *status == Some("complete") && detail.is_some());
                 let status = if completed > 0 && failed + cancelled == 0 {
-                    ScanExecutionStatus::Complete
+                    if incomplete_coverage {
+                        ScanExecutionStatus::Partial
+                    } else {
+                        ScanExecutionStatus::Complete
+                    }
                 } else if completed > 0 {
                     ScanExecutionStatus::Partial
                 } else if cancelled > 0 && failed == 0 {

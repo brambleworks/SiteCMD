@@ -13,6 +13,7 @@ import {
 } from "./prepare-public-history.mjs";
 
 const temporaryRoots = [];
+const PUBLIC_HISTORY_TEST_TIMEOUT_MS = 15_000;
 
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
@@ -101,7 +102,7 @@ describe("resolveBackupPath", () => {
   });
 });
 
-describe("preparePublicHistory", () => {
+describe("preparePublicHistory", { timeout: PUBLIC_HISTORY_TEST_TIMEOUT_MS }, () => {
   it("scans an exact tracked-tree export without ignored checkout files", () => {
     const { root } = repositoryFixture();
     fs.writeFileSync(path.join(root, ".gitignore"), ".env\n");

@@ -290,6 +290,7 @@ async fn report_scheduled_execution(
     let mut web_completion = summarize_scheduled_web_result(
         result.web_result.as_ref(),
         result.multi_result.as_ref(),
+        result.execution.web_detail.as_deref(),
         web_scan_id,
         web_session_id,
         &chrono::Utc::now().to_rfc3339(),
@@ -359,6 +360,7 @@ async fn report_scheduled_execution(
                     "status": completion_status,
                     "completedPages": web_result.completed_pages,
                     "totalPages": web_result.total_pages,
+                    "incompleteDetail": web_result.incomplete_detail,
                 }),
             );
             if notify_gate {
@@ -394,6 +396,7 @@ async fn report_scheduled_execution(
                     "status": completion_status,
                     "completed_pages": web_result.completed_pages,
                     "total_pages": web_result.total_pages,
+                    "incomplete_detail": web_result.incomplete_detail,
                     "scan_type": result.execution.web_focus.unwrap_or(ScanType::Health).as_str(),
                 }
             }),
@@ -471,6 +474,7 @@ async fn report_scheduled_execution(
                     "topDomainCount": leading_domain.map(|(_, count)| count).unwrap_or(0),
                     "domainTrendLabel": domain_trend_label,
                     "status": completion_status,
+                    "incompleteDetail": result.execution.code_detail,
                 }),
             );
             if notify_gate {
@@ -504,6 +508,7 @@ async fn report_scheduled_execution(
                     "critical_issues": code_result.critical_count,
                     "comparison_eligible": code_comparison_eligible,
                     "status": completion_status,
+                    "incomplete_detail": result.execution.code_detail,
                     "scan_type": "code",
                 }
             }),
@@ -535,6 +540,14 @@ async fn report_scheduled_execution(
         let total_pages = web_completion
             .as_ref()
             .map_or(scope_urls.len(), |completion| completion.total_pages);
+        let incomplete_detail = match (
+            result.execution.web_detail.as_deref(),
+            result.execution.code_detail.as_deref(),
+        ) {
+            (Some(web), Some(code)) if web != code => Some(format!("{web} {code}")),
+            (Some(detail), _) | (None, Some(detail)) => Some(detail.to_string()),
+            (None, None) => None,
+        };
         let previous_full_baseline = has_comparable_baseline
             .then(|| {
                 load_full_score_baseline(
@@ -565,6 +578,7 @@ async fn report_scheduled_execution(
                 completion_status,
                 completed_pages,
                 total_pages,
+                incomplete_detail,
             },
         )
         .await;
@@ -581,6 +595,7 @@ struct FullCompletionReport<'a> {
     completion_status: &'a str,
     completed_pages: usize,
     total_pages: usize,
+    incomplete_detail: Option<String>,
 }
 
 /// Emit one score, event, and optional notification for a full scheduled scan.
@@ -601,6 +616,7 @@ async fn emit_full_scan_completion(
         completion_status,
         completed_pages,
         total_pages,
+        incomplete_detail,
     } = report;
     let snapshot = match crate::commands::issues::compute_and_record_current_score(
         db,
@@ -642,6 +658,7 @@ async fn emit_full_scan_completion(
             "status": completion_status,
             "completedPages": completed_pages,
             "totalPages": total_pages,
+            "incompleteDetail": incomplete_detail,
         }),
     );
 

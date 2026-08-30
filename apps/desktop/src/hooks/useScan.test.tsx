@@ -108,6 +108,45 @@ describe("useScan", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("auto_prune_url_scans", expect.anything());
   });
 
+  it("retains incomplete execution details with usable web results", async () => {
+    invokeMock.mockResolvedValue(
+      executionResult({
+        execution: {
+          id: 17,
+          status: "partial",
+          webStatus: "complete",
+          webDetail: "Browser analysis failed: unavailable",
+          codeStatus: null,
+          codeDetail: null,
+          failureSummary: null,
+        },
+        webResult: {
+          url: "https://example.com",
+          mode: "full",
+          scanType: "health",
+          overallScore: 92,
+          categories: [],
+          issues: [],
+          detectedStack: null,
+          durationMs: 1200,
+          timestamp: "2026-05-06T00:00:00Z",
+        },
+      }),
+    );
+
+    const { result } = renderHook(() => useScan());
+
+    await act(async () => {
+      await result.current.scan("https://example.com");
+    });
+
+    expect(result.current.state).toBe("complete");
+    expect(result.current.currentExecutionMode).toBe("web");
+    expect(result.current.executionIncompleteDetail).toBe(
+      "Web Scan: Browser analysis failed: unavailable",
+    );
+  });
+
   it("a webview reload resumes the id sequence instead of re-minting a used id", async () => {
     invokeMock.mockResolvedValue(executionResult({}));
     const { result } = renderHook(() => useScan());
@@ -215,6 +254,60 @@ describe("useScan", () => {
       }),
     );
     expect(invokeMock).not.toHaveBeenCalledWith("auto_prune_url_scans", expect.anything());
+  });
+
+  it("exposes partial coverage from a unified scan execution", async () => {
+    invokeMock.mockResolvedValue(
+      executionResult({
+        execution: {
+          id: 17,
+          status: "partial",
+          webStatus: "complete",
+          webDetail: "2 of 3 selected pages completed.",
+          codeStatus: "complete",
+          codeDetail: null,
+          failureSummary: null,
+        },
+        multiResult: {
+          sessionId: 7,
+          totalPages: 3,
+          completedPages: 2,
+          overallScore: 88,
+          durationMs: 2400,
+          incompleteDetail: "2 of 3 selected pages completed.",
+          pageResults: [],
+          siteIssues: [],
+          newIssueCount: 0,
+          resolvedIssueCount: 0,
+        },
+      }),
+    );
+
+    const { result } = renderHook(() => useScan());
+
+    await act(async () => {
+      await result.current.scanExecution({
+        projectId: 1,
+        environmentId: 2,
+        environmentUrl: "https://example.com",
+        requestedMode: "web",
+        webFocus: "health",
+        urls: ["https://example.com", "https://example.com/about"],
+        enabledCategories: null,
+        timeoutSecs: null,
+        axeEnabled: false,
+        projectPath: null,
+        inspectLocalDatabases: false,
+        retention: 30,
+        trigger: "manual",
+        idempotencyKey: "manual:test-partial",
+      });
+    });
+
+    expect(result.current.executionIncompleteDetail).toBe(
+      "Web Scan: 2 of 3 selected pages completed.",
+    );
+    expect(result.current.currentExecutionMode).toBe("web");
   });
 
   it("cancels an in-flight unified execution and keeps its late response from reopening", async () => {

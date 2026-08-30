@@ -1,6 +1,7 @@
 use super::*;
 use crate::checks::{CheckStatus, Severity};
 use crate::core::normalized_scan::ScanRunKind;
+use crate::core::scanner::ScanResult;
 use crate::core::types_work_items::ScoreSnapshot;
 
 use super::comparison::full_baseline_execution_id;
@@ -185,6 +186,7 @@ fn scheduled_web_completion_summarizes_multi_page_sessions() {
         completed_pages: 2,
         overall_score: 73,
         duration_ms: 900,
+        incomplete_detail: None,
         page_results: vec![
             PageScanSummary {
                 url: "https://example.com/".into(),
@@ -218,6 +220,7 @@ fn scheduled_web_completion_summarizes_multi_page_sessions() {
         None,
         Some(&multi_result),
         None,
+        None,
         Some(42),
         "2026-08-29T12:00:00Z",
     )
@@ -243,6 +246,7 @@ fn scheduled_web_completion_excludes_partial_page_sets_from_comparisons() {
         completed_pages: 1,
         overall_score: 61,
         duration_ms: 900,
+        incomplete_detail: Some("1 of 2 selected pages completed.".into()),
         page_results: vec![
             PageScanSummary {
                 url: "https://example.com/".into(),
@@ -276,6 +280,7 @@ fn scheduled_web_completion_excludes_partial_page_sets_from_comparisons() {
         None,
         Some(&multi_result),
         None,
+        None,
         Some(42),
         "2026-08-29T12:00:00Z",
     )
@@ -286,6 +291,41 @@ fn scheduled_web_completion_excludes_partial_page_sets_from_comparisons() {
     assert_eq!(summary.completed_pages, 1);
     assert_eq!(summary.total_pages, 2);
     assert_eq!(summary.regression_scan_ids, vec![11]);
+}
+
+#[test]
+fn scheduled_web_completion_excludes_incomplete_browser_coverage() {
+    use crate::core::scanner::MultiScanResult;
+
+    let multi_result = MultiScanResult {
+        session_id: 43,
+        total_pages: 2,
+        completed_pages: 2,
+        overall_score: 70,
+        duration_ms: 900,
+        incomplete_detail: Some("Browser analysis failed: unavailable".into()),
+        page_results: Vec::new(),
+        new_issue_count: None,
+        resolved_issue_count: None,
+        site_issues: Vec::new(),
+    };
+
+    let summary = summarize_scheduled_web_result(
+        None,
+        Some(&multi_result),
+        Some("Browser analysis failed: unavailable"),
+        None,
+        Some(43),
+        "2026-08-29T12:00:00Z",
+    )
+    .expect("partial browser completion summary");
+
+    assert!(!summary.scope_complete);
+    assert!(!summary.comparison_eligible);
+    assert_eq!(
+        summary.incomplete_detail.as_deref(),
+        Some("Browser analysis failed: unavailable")
+    );
 }
 
 #[test]
@@ -366,6 +406,7 @@ fn scheduled_web_completion_includes_actionable_site_findings() {
         completed_pages: 2,
         overall_score: 73,
         duration_ms: 900,
+        incomplete_detail: None,
         page_results: Vec::new(),
         new_issue_count: Some(1),
         resolved_issue_count: Some(0),
@@ -379,6 +420,7 @@ fn scheduled_web_completion_includes_actionable_site_findings() {
     let summary = summarize_scheduled_web_result(
         None,
         Some(&multi_result),
+        None,
         None,
         None,
         "2026-08-29T12:00:00Z",
@@ -427,13 +469,49 @@ fn scheduled_web_completion_counts_only_actionable_single_page_findings() {
         site_facts: None,
     };
 
-    let summary =
-        summarize_scheduled_web_result(Some(&result), None, Some(11), None, "2026-08-29T12:00:00Z")
-            .expect("single-page completion summary");
+    let summary = summarize_scheduled_web_result(
+        Some(&result),
+        None,
+        None,
+        Some(11),
+        None,
+        "2026-08-29T12:00:00Z",
+    )
+    .expect("single-page completion summary");
 
     assert_eq!(summary.counts.total, 2);
     assert_eq!(summary.counts.critical, 1);
     assert_eq!(summary.counts.high, 1);
+}
+
+#[test]
+fn scheduled_web_completion_excludes_incomplete_single_page_coverage() {
+    let result = ScanResult {
+        url: "https://example.com/".into(),
+        mode: "live".into(),
+        scan_type: ScanType::Health,
+        overall_score: 91,
+        categories: Vec::new(),
+        issues: Vec::new(),
+        detected_stack: None,
+        duration_ms: 400,
+        timestamp: "2026-08-29T12:00:00Z".into(),
+        page_signals: None,
+        site_facts: None,
+    };
+
+    let summary = summarize_scheduled_web_result(
+        Some(&result),
+        None,
+        Some("Browser analysis failed: unavailable"),
+        Some(11),
+        None,
+        "2026-08-29T12:00:00Z",
+    )
+    .expect("incomplete single-page completion summary");
+
+    assert!(!summary.scope_complete);
+    assert!(!summary.comparison_eligible);
 }
 
 #[test]

@@ -73,7 +73,7 @@ type ScanRunOutcome<T = undefined> = { ok: true; result: T } | { ok: false; erro
 export interface ScanProgressEvent {
   check_id: string;
   category: ScanCategory;
-  status: "running" | "complete" | "skipped";
+  status: "running" | "complete" | "skipped" | "error";
   results_count: number;
   checks_done: number;
   checks_total: number;
@@ -93,6 +93,7 @@ export interface MultiScanResult {
   completedPages: number;
   overallScore: number;
   durationMs: number;
+  incompleteDetail: string | null;
   /** Active issue groups added, or null without a persisted project scope. */
   newIssueCount: number | null;
   /** Unique active issue groups removed by this session. */
@@ -134,11 +135,13 @@ interface CodeScanOptions {
 interface UseScanReturn {
   state: ScanState;
   currentScanType: ScheduledScanType | null;
+  currentExecutionMode: RunScanExecutionRequest["requestedMode"] | null;
   result: ScanResult | null;
   codeResult: CodeScanResult | null;
   /** Whether the displayed code report came from a background execution. */
   codeResultFromBackground: boolean;
   multiResult: MultiScanResult | null;
+  executionIncompleteDetail: string | null;
   error: string | null;
   scan: (url: string, options?: ScanOptions) => Promise<ScanRunOutcome<ScanResult>>;
   scanExecution: (
@@ -220,6 +223,31 @@ function executionFailureMessage(result: RunScanExecutionResult): string {
   );
 }
 
+function getExecutionIncompleteDetail(result: RunScanExecutionResult): string | null {
+  const { execution } = result;
+  if (execution.status !== "partial") return null;
+
+  const componentDetail = (
+    label: string,
+    status: typeof execution.webStatus,
+    detail: string | null,
+  ) => {
+    if (detail) return `${label}: ${detail}`;
+    if (status === "failed" || status === "cancelled") return `${label}: ${status}`;
+    return null;
+  };
+  const details = [
+    componentDetail("Web Scan", execution.webStatus, execution.webDetail),
+    componentDetail("Code Scan", execution.codeStatus, execution.codeDetail),
+  ].filter((detail): detail is string => detail != null);
+
+  return (
+    details.join(" ") ||
+    execution.failureSummary ||
+    "Scan completed without all requested coverage."
+  );
+}
+
 /** Reset both request-id stores for deterministic tests. */
 export function __resetScanRequestIdsForTests() {
   nextScanRequestId = 0;
@@ -238,11 +266,15 @@ export function __reloadScanRequestIdSeedForTests() {
 export function useScan(): UseScanReturn {
   const [state, setState] = useState<ScanState>("idle");
   const [currentScanType, setCurrentScanType] = useState<ScheduledScanType | null>(null);
+  const [currentExecutionMode, setCurrentExecutionMode] = useState<
+    RunScanExecutionRequest["requestedMode"] | null
+  >(null);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [codeResult, setCodeResult] = useState<CodeScanResult | null>(null);
   // Distinguish foreground reports from background refreshes without parallel state.
   const [foregroundCodeRunId, setForegroundCodeRunId] = useState<number | null>(null);
   const [multiResult, setMultiResult] = useState<MultiScanResult | null>(null);
+  const [executionIncompleteDetail, setExecutionIncompleteDetail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // External progress state avoids repainting the app shell on every tick.
   const unlistenRef = useRef<UnlistenFn | null>(null);
@@ -364,10 +396,12 @@ export function useScan(): UseScanReturn {
       const scanRequestId = mintScanRequestId();
       activeScanRequestIdRef.current = scanRequestId;
       setCurrentScanType((options?.scanType as ScanType | undefined) ?? "health");
+      setCurrentExecutionMode("web");
       setState("scanning");
       setResult(null);
       setCodeResult(null);
       setMultiResult(null);
+      setExecutionIncompleteDetail(null);
       setError(null);
       resetScanProgress();
       recordWorkflowHealthEvent("run_scan", "started", {
@@ -421,6 +455,7 @@ export function useScan(): UseScanReturn {
 
         if (scanEpochRef.current === epoch) {
           setResult(scanResult);
+          setExecutionIncompleteDetail(getExecutionIncompleteDetail(execution));
           setState("complete");
         }
         recordPerformanceMetric("scan.duration_ms", scanResult.durationMs, {
@@ -472,10 +507,12 @@ export function useScan(): UseScanReturn {
       setCurrentScanType(
         request.requestedMode === "web" ? (request.webFocus ?? "health") : request.requestedMode,
       );
+      setCurrentExecutionMode(request.requestedMode);
       setState("scanning");
       setResult(null);
       setCodeResult(null);
       setMultiResult(null);
+      setExecutionIncompleteDetail(null);
       setError(null);
       resetScanProgress();
       clearListeners();
@@ -538,6 +575,7 @@ export function useScan(): UseScanReturn {
           setMultiResult(executionResult.multiResult);
           setCodeResult(nextCodeResult);
           setForegroundCodeRunId(nextCodeResult?.id ?? null);
+          setExecutionIncompleteDetail(getExecutionIncompleteDetail(executionResult));
           setError(failed ? executionFailureMessage(executionResult) : null);
           setState(failed ? "error" : "complete");
         }
@@ -587,12 +625,14 @@ export function useScan(): UseScanReturn {
       const scanRequestId = mintScanRequestId();
       activeScanRequestIdRef.current = scanRequestId;
       setCurrentScanType("code");
+      setCurrentExecutionMode("code");
       setState("scanning");
       if (!options?.preservePreviousResults) {
         setResult(null);
         setMultiResult(null);
       }
       setCodeResult(null);
+      setExecutionIncompleteDetail(null);
       setError(null);
       resetScanProgress();
       clearListeners();
@@ -666,6 +706,7 @@ export function useScan(): UseScanReturn {
         if (scanEpochRef.current === epoch) {
           setCodeResult(nextCodeResult);
           setForegroundCodeRunId(nextCodeResult.id);
+          setExecutionIncompleteDetail(getExecutionIncompleteDetail(execution));
           setState("complete");
         }
         recordPerformanceMetric("scan.duration_ms", nextCodeResult.durationMs, {
@@ -716,9 +757,11 @@ export function useScan(): UseScanReturn {
     setResult(null);
     setCodeResult(null);
     setMultiResult(null);
+    setExecutionIncompleteDetail(null);
     setError(null);
     resetScanProgress();
     setCurrentScanType(null);
+    setCurrentExecutionMode(null);
     clearListeners();
 
     try {
@@ -737,19 +780,23 @@ export function useScan(): UseScanReturn {
     setResult(null);
     setCodeResult(null);
     setMultiResult(null);
+    setExecutionIncompleteDetail(null);
     setError(null);
     resetScanProgress();
     setCurrentScanType(null);
+    setCurrentExecutionMode(null);
     clearListeners();
   }, [clearListeners]);
 
   return {
     state,
     currentScanType,
+    currentExecutionMode,
     result,
     codeResult,
     codeResultFromBackground: codeResult !== null && codeResult.id !== foregroundCodeRunId,
     multiResult,
+    executionIncompleteDetail,
     error,
     scan,
     scanExecution,

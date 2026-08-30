@@ -23,6 +23,7 @@ pub(super) struct ScheduledWebCompletion {
     pub(super) scope_complete: bool,
     pub(super) completed_pages: usize,
     pub(super) total_pages: usize,
+    pub(super) incomplete_detail: Option<String>,
     pub(super) comparison_eligible: bool,
 }
 
@@ -44,21 +45,24 @@ pub(super) fn scheduled_web_run_kind(scope_urls: &[String]) -> ScanRunKind {
 pub(super) fn summarize_scheduled_web_result(
     web_result: Option<&ScanResult>,
     multi_result: Option<&MultiScanResult>,
+    incomplete_detail: Option<&str>,
     web_scan_id: Option<i64>,
     web_session_id: Option<i64>,
     fallback_timestamp: &str,
 ) -> Option<ScheduledWebCompletion> {
     if let Some(result) = web_result {
+        let scope_complete = incomplete_detail.is_none();
         return Some(ScheduledWebCompletion {
             scan_id: web_scan_id,
             score: result.overall_score,
             counts: web_scan_issue_counts(result),
             timestamp: result.timestamp.clone(),
             regression_scan_ids: web_scan_id.into_iter().collect(),
-            scope_complete: true,
+            scope_complete,
             completed_pages: 1,
             total_pages: 1,
-            comparison_eligible: true,
+            incomplete_detail: incomplete_detail.map(str::to_owned),
+            comparison_eligible: scope_complete,
         });
     }
 
@@ -90,7 +94,14 @@ pub(super) fn summarize_scheduled_web_result(
             }
         }
 
-        let scope_complete = result.total_pages > 0 && result.completed_pages == result.total_pages;
+        let incomplete_detail = result
+            .incomplete_detail
+            .as_deref()
+            .or(incomplete_detail)
+            .map(str::to_owned);
+        let scope_complete = result.total_pages > 0
+            && result.completed_pages == result.total_pages
+            && incomplete_detail.is_none();
         ScheduledWebCompletion {
             scan_id: web_session_id.or(Some(result.session_id)),
             score: result.overall_score,
@@ -105,6 +116,7 @@ pub(super) fn summarize_scheduled_web_result(
             scope_complete,
             completed_pages: result.completed_pages,
             total_pages: result.total_pages,
+            incomplete_detail,
             comparison_eligible: scope_complete,
         }
     })

@@ -16,6 +16,7 @@ function buildSummary(): ScanSummaryModel {
     estimatedNewIssues: 2,
     resolvedIssues: 1,
     regressionCount: 0,
+    incompleteDetail: null,
     note: "Skipped 2 nested repositories (repo-a, repo-b). Nested repositories and gitignored folders are not scanned as this project's code, so they add no findings here.",
   };
 }
@@ -30,6 +31,22 @@ describe("ScanSummaryOverlay", () => {
     expect(screen.getByText("7 open issues after this scan.")).toBeInTheDocument();
     expect(screen.getByLabelText("Issue severity totals")).toBeInTheDocument();
     expect(screen.getByText(/Skipped 2 nested repositories/)).toBeInTheDocument();
+  });
+
+  it("explains why a scan completed partially", () => {
+    render(
+      <ScanSummaryOverlay
+        summary={{
+          ...buildSummary(),
+          title: "Web scan partially complete",
+          incompleteDetail: "Web Scan: Browser analysis failed: unavailable",
+        }}
+        onClose={vi.fn()}
+        onReviewIssues={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Web Scan: Browser analysis failed: unavailable")).toBeInTheDocument();
   });
 
   it("shows an unavailable marker instead of calling an unknown delta a first scan", () => {

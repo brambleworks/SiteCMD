@@ -163,21 +163,6 @@ export function useAppScanActions({
         setScanRunStep(null);
         return;
       }
-      if (outcome.result.execution.status === "partial") {
-        const detail = [
-          outcome.result.execution.webStatus === "failed" ||
-          outcome.result.execution.webStatus === "cancelled"
-            ? `Web Scan: ${outcome.result.execution.webDetail ?? "failed"}`
-            : null,
-          outcome.result.execution.codeStatus === "failed" ||
-          outcome.result.execution.codeStatus === "cancelled"
-            ? `Code Scan: ${outcome.result.execution.codeDetail ?? "failed"}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        toast.error("Full Scan completed partially", detail);
-      }
     },
     [
       activeEnv,
