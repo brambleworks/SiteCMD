@@ -52,7 +52,7 @@ type WorkflowCue = {
   sentence: string;
 } | null;
 
-type ToastApi = Pick<ReturnType<typeof useToast>, "success" | "info">;
+type ToastApi = Pick<ReturnType<typeof useToast>, "success" | "warning" | "info">;
 
 interface UseAppShellOrchestrationOptions {
   projects: ProjectRecord[];
@@ -192,6 +192,9 @@ export function useAppShellOrchestration({
     const workflowCue = await loadPrimaryWorkflowCue(payload.projectId, payload.url);
     const copy = buildScheduledScanCompletionCopy({
       scanType: payload.scanType,
+      status: payload.status,
+      completedPages: payload.completedPages,
+      totalPages: payload.totalPages,
       score: scheduledCompletionScore.score,
       issueCount: scheduledCompletionScore.issueCount,
       host: hostname,
@@ -207,7 +210,11 @@ export function useAppShellOrchestration({
         : null,
     });
 
-    toast.success(copy.title, copy.body);
+    if (payload.status === "partial") {
+      toast.warning(copy.title, copy.body);
+    } else {
+      toast.success(copy.title, copy.body);
+    }
 
     recordCompletedJob({
       id: `scheduled-scan:${payload.scanType ?? "health"}:${payload.projectId}:${payload.timestamp ?? Date.now()}`,

@@ -397,7 +397,7 @@ export type NormalizedRunDiagnostics = { mode: string | null, focus: string | nu
 /**
  * Git provenance captured immediately before a code audit begins.
  */
-codeCommitSha: string | null, codeTreeClean: boolean | null, totalPages: number | null, completedPages: number | null, axeEnabled: boolean | null, browserRan: boolean | null, browserBuild: string | null, };
+codeCommitSha: string | null, codeTreeClean: boolean | null, totalPages: number | null, completedPages: number | null, axeEnabled: boolean | null, browserRan: boolean | null, axeRan: boolean | null, browserBuild: string | null, };
 
 export type Opportunity = { id: string, title: string, description: string, savingsMs: number | null, };
 

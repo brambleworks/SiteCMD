@@ -127,6 +127,23 @@ describe("scan completion copy", () => {
     expect(copy.jobLabel).toBe("Scheduled Full Scan");
   });
 
+  it("reports incomplete scheduled coverage as partial", () => {
+    const copy = buildScheduledScanCompletionCopy({
+      scanType: "health",
+      status: "partial",
+      completedPages: 1,
+      totalPages: 2,
+      score: 61,
+      issueCount: 2,
+      host: "example.com",
+      scoreMessage: "Needs attention.",
+    });
+
+    expect(copy.title).toBe("Scheduled Web Scan Partially Complete - 61/100");
+    expect(copy.body).toBe("1 of 2 pages scanned. 2 issues found on example.com. Needs attention.");
+    expect(copy.jobDetail).toBe("61/100 • 2 issues • 1 of 2 pages");
+  });
+
   it("maps scheduled scan labels consistently", () => {
     expect(getScheduledScanLabel("code")).toBe("Scheduled Code Scan");
     expect(getScheduledScanLabel("full")).toBe("Scheduled Full Scan");

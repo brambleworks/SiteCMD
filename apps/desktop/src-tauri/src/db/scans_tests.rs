@@ -117,6 +117,563 @@ fn make_work_item(check_id: &str, severity: &str, scan_id: i64, project_id: i64)
     }
 }
 
+fn set_web_run_profile(
+    db: &crate::db::Database,
+    run_id: i64,
+    requested_mode: crate::core::scan_execution::ScanExecutionMode,
+    axe_enabled: bool,
+    browser_ran: bool,
+    axe_ran: bool,
+) {
+    db.execute(move |conn| {
+        let (execution_id, diagnostics_json): (i64, String) = conn
+            .query_row(
+                "SELECT execution_id, diagnostics_json FROM scan_runs WHERE id = ?1",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("stored Web run");
+        let mut diagnostics: serde_json::Value =
+            serde_json::from_str(&diagnostics_json).expect("run diagnostics");
+        diagnostics["axeEnabled"] = serde_json::json!(axe_enabled);
+        diagnostics["browserRan"] = serde_json::json!(browser_ran);
+        diagnostics["axeRan"] = serde_json::json!(axe_ran);
+        conn.execute(
+            "UPDATE scan_runs SET diagnostics_json = ?1, axe_enabled = ?2 WHERE id = ?3",
+            rusqlite::params![
+                serde_json::to_string(&diagnostics).expect("serialize diagnostics"),
+                i64::from(axe_enabled),
+                run_id,
+            ],
+        )
+        .expect("update Web run profile");
+        conn.execute(
+            "UPDATE scan_executions
+                SET requested_mode = ?1,
+                    trigger = 'scheduled'
+              WHERE id = ?2",
+            rusqlite::params![requested_mode.as_str(), execution_id],
+        )
+        .expect("update execution mode");
+    })
+    .expect("database worker");
+}
+
+fn set_execution_trigger_for_run(
+    db: &crate::db::Database,
+    run_id: i64,
+    trigger: crate::core::scan_execution::ScanTrigger,
+) {
+    db.execute(move |conn| {
+        conn.execute(
+            "UPDATE scan_executions
+                SET trigger = ?1
+              WHERE id = (SELECT execution_id FROM scan_runs WHERE id = ?2)",
+            rusqlite::params![trigger.as_str(), run_id],
+        )
+        .expect("update execution trigger");
+    })
+    .expect("database worker");
+}
+
+fn web_run_profile(
+    axe_enabled: bool,
+    browser_ran: bool,
+    axe_ran: bool,
+) -> crate::db::WebRunComparisonProfile {
+    crate::db::WebRunComparisonProfile {
+        axe_enabled,
+        browser_ran,
+        axe_ran,
+    }
+}
+
+#[test]
+fn latest_web_baseline_requires_the_same_execution_profile() {
+    use crate::core::normalized_scan::ScanRunKind;
+    use crate::core::scan_execution::ScanExecutionMode;
+    use crate::core::scanner::ScanType;
+
+    let db = temp_db();
+    let url = "https://profile-baseline.example.com";
+    let site_id = db.get_or_create_site(url).expect("site");
+    let project_id = db
+        .upsert_project("Profile baseline", "/tmp/sitecmd-profile-baseline", None)
+        .expect("project");
+    db.add_environment(project_id, url, "Production", "production", "manual")
+        .expect("environment");
+
+    let health_run = db
+        .save_scan(site_id, &make_scan_result(91, "2026-08-28T12:00:00Z"))
+        .expect("Health scan");
+    set_web_run_profile(&db, health_run, ScanExecutionMode::Web, false, true, false);
+
+    let full_run = db
+        .save_scan(site_id, &make_scan_result(72, "2026-08-29T12:00:00Z"))
+        .expect("Full scan");
+    set_web_run_profile(&db, full_run, ScanExecutionMode::Full, true, true, true);
+
+    let transport_only_full_run = db
+        .save_scan(site_id, &make_scan_result(60, "2026-08-30T12:00:00Z"))
+        .expect("transport-only Full scan");
+    set_web_run_profile(
+        &db,
+        transport_only_full_run,
+        ScanExecutionMode::Full,
+        true,
+        false,
+        false,
+    );
+
+    let scope = vec![url.to_string()];
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::Single,
+            ScanType::Health,
+            ScanExecutionMode::Web,
+            web_run_profile(false, true, false),
+            &scope,
+        )
+        .expect("Health baseline"),
+        Some((health_run, 91, 0))
+    );
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::Single,
+            ScanType::Health,
+            ScanExecutionMode::Full,
+            web_run_profile(true, true, true),
+            &scope,
+        )
+        .expect("Full baseline"),
+        Some((full_run, 72, 0))
+    );
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::Single,
+            ScanType::Health,
+            ScanExecutionMode::Full,
+            web_run_profile(false, true, false),
+            &scope,
+        )
+        .expect("mismatched axe profile"),
+        None
+    );
+}
+
+#[test]
+fn latest_web_baseline_ignores_newer_manual_executions() {
+    use crate::core::normalized_scan::ScanRunKind;
+    use crate::core::scan_execution::{ScanExecutionMode, ScanTrigger};
+    use crate::core::scanner::ScanType;
+
+    let db = temp_db();
+    let url = "https://scheduled-baseline.example.com";
+    let site_id = db.get_or_create_site(url).expect("site");
+    let project_id = db
+        .upsert_project(
+            "Scheduled baseline",
+            "/tmp/sitecmd-scheduled-baseline",
+            None,
+        )
+        .expect("project");
+    db.add_environment(project_id, url, "Production", "production", "manual")
+        .expect("environment");
+
+    let scheduled_run = db
+        .save_scan(site_id, &make_scan_result(91, "2026-08-28T12:00:00Z"))
+        .expect("scheduled scan");
+    set_web_run_profile(
+        &db,
+        scheduled_run,
+        ScanExecutionMode::Web,
+        false,
+        true,
+        false,
+    );
+    set_execution_trigger_for_run(&db, scheduled_run, ScanTrigger::Scheduled);
+
+    let manual_run = db
+        .save_scan(site_id, &make_scan_result(42, "2026-08-29T12:00:00Z"))
+        .expect("manual scan");
+    set_web_run_profile(&db, manual_run, ScanExecutionMode::Web, false, true, false);
+    set_execution_trigger_for_run(&db, manual_run, ScanTrigger::Manual);
+
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::Single,
+            ScanType::Health,
+            ScanExecutionMode::Web,
+            web_run_profile(false, true, false),
+            &[url.to_string()],
+        )
+        .expect("scheduled baseline"),
+        Some((scheduled_run, 91, 0))
+    );
+}
+
+#[test]
+fn latest_code_baseline_ignores_newer_manual_executions() {
+    use crate::core::code_scan::CodeScanReport;
+    use crate::core::scan_execution::{ScanExecutionMode, ScanTrigger};
+
+    let db = temp_db();
+    let url = "https://scheduled-code-baseline.example.com";
+    let project_path = "/tmp/sitecmd-scheduled-code-baseline";
+    let project_id = db
+        .upsert_project("Scheduled code baseline", project_path, None)
+        .expect("project");
+    db.add_environment(project_id, url, "Production", "production", "manual")
+        .expect("environment");
+    let report = |checked_at: &str| CodeScanReport {
+        skipped_scopes: Default::default(),
+        checked_at: checked_at.to_string(),
+        framework: None,
+        issue_count: 0,
+        critical_count: 0,
+        high_count: 0,
+        medium_count: 0,
+        low_count: 0,
+        issues: Vec::new(),
+    };
+
+    let scheduled_run = db
+        .save_code_scan(
+            project_id,
+            Some(url.to_string()),
+            project_path.to_string(),
+            &report("2026-08-28T12:00:00Z"),
+            10,
+        )
+        .expect("scheduled code scan");
+    set_execution_trigger_for_run(&db, scheduled_run, ScanTrigger::Scheduled);
+
+    let manual_run = db
+        .save_code_scan(
+            project_id,
+            Some(url.to_string()),
+            project_path.to_string(),
+            &report("2026-08-29T12:00:00Z"),
+            10,
+        )
+        .expect("manual code scan");
+    set_execution_trigger_for_run(&db, manual_run, ScanTrigger::Manual);
+
+    let baseline = db
+        .get_latest_scheduled_code_run_baseline_for_project(
+            project_id,
+            url,
+            ScanExecutionMode::Code,
+        )
+        .expect("scheduled code baseline")
+        .expect("scheduled code run");
+    assert_eq!(baseline.id, scheduled_run);
+}
+
+#[test]
+fn score_comparison_rejects_changed_runtime_provenance() {
+    let db = temp_db();
+    let url = "https://runtime-baseline.example.com";
+    let site_id = db.get_or_create_site(url).expect("site");
+    let before = db
+        .save_scan(site_id, &make_scan_result(91, "2026-08-28T12:00:00Z"))
+        .expect("before scan");
+    let after = db
+        .save_scan(site_id, &make_scan_result(91, "2026-08-29T12:00:00Z"))
+        .expect("after scan");
+
+    assert!(db
+        .scan_runs_have_matching_score_provenance(before, after)
+        .expect("matching provenance"));
+
+    db.execute(move |conn| {
+        let profile_json: String = conn
+            .query_row(
+                "SELECT execution_profile_json FROM scan_runs WHERE id = ?1",
+                [after],
+                |row| row.get(0),
+            )
+            .expect("stored profile");
+        let mut profile: serde_json::Value =
+            serde_json::from_str(&profile_json).expect("profile json");
+        profile["browser_engine"] = serde_json::json!("webkit");
+        profile["browser_build"] = serde_json::json!("changed-build");
+        profile["layers_run"] = serde_json::json!(["transport", "browser"]);
+        conn.execute(
+            "UPDATE scan_runs SET execution_profile_json = ?1 WHERE id = ?2",
+            rusqlite::params![
+                serde_json::to_string(&profile).expect("serialize profile"),
+                after
+            ],
+        )
+        .expect("change runtime profile");
+    })
+    .expect("database worker");
+
+    assert!(!db
+        .scan_runs_have_matching_score_provenance(before, after)
+        .expect("changed provenance"));
+}
+
+#[test]
+fn latest_web_baseline_preserves_trailing_slash_route_identity() {
+    use crate::core::normalized_scan::ScanRunKind;
+    use crate::core::scan_execution::ScanExecutionMode;
+    use crate::core::scanner::ScanType;
+
+    let db = temp_db();
+    let url = "https://slash-baseline.example.com/checkout";
+    let site_id = db.get_or_create_site(url).expect("site");
+    let project_id = db
+        .upsert_project("Slash baseline", "/tmp/sitecmd-slash-baseline", None)
+        .expect("project");
+    db.add_environment(project_id, url, "Production", "production", "manual")
+        .expect("environment");
+
+    let run_id = db
+        .save_scan(site_id, &make_scan_result(88, "2026-08-28T12:00:00Z"))
+        .expect("Web scan");
+    set_web_run_profile(&db, run_id, ScanExecutionMode::Web, false, true, false);
+
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::Single,
+            ScanType::Health,
+            ScanExecutionMode::Web,
+            web_run_profile(false, true, false),
+            &["https://slash-baseline.example.com/checkout/".into()],
+        )
+        .expect("baseline lookup"),
+        None
+    );
+}
+
+#[test]
+fn latest_multi_page_baseline_groups_critical_findings_per_page() {
+    use crate::checks::Severity;
+    use crate::core::normalized_scan::ScanRunKind;
+    use crate::core::scan_execution::ScanExecutionMode;
+    use crate::core::scanner::ScanType;
+
+    let db = temp_db();
+    let url = "https://count-baseline.example.com";
+    let pricing_url = "https://count-baseline.example.com/pricing";
+    let site_id = db.get_or_create_site(url).expect("site");
+    let project_id = db
+        .upsert_project("Count baseline", "/tmp/sitecmd-count-baseline", None)
+        .expect("project");
+    db.add_environment(project_id, url, "Production", "production", "manual")
+        .expect("environment");
+
+    let session_id = db.create_scan_session(site_id, 2, false).expect("session");
+    let mut first_page = make_scan_result(80, "2026-08-28T12:00:00Z");
+    let mut critical = make_snapshot_issue("shared-critical");
+    critical.severity = Severity::Critical;
+    first_page.issues = vec![critical];
+    let first_page_run = db
+        .save_scan_with_session(site_id, session_id, url, &first_page)
+        .expect("first page");
+    db.save_scan_with_session(
+        site_id,
+        session_id,
+        pricing_url,
+        &make_scan_result(80, "2026-08-28T12:00:01Z"),
+    )
+    .expect("second page");
+    db.complete_scan_session(session_id, Some(80), 500)
+        .expect("session score");
+    set_web_run_profile(&db, session_id, ScanExecutionMode::Web, false, true, false);
+
+    db.execute(move |conn| {
+        conn.execute(
+            "INSERT INTO scan_findings (
+                run_id, ordinal, occurrence_id, source, canonical_check_id,
+                producer_check_id, category, producer_category, domain, verdict,
+                severity, confidence, confidence_reason, title, description,
+                fix_prompt, producer_fix_prompt, manual_fix, why_it_matters,
+                verification_hint, raw_data, detail_json, location_kind,
+                page_url, relative_path, line
+             )
+             SELECT run_id, ordinal + 1, occurrence_id || ':second', source,
+                    canonical_check_id, producer_check_id, category,
+                    producer_category, domain, verdict, severity, confidence,
+                    confidence_reason, title, description, fix_prompt,
+                    producer_fix_prompt, manual_fix, why_it_matters,
+                    verification_hint, raw_data, detail_json, location_kind,
+                    page_url, relative_path, line
+               FROM scan_findings
+              WHERE run_id = ?1
+              LIMIT 1",
+            [first_page_run],
+        )
+        .expect("duplicate producer finding");
+        conn.execute(
+            "UPDATE scan_runs SET issues_total = 2, issues_critical = 2 WHERE id = ?1",
+            [first_page_run],
+        )
+        .expect("raw run counters");
+    })
+    .expect("database worker");
+
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::MultiParent,
+            ScanType::Health,
+            ScanExecutionMode::Web,
+            web_run_profile(false, true, false),
+            &[url.into(), pricing_url.into()],
+        )
+        .expect("multi-page baseline"),
+        Some((session_id, 80, 1))
+    );
+}
+
+#[test]
+fn latest_web_baseline_keeps_single_and_multi_runs_separate() {
+    use crate::checks::Severity;
+    use crate::core::normalized_scan::ScanRunKind;
+
+    let db = temp_db();
+    let url = "https://baseline.example.com";
+    let site_id = db.get_or_create_site(url).expect("site");
+    let project_id = db
+        .upsert_project("Baseline", "/tmp/sitecmd-baseline", None)
+        .expect("project");
+    db.add_environment(project_id, url, "Production", "production", "manual")
+        .expect("environment");
+
+    let mut single = make_scan_result(82, "2026-08-28T12:00:00Z");
+    let mut single_issue = make_snapshot_issue("single-critical");
+    single_issue.severity = Severity::Critical;
+    single.issues = vec![single_issue];
+    let single_id = db.save_scan(site_id, &single).expect("single scan");
+    set_web_run_profile(
+        &db,
+        single_id,
+        crate::core::scan_execution::ScanExecutionMode::Web,
+        false,
+        true,
+        false,
+    );
+
+    let session_id = db.create_scan_session(site_id, 2, false).expect("session");
+    let mut first_page = make_scan_result(70, "2026-08-29T12:00:00Z");
+    let mut page_issue = make_snapshot_issue("page-critical");
+    page_issue.severity = Severity::Critical;
+    first_page.issues = vec![page_issue];
+    db.save_scan_with_session(site_id, session_id, url, &first_page)
+        .expect("first page");
+    db.save_scan_with_session(
+        site_id,
+        session_id,
+        "https://baseline.example.com/pricing",
+        &make_scan_result(64, "2026-08-29T12:00:01Z"),
+    )
+    .expect("second page");
+    db.complete_scan_session(session_id, Some(67), 500)
+        .expect("session score");
+    let mut first_site_issue = make_snapshot_issue("site-critical-one");
+    first_site_issue.severity = Severity::Critical;
+    let mut second_site_issue = make_snapshot_issue("site-critical-two");
+    second_site_issue.severity = Severity::Critical;
+    db.save_session_issue_snapshot(session_id, &[first_site_issue, second_site_issue])
+        .expect("session findings");
+    set_web_run_profile(
+        &db,
+        session_id,
+        crate::core::scan_execution::ScanExecutionMode::Web,
+        false,
+        true,
+        false,
+    );
+
+    let mut security = make_scan_result(55, "2026-08-30T12:00:00Z");
+    security.scan_type = crate::core::scanner::ScanType::Security;
+    let security_id = db.save_scan(site_id, &security).expect("security scan");
+    set_web_run_profile(
+        &db,
+        security_id,
+        crate::core::scan_execution::ScanExecutionMode::Web,
+        false,
+        false,
+        false,
+    );
+
+    let single_scope = vec![url.to_string()];
+    let multi_scope = vec![
+        url.to_string(),
+        "https://baseline.example.com/pricing".to_string(),
+    ];
+
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::Single,
+            crate::core::scanner::ScanType::Health,
+            crate::core::scan_execution::ScanExecutionMode::Web,
+            web_run_profile(false, true, false),
+            &single_scope,
+        )
+        .expect("single baseline"),
+        Some((single_id, 82, 1))
+    );
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::Single,
+            crate::core::scanner::ScanType::Security,
+            crate::core::scan_execution::ScanExecutionMode::Web,
+            web_run_profile(false, false, false),
+            &single_scope,
+        )
+        .expect("security baseline"),
+        Some((security_id, 55, 0))
+    );
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::MultiParent,
+            crate::core::scanner::ScanType::Health,
+            crate::core::scan_execution::ScanExecutionMode::Web,
+            web_run_profile(false, true, false),
+            &multi_scope,
+        )
+        .expect("multi baseline"),
+        Some((session_id, 67, 3))
+    );
+    assert_eq!(
+        db.get_latest_web_run_baseline_for_project(
+            project_id,
+            url,
+            ScanRunKind::MultiParent,
+            crate::core::scanner::ScanType::Health,
+            crate::core::scan_execution::ScanExecutionMode::Web,
+            web_run_profile(false, true, false),
+            &[
+                url.to_string(),
+                "https://baseline.example.com/contact".to_string(),
+            ],
+        )
+        .expect("mismatched scope"),
+        None
+    );
+}
+
 // Each immutable scan snapshot retains the guidance emitted in that scan;
 // a later scan gets its refreshed copy without rewriting history.
 #[test]

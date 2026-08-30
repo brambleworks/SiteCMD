@@ -25,6 +25,9 @@ const CLAIM_MARKERS =
 const PRIVATE_RECORD_LINK =
   /\]\([^)]*(?:publication-decision|paid-intelligence-rfc|commercial-terms-spec|connected-service-rfc)\.md[^)]*\)/;
 
+const UNQUALIFIED_NETWORK_ENUMERATION =
+  /\b(?:every|all)\s+outbound\s+(?:calls?|requests?)\b[^.!?]{0,80}\bby name\b/i;
+
 const APP_REFERENCE = /(?<![\w.-])apps\/([\w.-]+)/g;
 
 function pathTokens(markdown) {
@@ -69,6 +72,12 @@ function appDirectories(listFiles) {
 
 export function publicationRecordFailures(read, exists, listFiles) {
   const failures = [];
+
+  if (exists(README) && UNQUALIFIED_NETWORK_ENUMERATION.test(read(README).replace(/\s+/g, " "))) {
+    failures.push(
+      `${README} must describe fixed network hosts by name and dynamic destinations by class; scan targets, subresources, integrations, providers, and webhooks cannot be enumerated in advance.`,
+    );
+  }
 
   for (const file of listFiles(CONNECTED_SPEC_DIRECTORY, (path) => path.endsWith("-spec.md"))) {
     const source = read(file);

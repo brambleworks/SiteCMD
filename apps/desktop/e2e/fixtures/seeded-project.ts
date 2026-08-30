@@ -113,6 +113,7 @@ const runDiagnostics: NormalizedRunDiagnostics = {
   completedPages: 1,
   axeEnabled: false,
   browserRan: false,
+  axeRan: false,
   browserBuild: null,
 };
 

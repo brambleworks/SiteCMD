@@ -5,48 +5,88 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 use crate::{
-    checks::{CheckStatus, Severity},
     commands,
     core::scan_control::ScanControlState,
     core::scan_execution::{ScanExecutionMode, ScanTrigger},
-    core::scanner::{ScanResult, ScanType, ScheduledScanType},
-    db::{Database, ScanSchedule, MAX_SCAN_RETENTION},
+    core::scanner::{ScanType, ScheduledScanType},
+    db::{Database, ScanSchedule, WebRunComparisonProfile},
     webhooks,
 };
+
+#[path = "scan_scheduler_comparison.rs"]
+mod comparison;
+use comparison::{
+    has_complete_full_comparison_baseline, load_full_score_baseline, scan_completion_event_type,
+    scan_provenance_matches_previous, scheduled_completion_status, should_notify_score_change,
+    should_send_full_scheduler_notification, should_send_scheduler_notification, FullScoreBaseline,
+};
+#[path = "scan_scheduler_notifications.rs"]
+mod notifications;
+use notifications::{
+    send_code_scan_notification, send_full_scan_notification, send_web_scan_notification,
+};
+#[path = "scan_scheduler_reporting.rs"]
+mod reporting;
+use reporting::{scheduled_web_run_kind, summarize_scheduled_web_result, PreviousWebCompletion};
+
+fn scheduled_execution_mode(scan_type: ScheduledScanType) -> ScanExecutionMode {
+    match scan_type {
+        ScheduledScanType::Full => ScanExecutionMode::Full,
+        ScheduledScanType::Code => ScanExecutionMode::Code,
+        _ => ScanExecutionMode::Web,
+    }
+}
+
+fn scheduled_axe_enabled(scan_type: ScheduledScanType) -> bool {
+    matches!(
+        scan_type,
+        ScheduledScanType::Accessibility | ScheduledScanType::Full
+    )
+}
+
+fn scheduled_web_comparison_profile(
+    web_focus: ScanType,
+    axe_enabled: bool,
+    url: &str,
+) -> Option<WebRunComparisonProfile> {
+    let parsed = url::Url::parse(url).ok()?;
+    let (browser_ran, axe_ran) =
+        commands::scan::webview_analysis_profile(web_focus, Some(axe_enabled), &parsed);
+    Some(WebRunComparisonProfile {
+        axe_enabled,
+        browser_ran,
+        axe_ran,
+    })
+}
 
 fn build_scheduled_execution_request(
     schedule: &ScanSchedule,
     url: &str,
     scope_urls: Vec<String>,
     project_path: Option<String>,
+    retention: u32,
 ) -> Result<commands::scan::execution::RunScanExecutionRequest, String> {
     let occurrence = schedule
         .next_run_at
         .as_deref()
         .ok_or_else(|| "scheduled execution is missing its occurrence timestamp".to_string())?;
     let (web_focus, _) = schedule.scan_type.scheduled_run_plan();
-    let requested_mode = match schedule.scan_type {
-        ScheduledScanType::Full => ScanExecutionMode::Full,
-        ScheduledScanType::Code => ScanExecutionMode::Code,
-        _ => ScanExecutionMode::Web,
-    };
+    let requested_mode = scheduled_execution_mode(schedule.scan_type);
     Ok(commands::scan::execution::RunScanExecutionRequest {
         project_id: Some(schedule.project_id),
         environment_id: Some(schedule.environment_id),
         environment_url: Some(url.to_string()),
         requested_mode,
         web_focus,
-        // The site's scan scope, not the entry URL alone. A scheduled run is
-        // the one nobody watches, so it is exactly where watching a single
-        // page while the owner checks twelve went unnoticed.
+        // Scheduled web runs cover the saved environment scope.
         urls: web_focus.map(|_| scope_urls).unwrap_or_default(),
         enabled_categories: None,
         timeout_secs: None,
-        axe_enabled: Some(false),
+        axe_enabled: Some(scheduled_axe_enabled(schedule.scan_type)),
         inspect_local_databases: false,
         project_path,
         scan_request_id: None,
-        retention: Some(MAX_SCAN_RETENTION),
+        retention: Some(retention),
         trigger: ScanTrigger::Scheduled,
         idempotency_key: format!("schedule:{}:{occurrence}", schedule.id.unwrap_or_default()),
     })
@@ -102,25 +142,65 @@ async fn run_due_schedule(
     );
 
     let (web_focus, wants_code) = schedule.scan_type.scheduled_run_plan();
-    let previous_web_score = web_focus.and_then(|_| {
-        db.get_scan_history_for_project(schedule.project_id, &url, 1)
-            .ok()
-            .and_then(|history| history.first().map(|scan| scan.overall_score))
-    });
-    let previous_code_summary = wants_code
-        .then(|| {
-            commands::scan::select_relevant_previous_code_scan_summary(
-                db.get_code_scan_history(schedule.project_id, 10)
-                    .unwrap_or_default(),
-                Some(&url),
-            )
-        })
-        .flatten();
+    let requested_mode = scheduled_execution_mode(schedule.scan_type);
+    let axe_enabled = scheduled_axe_enabled(schedule.scan_type);
+    let scope_urls = crate::db::scan_scope_urls_for_project(db, schedule.project_id, &url);
+    let web_comparison_profile =
+        web_focus.and_then(|focus| scheduled_web_comparison_profile(focus, axe_enabled, &url));
+    let previous_web_completion =
+        if let (Some(web_focus), Some(profile)) = (web_focus, web_comparison_profile) {
+            let run_kind = scheduled_web_run_kind(&scope_urls);
+            match db.get_latest_web_run_baseline_for_project(
+                schedule.project_id,
+                &url,
+                run_kind,
+                web_focus,
+                requested_mode,
+                profile,
+                &scope_urls,
+            ) {
+                Ok(baseline) => baseline.map(|(run_id, score, critical)| PreviousWebCompletion {
+                    run_id,
+                    score,
+                    critical: critical as usize,
+                }),
+                Err(error) => {
+                    tracing::warn!(
+                        "Scheduled scan for {} could not read its previous Web result: {}",
+                        safe_url,
+                        error
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+    let previous_code_result = if wants_code {
+        match db.get_latest_scheduled_code_run_baseline_for_project(
+            schedule.project_id,
+            &url,
+            requested_mode,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::warn!(
+                    "Scheduled scan for {} could not read its previous Code result: {}",
+                    safe_url,
+                    error
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
     let request = build_scheduled_execution_request(
         &schedule,
         &url,
-        crate::db::scan_scope_urls_for_project(db, schedule.project_id, &url),
+        scope_urls.clone(),
         db.get_project_path(schedule.project_id),
+        commands::scan::configured_scan_retention(app_handle),
     );
 
     match request {
@@ -138,8 +218,10 @@ async fn run_due_schedule(
                     app_handle,
                     &schedule,
                     &url,
-                    previous_web_score,
-                    previous_code_summary.as_ref(),
+                    previous_web_completion.as_ref(),
+                    previous_code_result.as_ref(),
+                    web_comparison_profile,
+                    &scope_urls,
                     &result,
                 )
                 .await;
@@ -170,8 +252,10 @@ async fn report_scheduled_execution(
     app_handle: &AppHandle,
     schedule: &ScanSchedule,
     url: &str,
-    previous_web_score: Option<u32>,
-    previous_code_summary: Option<&crate::db::CodeScanSummary>,
+    previous_web_completion: Option<&PreviousWebCompletion>,
+    previous_code_result: Option<&crate::db::CodeScanResult>,
+    web_comparison_profile: Option<WebRunComparisonProfile>,
+    scope_urls: &[String],
     result: &commands::scan::execution::RunScanExecutionResult,
 ) {
     if result.reused {
@@ -190,25 +274,75 @@ async fn report_scheduled_execution(
     let web_scan_id = execution_summary
         .as_ref()
         .and_then(|execution| execution.web_scan_id);
-    let mut should_notify_full = false;
-    if let Some(web_result) = result.web_result.as_ref() {
-        let counts = web_scan_issue_counts(web_result);
-        let scan_id = web_scan_id;
-        let blame_notified = scan_id
-            .and_then(|id| db.get_regression_by_scan("web", id).ok().flatten())
-            .is_some();
-        let should_notify = should_notify_score_change(
-            previous_web_score,
-            web_result.overall_score,
-            counts.critical,
-        );
-        let notify_gate = should_send_scheduler_notification(
-            blame_notified,
-            previous_web_score,
-            web_result.overall_score,
-            counts.critical,
-        );
-        should_notify_full |= notify_gate;
+    let web_session_id = execution_summary
+        .as_ref()
+        .and_then(|execution| execution.web_session_id);
+    let current_web_profile_matches = execution_summary.as_ref().is_some_and(|execution| {
+        web_comparison_profile.is_some_and(|profile| {
+            crate::db::web_execution_matches_comparison_profile(
+                execution,
+                scheduled_web_run_kind(scope_urls),
+                profile,
+                scope_urls,
+            )
+        })
+    });
+    let mut web_completion = summarize_scheduled_web_result(
+        result.web_result.as_ref(),
+        result.multi_result.as_ref(),
+        web_scan_id,
+        web_session_id,
+        &chrono::Utc::now().to_rfc3339(),
+    );
+    if let Some(completion) = web_completion.as_mut() {
+        completion.comparison_eligible &= current_web_profile_matches
+            && scan_provenance_matches_previous(
+                db,
+                previous_web_completion.map(|previous| previous.run_id),
+                completion.scan_id,
+            );
+    }
+    let completion_status = scheduled_completion_status(
+        result.execution.status,
+        web_completion
+            .as_ref()
+            .map(|completion| completion.scope_complete),
+    );
+    let mut full_blame_notified = false;
+    let mut full_uncovered_regression = false;
+    if let Some(web_result) = web_completion.as_ref() {
+        let previous_web_score = web_result
+            .comparison_eligible
+            .then(|| previous_web_completion.map(|scan| scan.score))
+            .flatten();
+        let previous_web_critical = web_result
+            .comparison_eligible
+            .then(|| previous_web_completion.map(|scan| scan.critical))
+            .flatten();
+        let blame_notified = web_result.comparison_eligible
+            && web_result.regression_scan_ids.iter().any(|scan_id| {
+                db.get_regression_by_scan("web", *scan_id)
+                    .ok()
+                    .flatten()
+                    .is_some()
+            });
+        let should_notify = web_result.comparison_eligible
+            && should_notify_score_change(
+                previous_web_score,
+                web_result.score,
+                previous_web_critical,
+                web_result.counts.critical,
+            );
+        let notify_gate = web_result.comparison_eligible
+            && should_send_scheduler_notification(
+                blame_notified,
+                previous_web_score,
+                web_result.score,
+                previous_web_critical,
+                web_result.counts.critical,
+            );
+        full_blame_notified |= blame_notified;
+        full_uncovered_regression |= notify_gate;
 
         if schedule.scan_type != ScheduledScanType::Full {
             let _ = app_handle.emit(
@@ -217,11 +351,14 @@ async fn report_scheduled_execution(
                     "executionId": result.execution.id,
                     "projectId": schedule.project_id,
                     "url": url,
-                    "scanId": scan_id,
-                    "score": web_result.overall_score,
-                    "issues": counts.total,
+                    "scanId": web_result.scan_id,
+                    "score": web_result.score,
+                    "issues": web_result.counts.total,
                     "scanType": schedule.scan_type.as_str(),
                     "timestamp": web_result.timestamp,
+                    "status": completion_status,
+                    "completedPages": web_result.completed_pages,
+                    "totalPages": web_result.total_pages,
                 }),
             );
             if notify_gate {
@@ -230,9 +367,9 @@ async fn report_scheduled_execution(
                     url,
                     result.execution.web_focus.unwrap_or(ScanType::Health),
                     previous_web_score,
-                    web_result.overall_score,
-                    counts.critical,
-                    counts.total,
+                    web_result.score,
+                    web_result.counts.critical,
+                    web_result.counts.total,
                 );
             }
         }
@@ -249,10 +386,14 @@ async fn report_scheduled_execution(
                 "data": {
                     "execution_id": result.execution.id,
                     "url": url,
-                    "score": web_result.overall_score,
+                    "score": web_result.score,
                     "previous_score": previous_web_score,
-                    "issues_total": counts.total,
-                    "critical_issues": counts.critical,
+                    "issues_total": web_result.counts.total,
+                    "critical_issues": web_result.counts.critical,
+                    "comparison_eligible": web_result.comparison_eligible,
+                    "status": completion_status,
+                    "completed_pages": web_result.completed_pages,
+                    "total_pages": web_result.total_pages,
                     "scan_type": result.execution.web_focus.unwrap_or(ScanType::Health).as_str(),
                 }
             }),
@@ -260,35 +401,59 @@ async fn report_scheduled_execution(
         .await;
     }
 
+    let mut code_comparison_eligible = true;
     if let Some(code_result) = result.code_result.as_ref() {
-        let previous_score = previous_code_summary.map(|entry| entry.overall_score);
+        code_comparison_eligible = scan_provenance_matches_previous(
+            db,
+            previous_code_result.map(|previous| previous.id),
+            Some(code_result.id),
+        );
+        let previous_score = code_comparison_eligible
+            .then(|| previous_code_result.map(|entry| entry.overall_score))
+            .flatten();
+        let previous_critical = code_comparison_eligible
+            .then(|| previous_code_result.map(|entry| entry.critical_count as usize))
+            .flatten();
         let leading_domain =
             commands::scan::top_code_scan_domain_from_summaries(&code_result.domain_summaries);
-        let domain_trend_label = previous_code_summary.and_then(|previous| {
-            commands::scan::describe_code_scan_domain_trend(
-                &code_result.domain_summaries,
-                &previous.domain_summaries,
-                leading_domain.map(|(domain, _)| domain),
-                previous.top_domain,
-            )
+        let previous_top_domain = previous_code_result.and_then(|previous| {
+            commands::scan::top_code_scan_domain_from_summaries(&previous.domain_summaries)
+                .map(|(domain, _)| domain)
         });
-        let blame_notified = db
-            .get_regression_by_scan("code", code_result.id)
-            .ok()
+        let domain_trend_label = code_comparison_eligible
+            .then_some(previous_code_result)
             .flatten()
-            .is_some();
-        let should_notify = should_notify_score_change(
-            previous_score,
-            code_result.overall_score,
-            code_result.critical_count as usize,
-        );
-        let notify_gate = should_send_scheduler_notification(
-            blame_notified,
-            previous_score,
-            code_result.overall_score,
-            code_result.critical_count as usize,
-        );
-        should_notify_full |= notify_gate;
+            .and_then(|previous| {
+                commands::scan::describe_code_scan_domain_trend(
+                    &code_result.domain_summaries,
+                    &previous.domain_summaries,
+                    leading_domain.map(|(domain, _)| domain),
+                    previous_top_domain,
+                )
+            });
+        let blame_notified = code_comparison_eligible
+            && db
+                .get_regression_by_scan("code", code_result.id)
+                .ok()
+                .flatten()
+                .is_some();
+        let should_notify = code_comparison_eligible
+            && should_notify_score_change(
+                previous_score,
+                code_result.overall_score,
+                previous_critical,
+                code_result.critical_count as usize,
+            );
+        let notify_gate = code_comparison_eligible
+            && should_send_scheduler_notification(
+                blame_notified,
+                previous_score,
+                code_result.overall_score,
+                previous_critical,
+                code_result.critical_count as usize,
+            );
+        full_blame_notified |= blame_notified;
+        full_uncovered_regression |= notify_gate;
 
         if schedule.scan_type != ScheduledScanType::Full {
             let _ = app_handle.emit(
@@ -305,6 +470,7 @@ async fn report_scheduled_execution(
                     "topDomain": leading_domain.map(|(domain, _)| domain.as_str()),
                     "topDomainCount": leading_domain.map(|(_, count)| count).unwrap_or(0),
                     "domainTrendLabel": domain_trend_label,
+                    "status": completion_status,
                 }),
             );
             if notify_gate {
@@ -336,6 +502,8 @@ async fn report_scheduled_execution(
                     "previous_score": previous_score,
                     "issues_total": code_result.issue_count,
                     "critical_issues": code_result.critical_count,
+                    "comparison_eligible": code_comparison_eligible,
+                    "status": completion_status,
                     "scan_type": "code",
                 }
             }),
@@ -344,19 +512,75 @@ async fn report_scheduled_execution(
     }
 
     if schedule.scan_type == ScheduledScanType::Full
-        && (result.web_result.is_some() || result.code_result.is_some())
+        && (web_completion.is_some() || result.code_result.is_some())
     {
+        let web_completed = web_completion.is_some();
+        let code_completed = result.code_result.is_some();
+        let has_comparable_baseline = has_complete_full_comparison_baseline(
+            web_completed,
+            web_completion.as_ref().is_some_and(|completion| {
+                completion.comparison_eligible && previous_web_completion.is_some()
+            }),
+            code_completed,
+            code_comparison_eligible && previous_code_result.is_some(),
+        );
+        let current_components_comparable = completion_status == "complete"
+            && web_completion
+                .as_ref()
+                .is_none_or(|completion| completion.comparison_eligible)
+            && (!code_completed || code_comparison_eligible);
+        let completed_pages = web_completion
+            .as_ref()
+            .map_or(0, |completion| completion.completed_pages);
+        let total_pages = web_completion
+            .as_ref()
+            .map_or(scope_urls.len(), |completion| completion.total_pages);
+        let previous_full_baseline = has_comparable_baseline
+            .then(|| {
+                load_full_score_baseline(
+                    db,
+                    web_completed
+                        .then_some(previous_web_completion.map(|previous| previous.run_id))
+                        .flatten(),
+                    code_completed
+                        .then_some(previous_code_result.map(|previous| previous.id))
+                        .flatten(),
+                )
+            })
+            .flatten();
         emit_full_scan_completion(
             db,
             app_handle,
             schedule,
             url,
-            result.execution.id,
-            web_scan_id,
-            should_notify_full,
+            FullCompletionReport {
+                execution_id: result.execution.id,
+                web_scan_id: web_completion
+                    .as_ref()
+                    .and_then(|completion| completion.scan_id),
+                previous_snapshot: previous_full_baseline.as_ref(),
+                blame_notified: full_blame_notified,
+                uncovered_component_regression: full_uncovered_regression,
+                comparison_eligible: current_components_comparable,
+                completion_status,
+                completed_pages,
+                total_pages,
+            },
         )
         .await;
     }
+}
+
+struct FullCompletionReport<'a> {
+    execution_id: i64,
+    web_scan_id: Option<i64>,
+    previous_snapshot: Option<&'a FullScoreBaseline>,
+    blame_notified: bool,
+    uncovered_component_regression: bool,
+    comparison_eligible: bool,
+    completion_status: &'a str,
+    completed_pages: usize,
+    total_pages: usize,
 }
 
 /// Emit one score, event, and optional notification for a full scheduled scan.
@@ -365,10 +589,19 @@ async fn emit_full_scan_completion(
     app_handle: &AppHandle,
     schedule: &ScanSchedule,
     url: &str,
-    execution_id: i64,
-    web_scan_id: Option<i64>,
-    should_notify: bool,
+    report: FullCompletionReport<'_>,
 ) {
+    let FullCompletionReport {
+        execution_id,
+        web_scan_id,
+        previous_snapshot,
+        blame_notified,
+        uncovered_component_regression,
+        comparison_eligible,
+        completion_status,
+        completed_pages,
+        total_pages,
+    } = report;
     let snapshot = match crate::commands::issues::compute_and_record_current_score(
         db,
         schedule.project_id,
@@ -388,6 +621,13 @@ async fn emit_full_scan_completion(
     let score = snapshot.overall.round() as u32;
     let issue_count =
         snapshot.critical_count + snapshot.high_count + snapshot.medium_count + snapshot.low_count;
+    let should_notify = should_send_full_scheduler_notification(
+        comparison_eligible,
+        blame_notified,
+        uncovered_component_regression,
+        previous_snapshot,
+        &snapshot,
+    );
     let _ = app_handle.emit(
         "scheduled-scan-complete",
         serde_json::json!({
@@ -399,258 +639,14 @@ async fn emit_full_scan_completion(
             "issues": issue_count,
             "scanType": "full",
             "timestamp": chrono::Utc::now().to_rfc3339(),
+            "status": completion_status,
+            "completedPages": completed_pages,
+            "totalPages": total_pages,
         }),
     );
 
     if should_notify {
         send_full_scan_notification(app_handle, url, score, issue_count, snapshot.critical_count);
-    }
-}
-
-fn send_full_scan_notification(
-    app_handle: &AppHandle,
-    url: &str,
-    score: u32,
-    issue_count: usize,
-    critical: usize,
-) {
-    use tauri_plugin_notification::NotificationExt;
-
-    let hostname = hostname_for_url(url);
-    let body = if critical > 0 {
-        format!(
-            "{} scheduled full scan complete. SiteCMD Score {}/100 - {} critical issue{} among {} tracked.",
-            hostname,
-            score,
-            critical,
-            plural_suffix(critical),
-            issue_count
-        )
-    } else {
-        format!(
-            "{} scheduled full scan complete. SiteCMD Score {}/100 - {} issue{} tracked.",
-            hostname,
-            score,
-            issue_count,
-            plural_suffix(issue_count)
-        )
-    };
-
-    if let Err(error) = app_handle
-        .notification()
-        .builder()
-        .title("SiteCMD - Scheduled Full Scan")
-        .body(&body)
-        .show()
-    {
-        tracing::warn!("Failed to send notification: {:?}", error);
-    } else {
-        tracing::info!("Notification sent: {}", body);
-    }
-}
-
-fn send_code_scan_notification(
-    app_handle: &AppHandle,
-    url: &str,
-    prev_score: Option<u32>,
-    new_score: u32,
-    new_critical: usize,
-    issue_count: usize,
-    domain_trend_label: Option<&str>,
-) {
-    use tauri_plugin_notification::NotificationExt;
-
-    let hostname = hostname_for_url(url);
-    let domain_trend_suffix = domain_trend_label
-        .map(|label| format!(" {label}."))
-        .unwrap_or_default();
-    let body = match prev_score {
-        Some(prev) if new_critical > 0 => format!(
-            "{} scheduled Code Scan diagnostic dropped from {} to {}. {} critical code issue{} found.{}",
-            hostname,
-            prev,
-            new_score,
-            new_critical,
-            plural_suffix(new_critical),
-            domain_trend_suffix
-        ),
-        Some(prev) => format!(
-            "{} scheduled Code Scan diagnostic dropped from {} to {}. {} code issue{} detected.{}",
-            hostname,
-            prev,
-            new_score,
-            issue_count,
-            plural_suffix(issue_count),
-            domain_trend_suffix
-        ),
-        None => format!(
-            "{} scheduled Code Scan found {} critical code issue{} (diagnostic: {}/100).{}",
-            hostname,
-            new_critical,
-            plural_suffix(new_critical),
-            new_score,
-            domain_trend_suffix
-        ),
-    };
-
-    if let Err(error) = app_handle
-        .notification()
-        .builder()
-        .title("SiteCMD - Scheduled Code Alert")
-        .body(&body)
-        .show()
-    {
-        tracing::warn!("Failed to send notification: {:?}", error);
-    } else {
-        tracing::info!("Notification sent: {}", body);
-    }
-}
-
-fn send_web_scan_notification(
-    app_handle: &AppHandle,
-    url: &str,
-    scan_type: ScanType,
-    prev_score: Option<u32>,
-    new_score: u32,
-    new_critical: usize,
-    issue_count: usize,
-) {
-    use tauri_plugin_notification::NotificationExt;
-
-    let hostname = hostname_for_url(url);
-    let scan_label = if scan_type == ScanType::Security {
-        "Security Scan"
-    } else {
-        "Web Scan"
-    };
-    let body = if let Some(prev) = prev_score {
-        if new_critical > 0 {
-            format!(
-                "{} scheduled {} diagnostic dropped from {} to {}. {} critical issue{} found.",
-                hostname,
-                scan_label,
-                prev,
-                new_score,
-                new_critical,
-                plural_suffix(new_critical)
-            )
-        } else {
-            format!(
-                "{} scheduled {} diagnostic dropped from {} to {}. {} actionable issue{} detected.",
-                hostname,
-                scan_label,
-                prev,
-                new_score,
-                issue_count,
-                plural_suffix(issue_count)
-            )
-        }
-    } else {
-        format!(
-            "{} scheduled {} found {} critical issue{} (diagnostic: {}/100).",
-            hostname,
-            scan_label,
-            new_critical,
-            plural_suffix(new_critical),
-            new_score
-        )
-    };
-    let title = if scan_type == ScanType::Security {
-        "SiteCMD - Scheduled Security Alert"
-    } else {
-        "SiteCMD - Scheduled Web Alert"
-    };
-
-    if let Err(error) = app_handle
-        .notification()
-        .builder()
-        .title(title)
-        .body(&body)
-        .show()
-    {
-        tracing::warn!("Failed to send notification: {:?}", error);
-    } else {
-        tracing::info!("Notification sent: {}", body);
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct WebScanIssueCounts {
-    total: usize,
-    critical: usize,
-    high: usize,
-}
-
-fn web_scan_issue_counts(result: &ScanResult) -> WebScanIssueCounts {
-    let actionable = result
-        .issues
-        .iter()
-        .filter(|issue| !matches!(issue.status, CheckStatus::Pass));
-
-    actionable.fold(
-        WebScanIssueCounts {
-            total: 0,
-            critical: 0,
-            high: 0,
-        },
-        |mut counts, issue| {
-            counts.total += 1;
-            if matches!(issue.severity, Severity::Critical) {
-                counts.critical += 1;
-            }
-            if matches!(issue.severity, Severity::High) {
-                counts.high += 1;
-            }
-            counts
-        },
-    )
-}
-
-fn should_notify_score_change(
-    prev_score: Option<u32>,
-    new_score: u32,
-    new_critical: usize,
-) -> bool {
-    if let Some(prev) = prev_score {
-        let drop = prev as i32 - new_score as i32;
-        drop >= 10 || (new_critical > 0 && drop > 0)
-    } else {
-        new_critical > 0
-    }
-}
-
-/// Scheduler OS-notification gate: the score-change threshold, suppressed
-/// when the shared persist path already sent a deploy-regression
-/// notification for the same scan. One ping per event.
-fn should_send_scheduler_notification(
-    blame_notified: bool,
-    prev_score: Option<u32>,
-    new_score: u32,
-    new_critical: usize,
-) -> bool {
-    !blame_notified && should_notify_score_change(prev_score, new_score, new_critical)
-}
-
-fn scan_completion_event_type(should_notify: bool) -> &'static str {
-    if should_notify {
-        "score_drop"
-    } else {
-        "scan_complete"
-    }
-}
-
-fn hostname_for_url(url: &str) -> String {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|url| url.host_str().map(String::from))
-        .unwrap_or_else(|| url.to_string())
-}
-
-fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
     }
 }
 

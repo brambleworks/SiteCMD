@@ -7,24 +7,10 @@ use tauri::{AppHandle, Emitter};
 use super::control::ScanControlState;
 use crate::commands::validate_url_async;
 
+mod auto_export;
 mod webview_layer;
-use webview_layer::apply_webview_layer;
-
-fn auto_export_sitecmd_scan(project_path: Option<&str>, result: &scanner::ScanResult) {
-    let Some(project_path) = project_path.filter(|value| !value.trim().is_empty()) else {
-        return;
-    };
-    let sitecmd_dir = std::path::Path::new(project_path).join(".sitecmd");
-    if !sitecmd_dir.is_dir() {
-        return;
-    }
-
-    if let Err(error) = crate::cli::export::export_scan(&sitecmd_dir, result) {
-        tracing::warn!("Failed to auto-export desktop scan: {}", error);
-    } else {
-        tracing::info!("Auto-exported desktop scan");
-    }
-}
+use auto_export::auto_export_sitecmd_scan;
+pub(super) use webview_layer::{apply_webview_layer, BrowserRuntime};
 
 pub(crate) async fn scan_url_for_execution(
     app: AppHandle,
@@ -139,7 +125,9 @@ async fn run_and_persist_scan(
         scan_type,
         project_id,
         execution_id,
+        axe_enabled.unwrap_or(false),
         browser_runtime.ran,
+        browser_runtime.axe_ran,
         browser_runtime.build.as_deref(),
         &mut result,
     )
@@ -212,7 +200,9 @@ pub(crate) async fn post_scan_persist(
     scan_type: ScanType,
     known_project_id: Option<i64>,
     execution_id: i64,
+    axe_enabled: bool,
     browser_ran: bool,
+    axe_ran: bool,
     browser_build: Option<&str>,
     result: &mut scanner::ScanResult,
 ) -> PostScanOutcome {
@@ -247,7 +237,9 @@ pub(crate) async fn post_scan_persist(
                 scan_type,
                 resolved_project_id,
                 execution_id,
+                axe_enabled,
                 browser_ran,
+                axe_ran,
                 browser_build.as_deref(),
                 &result,
             )
@@ -286,7 +278,9 @@ fn persist_scan_blocking(
     scan_type: ScanType,
     resolved_project_id: Option<i64>,
     execution_id: i64,
+    axe_enabled: bool,
     browser_ran: bool,
+    axe_ran: bool,
     browser_build: Option<&str>,
     result: &scanner::ScanResult,
 ) -> (
@@ -385,7 +379,9 @@ fn persist_scan_blocking(
             );
         }
     };
+    batch.diagnostics.axe_enabled = Some(axe_enabled);
     batch.diagnostics.browser_ran = Some(browser_ran);
+    batch.diagnostics.axe_ran = Some(axe_ran);
     batch.diagnostics.browser_build = browser_build.map(str::to_owned);
     batch.environment_url = Some(environment_url.to_string());
     batch.environment_scope_key = crate::db::normalize_env_url(Some(environment_url));
@@ -561,13 +557,31 @@ mod tests {
             ScanType::Health,
             None,
             execution_id,
-            false,
-            None,
+            true,
+            true,
+            true,
+            Some("test-browser"),
             &result,
         );
 
         let scan_id = outcome.scan_id.expect("scan persistence should succeed");
+        let diagnostics_json: String = db
+            .execute(move |conn| {
+                conn.query_row(
+                    "SELECT diagnostics_json FROM scan_runs WHERE id = ?1",
+                    [scan_id],
+                    |row| row.get(0),
+                )
+                .expect("stored diagnostics")
+            })
+            .expect("database worker");
+        let diagnostics: crate::core::normalized_scan::NormalizedRunDiagnostics =
+            serde_json::from_str(&diagnostics_json).expect("run diagnostics");
         assert!(scan_id > 0);
+        assert_eq!(diagnostics.axe_enabled, Some(true));
+        assert_eq!(diagnostics.browser_ran, Some(true));
+        assert_eq!(diagnostics.axe_ran, Some(true));
+        assert_eq!(diagnostics.browser_build.as_deref(), Some("test-browser"));
         assert!(!outcome.blame_notified);
         assert!(notice.is_none());
     }
@@ -600,6 +614,8 @@ mod tests {
             ScanType::Health,
             Some(second),
             execution_id,
+            false,
+            false,
             false,
             None,
             &scan_result_fixture(URL),
@@ -669,6 +685,8 @@ mod tests {
             Some(project_id),
             execution_id,
             false,
+            false,
+            false,
             None,
             &result,
         );
@@ -737,6 +755,8 @@ mod tests {
             ScanType::Health,
             None,
             execution_id,
+            false,
+            false,
             false,
             None,
             &result,

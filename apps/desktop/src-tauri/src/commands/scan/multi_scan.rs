@@ -9,7 +9,9 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 use super::control::ScanControlState;
-use super::page_loop::{run_page_loop, session_average, PageLoopOutcome, PageLoopStatus};
+use super::page_loop::{
+    run_page_loop, session_average, PageLoopOutcome, PageLoopStatus, PageScanOutput,
+};
 use crate::commands::{emit_event, sanitize_error, validate_url_async};
 
 pub(crate) async fn scan_multi_for_execution(
@@ -101,6 +103,8 @@ pub(crate) async fn scan_multi_for_execution(
             |_, url, skip_origin_checks| {
                 let st = focus;
                 let progress_app = app.clone();
+                let browser_app = app.clone();
+                let page_url = url.to_string();
                 let progress_fn: std::sync::Arc<scanner::ProgressFn> =
                     std::sync::Arc::new(move |p| {
                         let _ = progress_app.emit("scan-progress", p);
@@ -108,17 +112,33 @@ pub(crate) async fn scan_multi_for_execution(
                 let scan_control_clone = scan_control.clone();
                 let cancel_fn: std::sync::Arc<crate::scan_runtime::CancelFn> =
                     std::sync::Arc::new(move || scan_control_clone.is_cancelled(scan_request_id));
-                crate::scan_runtime::run_scan_low_priority(
-                    url.to_string(),
-                    Some(progress_fn),
-                    enabled_categories.clone(),
-                    timeout_secs,
-                    st,
-                    skip_origin_checks,
-                    Some(cancel_fn),
-                )
+                let enabled_categories = enabled_categories.clone();
+                async move {
+                    let mut result = crate::scan_runtime::run_scan_low_priority(
+                        page_url.clone(),
+                        Some(progress_fn),
+                        enabled_categories,
+                        timeout_secs,
+                        st,
+                        skip_origin_checks,
+                        Some(cancel_fn),
+                    )
+                    .await?;
+                    let browser_runtime = super::web_scan::apply_webview_layer(
+                        &browser_app,
+                        &mut result,
+                        &page_url,
+                        st,
+                        axe_enabled,
+                    )
+                    .await?;
+                    Ok(PageScanOutput {
+                        result,
+                        browser_runtime,
+                    })
+                }
             },
-            |completed_pages, url, result| {
+            |completed_pages, url, result, browser_runtime| {
                 // Persist this page off the async-runtime worker threads: the
                 // scan save + work-items upsert + session-progress update are
                 // synchronous SQLite round-trips that would otherwise park a
@@ -138,6 +158,8 @@ pub(crate) async fn scan_multi_for_execution(
                             &page_url,
                             project_id,
                             site_id,
+                            axe_enabled.unwrap_or(false),
+                            &browser_runtime,
                             &result,
                         )
                     })
@@ -157,6 +179,7 @@ pub(crate) async fn scan_multi_for_execution(
             completed_scores,
             session_signals,
             session_site_facts,
+            browser_runtimes,
         } = loop_outcome;
 
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -220,6 +243,11 @@ pub(crate) async fn scan_multi_for_execution(
             session_analyzed,
         )
         .map_err(|error| format!("failed to normalize multi-page scan: {error}"))?;
+        let browser_runtime =
+            super::web_scan::BrowserRuntime::for_scope(&browser_runtimes, urls.len());
+        parent_batch.diagnostics.browser_ran = Some(browser_runtime.ran);
+        parent_batch.diagnostics.axe_ran = Some(browser_runtime.axe_ran);
+        parent_batch.diagnostics.browser_build = browser_runtime.build;
         parent_batch.environment_scope_key = crate::db::normalize_env_url(Some(base_url));
         parent_batch.status = match loop_status {
             PageLoopStatus::Complete => ScanRunStatus::Complete,
@@ -355,6 +383,8 @@ fn persist_multi_page_blocking(
     page_url: &str,
     project_id: Option<i64>,
     site_id: i64,
+    axe_enabled: bool,
+    browser_runtime: &super::web_scan::BrowserRuntime,
     result: &scanner::ScanResult,
 ) -> Result<i64, String> {
     let completed_at = chrono::Utc::now().timestamp_millis();
@@ -372,6 +402,10 @@ fn persist_multi_page_blocking(
     batch.environment_url = Some(environment_url.to_string());
     batch.environment_scope_key = crate::db::normalize_env_url(Some(environment_url));
     batch.diagnostics.page_url = Some(page_url.to_string());
+    batch.diagnostics.axe_enabled = Some(axe_enabled);
+    batch.diagnostics.browser_ran = Some(browser_runtime.ran);
+    batch.diagnostics.axe_ran = Some(browser_runtime.axe_ran);
+    batch.diagnostics.browser_build = browser_runtime.build.clone();
     // Claim authored and effective URLs: coverage exceptions use the authored
     // route, while findings and resolution use the post-redirect URL.
     let routes = covered_routes(page_url, &result.url);

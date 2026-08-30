@@ -8,6 +8,7 @@ import type { CodeIssue, CodeScanResult, CodeScanSummary } from "@/lib/types";
 import { normalizeCodeScanResult } from "@/lib/code-scan-result-normalize";
 import { buildPendingVerificationId, resolvePendingVerification } from "@/lib/pending-verification";
 import { useToast } from "@/hooks/useToast";
+import { useScanPrefs } from "@/hooks/useScanPrefs";
 import { userFacingError } from "@/lib/user-facing-error";
 import { useResetOnChange } from "@/hooks/useResetOnChange";
 import { normalizeAppUrlForKey, type AppTarget } from "@/lib/app-targets";
@@ -66,6 +67,7 @@ export function CodeScanResults({
 }: CodeScanResultsProps) {
   const presentation = useMemo(() => getCodeScanPresentation(), []);
   const toast = useToast();
+  const { prefs } = useScanPrefs();
   const [currentResult, setCurrentResult] = useState(result);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(initialIssueId);
   const [issuePage, setIssuePage] = useState(1);
@@ -231,7 +233,7 @@ export function CodeScanResults({
             projectPath,
             inspectLocalDatabases: false,
             scanRequestId: null,
-            retention: null,
+            retention: prefs.retentionLimit,
             trigger: "verification",
             idempotencyKey: createScanActionKey("verification-code"),
           },
@@ -288,7 +290,7 @@ export function CodeScanResults({
         setVerifyingIssueId((current) => (current === issue.id ? null : current));
       }
     },
-    [currentResult, onResultUpdated, projectPath, toast, verifyingIssueId],
+    [currentResult, onResultUpdated, prefs.retentionLimit, projectPath, toast, verifyingIssueId],
   );
 
   return (

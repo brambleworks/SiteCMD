@@ -263,7 +263,8 @@ pub(crate) async fn run_bounded_web_verification(
     if let Err(error) = db.prune_scan_executions_for_scope(
         project_id,
         &environment_scope_key,
-        super::policy::scan_retention(None),
+        app.map(super::policy::configured_scan_retention)
+            .unwrap_or_else(|| super::policy::scan_retention(None)),
         crate::db::ScanRetentionWindow::BoundedVerification,
     ) {
         tracing::warn!(execution_id, "Failed to prune old verifications: {error}");

@@ -119,7 +119,7 @@ pub(crate) async fn verify_issue_source(
                     inspect_local_databases: false,
                     project_path,
                     scan_request_id: None,
-                    retention: Some(crate::db::MAX_SCAN_RETENTION),
+                    retention: Some(crate::commands::scan::configured_scan_retention(app)),
                     trigger: crate::core::scan_execution::ScanTrigger::Verification,
                     idempotency_key: action_key,
                 },

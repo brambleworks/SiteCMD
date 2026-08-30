@@ -265,6 +265,19 @@ describe("useAppScanActions", () => {
     );
   });
 
+  it("applies the saved retention preference to shortcut scans", async () => {
+    const { result, scanHook } = renderScanActions({});
+
+    await act(async () => {
+      await result.current.handleShortcutScan("https://example.com");
+    });
+
+    expect(scanHook.scan).toHaveBeenCalledWith(
+      "https://example.com",
+      expect.objectContaining({ retention: prefs.retentionLimit }),
+    );
+  });
+
   it("still starts a scan when the previous one has finished", async () => {
     const { result, scanHook, toast } = renderScanActions({ state: "complete" });
 

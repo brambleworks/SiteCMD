@@ -72,6 +72,8 @@ fn persist(
         Some(project_id),
         execution_id,
         false,
+        false,
+        false,
         None,
         result,
     );

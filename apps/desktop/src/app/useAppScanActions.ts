@@ -216,10 +216,11 @@ export function useAppScanActions({
         projectId: activeProject?.id ?? null,
         environmentId: activeEnv?.id ?? null,
         environmentUrl: activeEnv?.url ?? url,
+        retention: prefs.retentionLimit,
         trigger: "manual",
       });
     },
-    [activeEnv, activeProject, refuseWhileScanning, scan],
+    [activeEnv, activeProject, prefs.retentionLimit, refuseWhileScanning, scan],
   );
 
   return {

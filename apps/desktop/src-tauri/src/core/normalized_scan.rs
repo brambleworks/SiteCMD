@@ -264,6 +264,7 @@ pub struct NormalizedRunDiagnostics {
     pub completed_pages: Option<u32>,
     pub axe_enabled: Option<bool>,
     pub browser_ran: Option<bool>,
+    pub axe_ran: Option<bool>,
     pub browser_build: Option<String>,
 }
 

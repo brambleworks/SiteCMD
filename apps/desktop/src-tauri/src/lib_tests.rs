@@ -1656,7 +1656,7 @@ fn blocking_database_call_sites_only_decrease() {
 
 /// Calls to the four legacy local-origin predicates outside their definitions.
 /// Lower as callers move to `LocalOrigin::classify`; delete the predicates at 0.
-const LEGACY_LOCAL_PREDICATE_BUDGET: usize = 24;
+const LEGACY_LOCAL_PREDICATE_BUDGET: usize = 23;
 
 #[test]
 fn legacy_local_origin_predicates_only_decrease() {

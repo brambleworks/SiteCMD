@@ -325,8 +325,12 @@ pub(crate) async fn run_scan_execution_internal(
     app: AppHandle,
     db: Arc<Database>,
     scan_control: &ScanControlState,
-    request: RunScanExecutionRequest,
+    mut request: RunScanExecutionRequest,
 ) -> Result<RunScanExecutionResult, ScanExecutionError> {
+    request.retention = Some(super::policy::resolve_scan_retention(
+        request.retention,
+        super::policy::configured_scan_retention(&app),
+    ));
     let request_guard = scan_control.begin_execution(request.scan_request_id);
     let scan_request_id = request_guard.request_id();
     let plan = validate_plan(&db, request).await?;

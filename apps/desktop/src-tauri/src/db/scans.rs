@@ -22,7 +22,7 @@ pub const DEFAULT_SCAN_RETENTION: u32 = 50;
 #[cfg(any(test, feature = "desktop"))]
 pub const MIN_SCAN_RETENTION: u32 = 1;
 #[cfg(any(test, feature = "desktop"))]
-pub const MAX_SCAN_RETENTION: u32 = 500;
+pub const MAX_SCAN_RETENTION: u32 = 100;
 
 #[cfg(any(test, feature = "desktop"))]
 pub fn normalize_scan_retention(keep_count: Option<u32>) -> u32 {

@@ -242,7 +242,7 @@ async fn fulfil_run_scan(
         inspect_local_databases: false,
         project_path: db.get_project_path(request.project_id),
         scan_request_id: None,
-        retention: Some(crate::db::MAX_SCAN_RETENTION),
+        retention: Some(crate::commands::scan::configured_scan_retention(app)),
         trigger: ScanTrigger::Manual,
         idempotency_key: format!("agent_request:{}", request.id),
     };
