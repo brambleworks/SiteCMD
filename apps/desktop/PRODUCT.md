@@ -127,8 +127,8 @@ Constraints and durable product facts:
   every tier: every scan, full issue detail, fix guides, AI prompts, reports,
   and dossiers, with no meters, caps, or redaction anywhere in the client. A
   subscription buys the connected service and maintained intelligence stream,
-  enforced server-side where no fork reaches. Founder-beta access is comped
-  and public pricing is not set.
+  enforced server-side where no fork reaches. Connected-service access is
+  free during the beta and public pricing is not set.
 
 Terminology: "SiteCMD Score" (never Web Score or Code Score); "Issues" for the
 unified list (security is a category filter inside it, not its own page); "list,"

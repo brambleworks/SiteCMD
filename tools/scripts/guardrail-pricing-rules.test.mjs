@@ -7,7 +7,7 @@ const ACCT = "apps/desktop/src/components/settings/AccountSettings.tsx";
 
 const validModel = JSON.stringify({
   billableUnit: "connected_production_site",
-  connectedServiceAccess: "comped_founder_beta",
+  connectedServiceAccess: "comped_beta",
   localWorkbench: "free_complete",
   meteredOverages: false,
   paidBoundary: "connected_service",
@@ -16,10 +16,10 @@ const validModel = JSON.stringify({
 });
 
 const validAccount = [
-  'const FOUNDER_BETA_CONTACT_URL = "https://sitecmd.com/contact";',
+  'const BETA_CONTACT_URL = "https://sitecmd.com/contact";',
   'const copy = "The desktop workbench is free and complete";',
-  'const beta = "Comped during the founder beta";',
-  'const cta = "Request founder beta access";',
+  'const beta = "Free during the beta";',
+  'const cta = "Request beta access";',
   'const legacy = "Manage Billing";',
 ].join("\n");
 
@@ -32,7 +32,7 @@ function failures(overrides = {}) {
 }
 
 describe("desktop commercial boundary", () => {
-  it("accepts the complete free workbench and comped founder beta", () => {
+  it("accepts the complete free workbench and the free connected beta", () => {
     expect(failures()).toEqual([]);
   });
 
@@ -51,7 +51,7 @@ describe("desktop commercial boundary", () => {
   it("requires the generated commercial model", () => {
     const bad = JSON.stringify({ ...JSON.parse(validModel), publicPricing: "29_monthly" });
     expect(failures({ [MODEL]: bad })).toContainEqual(
-      expect.stringContaining("founder-beta commercial model"),
+      expect.stringContaining("connected-service commercial model"),
     );
   });
 });
