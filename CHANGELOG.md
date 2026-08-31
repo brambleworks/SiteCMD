@@ -15,8 +15,8 @@ public repository history.
 
 - Fix guides and MCP scan comparisons now use plain words instead of
   emoji, so status and severity read the same everywhere they are quoted.
-- The connected service beta is no longer branded "Founder Beta" in the app
-  and documentation.
+- The hosted service is now named SiteCMD Connect, replacing the retired
+  "Founder Beta" branding in the app and documentation.
 
 ### Fixed
 

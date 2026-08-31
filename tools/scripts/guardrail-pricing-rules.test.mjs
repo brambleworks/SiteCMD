@@ -20,6 +20,7 @@ const validAccount = [
   'const copy = "The desktop workbench is free and complete";',
   'const beta = "Free during the beta";',
   'const cta = "Request beta access";',
+  'const name = "SiteCMD Connect";',
   'const legacy = "Manage Billing";',
 ].join("\n");
 

@@ -335,8 +335,8 @@ export function AccountSection() {
             </div>
             <p className="body-muted account-plans-desc">
               {plansExpanded
-                ? "The connected service adds hosted automation around the complete free desktop workbench. Access is free during the beta while real usage sets the public pricing."
-                : "See what the connected service adds when you want your sites watched between sessions."}
+                ? "SiteCMD Connect adds hosted automation around the complete free desktop workbench. Access is free during the beta while real usage sets the public pricing."
+                : "See what SiteCMD Connect adds when you want your sites watched between sessions."}
             </p>
           </div>
           {licenseInfo.isActive ? (
@@ -353,7 +353,7 @@ export function AccountSection() {
                   <Zap className="icon-lg" />
                 </div>
                 <div className="plan-card-title-wrap">
-                  <span className="plan-card-name text-foreground">Connected Service</span>
+                  <span className="plan-card-name text-foreground">SiteCMD Connect</span>
                   <p className="subtitle-xs plan-card-desc">
                     Hosted scans, deploy watches, alerts, verification, and CI gates while your
                     laptop is closed.

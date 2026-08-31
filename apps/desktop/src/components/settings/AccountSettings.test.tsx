@@ -499,7 +499,7 @@ describe("AccountSettings commercial boundary", () => {
     expect(document.querySelector(".plan-card-name")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
-    expect(document.querySelector(".plan-card-name")).toHaveTextContent("Connected Service");
+    expect(document.querySelector(".plan-card-name")).toHaveTextContent("SiteCMD Connect");
     expect(screen.queryByText("Professional")).not.toBeInTheDocument();
     expect(screen.getByText("PLUS MONTHLY")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connected access licensed" })).toBeDisabled();
@@ -637,7 +637,7 @@ describe("AccountSettings commercial boundary", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
-    expect(document.querySelector(".plan-card-name")).toHaveTextContent("Connected Service");
+    expect(document.querySelector(".plan-card-name")).toHaveTextContent("SiteCMD Connect");
     expect(screen.getByText("PROFESSIONAL YEARLY")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connected access licensed" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Get Plus|Get Professional/ })).toBeNull();

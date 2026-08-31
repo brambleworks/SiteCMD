@@ -52,6 +52,7 @@ export function pricingConsistencyFailures(read, exists) {
     ["the complete free desktop workbench", /desktop workbench is free and complete/i],
     ["free connected beta access", /free during the beta/i],
     ["the beta request action", /Request beta access/],
+    ["the SiteCMD Connect name", /SiteCMD Connect/],
     ["existing-subscriber billing management", /Manage Billing/],
     ["the beta contact path", /https:\/\/sitecmd\.com\/contact/],
   ]) {
