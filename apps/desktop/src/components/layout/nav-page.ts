@@ -1,6 +1,6 @@
 // Runtime navigation vocabulary and typed deep-link targets.
 
-const NAV_PAGES = [
+export const NAV_PAGES = [
   "dashboard",
   "analytics",
   "issues",

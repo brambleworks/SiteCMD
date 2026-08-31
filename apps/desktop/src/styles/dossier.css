@@ -553,6 +553,9 @@
     padding: var(--space-section);
     background-color: var(--card);
   }
+  .page-guide-title {
+    margin-top: 0;
+  }
   .page-guide-body {
     min-height: 0;
     flex: 1;
@@ -563,11 +566,10 @@
     margin-top: var(--space-card);
   }
   .page-guide-section {
+    padding: var(--space-card);
     background-color: color-mix(in oklab, var(--surface-low) 35%, transparent);
   }
-  .page-guide-paragraph,
-  .page-guide-list,
-  .page-guide-tip p {
+  .page-guide-list {
     font-size: var(--text-sm);
     line-height: 1.625;
     color: var(--foreground);
@@ -581,13 +583,6 @@
   }
   .page-guide-list li::marker {
     color: var(--brand);
-  }
-  .page-guide-tip {
-    padding: var(--space-card);
-    background-color: var(--brand-subtle);
-  }
-  .page-guide-tip > * + * {
-    margin-top: var(--space-tight);
   }
 
   .dossier-actions .issue-action-extra > * {
