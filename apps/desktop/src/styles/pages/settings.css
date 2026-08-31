@@ -798,8 +798,8 @@
     color: var(--muted-foreground);
   }
   .scan-terminal-status-error {
-    background-color: color-mix(in oklab, var(--destructive) 15%, transparent);
-    color: var(--destructive);
+    background-color: color-mix(in oklab, var(--red-500) 18%, transparent);
+    color: var(--red-300);
   }
   .scan-terminal-status-complete {
     background-color: color-mix(in oklab, white 8%, transparent);

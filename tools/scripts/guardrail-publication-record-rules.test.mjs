@@ -230,6 +230,14 @@ describe("public network-boundary wording", () => {
       }),
     ).toContain("dynamic destinations by class");
   });
+
+  it("accepts a sentence that denies complete enumeration", () => {
+    expect(
+      failures((files) => {
+        files["README.md"] += "\nThe Trust page does not enumerate every outbound call by name.\n";
+      }),
+    ).not.toContain("dynamic destinations by class");
+  });
 });
 
 describe("layout maps against the tree", () => {

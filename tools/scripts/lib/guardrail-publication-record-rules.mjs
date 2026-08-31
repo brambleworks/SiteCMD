@@ -28,6 +28,20 @@ const PRIVATE_RECORD_LINK =
 const UNQUALIFIED_NETWORK_ENUMERATION =
   /\b(?:every|all)\s+outbound\s+(?:calls?|requests?)\b[^.!?]{0,80}\bby name\b/i;
 
+// A sentence that denies complete enumeration states the limitation the rule
+// exists to protect, so only affirmative claims fail.
+const ENUMERATION_DENIAL = /\b(?:no|not|never|cannot|can't)\b/i;
+
+function claimsCompleteNetworkEnumeration(markdown) {
+  return markdown
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .some((sentence) => {
+      const match = UNQUALIFIED_NETWORK_ENUMERATION.exec(sentence);
+      return match != null && !ENUMERATION_DENIAL.test(sentence.slice(0, match.index));
+    });
+}
+
 const APP_REFERENCE = /(?<![\w.-])apps\/([\w.-]+)/g;
 
 function pathTokens(markdown) {
@@ -73,7 +87,7 @@ function appDirectories(listFiles) {
 export function publicationRecordFailures(read, exists, listFiles) {
   const failures = [];
 
-  if (exists(README) && UNQUALIFIED_NETWORK_ENUMERATION.test(read(README).replace(/\s+/g, " "))) {
+  if (exists(README) && claimsCompleteNetworkEnumeration(read(README))) {
     failures.push(
       `${README} must describe fixed network hosts by name and dynamic destinations by class; scan targets, subresources, integrations, providers, and webhooks cannot be enumerated in advance.`,
     );

@@ -13,8 +13,13 @@ import {
 describe("push-gate port preflight", () => {
   it("distinguishes an occupied port from other bind failures", () => {
     expect(classifyBindError({ code: "EADDRINUSE" })).toBe("occupied");
-    expect(classifyBindError({ code: "EACCES" })).toBe("unavailable");
+    expect(classifyBindError({ code: "EACCES" })).toBe("denied");
+    expect(classifyBindError({ code: "EPERM" })).toBe("denied");
     expect(classifyBindError(new Error("network unavailable"))).toBe("unavailable");
+  });
+
+  it("does not report an unusable address as a permission failure", () => {
+    expect(classifyBindError({ code: "EADDRNOTAVAIL" })).toBe("unavailable");
   });
 });
 

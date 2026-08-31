@@ -230,7 +230,6 @@ fn scheduled_web_completion_summarizes_multi_page_sessions() {
     assert_eq!(summary.score, 73);
     assert_eq!(summary.counts.total, 5);
     assert_eq!(summary.counts.critical, 1);
-    assert_eq!(summary.counts.high, 2);
     assert_eq!(summary.timestamp, "2026-08-29T12:00:00Z");
     assert_eq!(summary.regression_scan_ids, vec![11, 12]);
     assert!(summary.comparison_eligible);
@@ -481,7 +480,6 @@ fn scheduled_web_completion_counts_only_actionable_single_page_findings() {
 
     assert_eq!(summary.counts.total, 2);
     assert_eq!(summary.counts.critical, 1);
-    assert_eq!(summary.counts.high, 1);
 }
 
 #[test]

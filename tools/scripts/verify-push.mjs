@@ -257,11 +257,15 @@ async function preflightPortCheck() {
   const error = await bindError(E2E_HOST, E2E_PORT);
   if (error === null) return;
 
-  if (classifyBindError(error) !== "occupied") {
+  const classification = classifyBindError(error);
+  if (classification !== "occupied") {
     const code = typeof error.code === "string" ? ` (${error.code})` : "";
+    const remedy =
+      classification === "denied"
+        ? "Playwright needs permission to open that local endpoint for its preview server.\n"
+        : "Playwright needs that exact address for its preview server; check the loopback interface and any network policy in effect.\n";
     process.stderr.write(
-      `${RED}${BOLD}verify-push: could not bind ${E2E_HOST}:${E2E_PORT}${code}.${RESET}\n` +
-        `Playwright needs permission to open that local endpoint for its preview server.\n`,
+      `${RED}${BOLD}verify-push: could not bind ${E2E_HOST}:${E2E_PORT}${code}.${RESET}\n` + remedy,
     );
     process.exit(1);
   }

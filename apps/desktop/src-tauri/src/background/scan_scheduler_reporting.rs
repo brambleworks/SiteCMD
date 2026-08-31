@@ -10,7 +10,6 @@ use crate::{
 pub(super) struct WebScanIssueCounts {
     pub(super) total: usize,
     pub(super) critical: usize,
-    pub(super) high: usize,
 }
 
 #[derive(Debug)]
@@ -71,12 +70,10 @@ pub(super) fn summarize_scheduled_web_result(
             WebScanIssueCounts {
                 total: 0,
                 critical: 0,
-                high: 0,
             },
             |mut counts, page| {
                 counts.total += page.issues_count;
                 counts.critical += page.issues_critical;
-                counts.high += page.issues_high;
                 counts
             },
         );
@@ -88,9 +85,6 @@ pub(super) fn summarize_scheduled_web_result(
             counts.total += 1;
             if matches!(issue.severity, Severity::Critical) {
                 counts.critical += 1;
-            }
-            if matches!(issue.severity, Severity::High) {
-                counts.high += 1;
             }
         }
 
@@ -131,15 +125,11 @@ fn web_scan_issue_counts(result: &ScanResult) -> WebScanIssueCounts {
             WebScanIssueCounts {
                 total: 0,
                 critical: 0,
-                high: 0,
             },
             |mut counts, issue| {
                 counts.total += 1;
                 if matches!(issue.severity, Severity::Critical) {
                     counts.critical += 1;
-                }
-                if matches!(issue.severity, Severity::High) {
-                    counts.high += 1;
                 }
                 counts
             },
