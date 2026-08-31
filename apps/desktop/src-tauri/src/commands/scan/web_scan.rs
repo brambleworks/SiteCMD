@@ -1,4 +1,6 @@
-use crate::core::normalized_scan::{batch_outcomes_on_routes, normalize_web_scan, ScanRunKind};
+use crate::core::normalized_scan::{
+    batch_outcomes_on_routes, normalize_web_scan, ScanRunKind, ScanRunStatus,
+};
 use crate::core::scanner::{self, ScanType};
 use crate::db::Database;
 use std::sync::Arc;
@@ -7,23 +9,14 @@ use tauri::{AppHandle, Emitter};
 use super::control::ScanControlState;
 use crate::commands::validate_url_async;
 
+mod auto_export;
 mod webview_layer;
-use webview_layer::apply_webview_layer;
+use auto_export::auto_export_sitecmd_scan;
+pub(super) use webview_layer::{apply_webview_layer, BrowserRuntime};
 
-fn auto_export_sitecmd_scan(project_path: Option<&str>, result: &scanner::ScanResult) {
-    let Some(project_path) = project_path.filter(|value| !value.trim().is_empty()) else {
-        return;
-    };
-    let sitecmd_dir = std::path::Path::new(project_path).join(".sitecmd");
-    if !sitecmd_dir.is_dir() {
-        return;
-    }
-
-    if let Err(error) = crate::cli::export::export_scan(&sitecmd_dir, result) {
-        tracing::warn!("Failed to auto-export desktop scan: {}", error);
-    } else {
-        tracing::info!("Auto-exported desktop scan");
-    }
+pub(crate) struct WebScanOutput {
+    pub result: scanner::ScanResult,
+    pub incomplete_detail: Option<String>,
 }
 
 pub(crate) async fn scan_url_for_execution(
@@ -39,7 +32,7 @@ pub(crate) async fn scan_url_for_execution(
     scan_type: Option<ScanType>,
     scan_request_id: u64,
     execution_id: i64,
-) -> Result<scanner::ScanResult, scanner::ScanError> {
+) -> Result<WebScanOutput, scanner::ScanError> {
     validate_url_async(&page_url)
         .await
         .map_err(scanner::ScanError::NetworkError)?;
@@ -101,7 +94,7 @@ async fn run_and_persist_scan(
     axe_enabled: Option<bool>,
     scan_type: ScanType,
     execution_id: i64,
-) -> Result<scanner::ScanResult, scanner::ScanError> {
+) -> Result<WebScanOutput, scanner::ScanError> {
     tracing::info!(
         "Starting {} scan for: {}",
         scan_type,
@@ -131,6 +124,7 @@ async fn run_and_persist_scan(
         result.duration_ms
     );
 
+    let incomplete_detail = browser_runtime.incomplete_detail();
     let outcome = post_scan_persist(
         app,
         &db,
@@ -139,8 +133,8 @@ async fn run_and_persist_scan(
         scan_type,
         project_id,
         execution_id,
-        browser_runtime.ran,
-        browser_runtime.build.as_deref(),
+        axe_enabled.unwrap_or(false),
+        &browser_runtime,
         &mut result,
     )
     .await;
@@ -150,7 +144,10 @@ async fn run_and_persist_scan(
         .scan_id
         .map_err(|error| persist_failure_error(&error))?;
 
-    Ok(result)
+    Ok(WebScanOutput {
+        result,
+        incomplete_detail,
+    })
 }
 
 /// Command-path mapping for a persistence failure. The scan itself ran, so
@@ -212,10 +209,11 @@ pub(crate) async fn post_scan_persist(
     scan_type: ScanType,
     known_project_id: Option<i64>,
     execution_id: i64,
-    browser_ran: bool,
-    browser_build: Option<&str>,
+    axe_enabled: bool,
+    browser_runtime: &BrowserRuntime,
     result: &mut scanner::ScanResult,
 ) -> PostScanOutcome {
+    let complete_browser_coverage = browser_runtime.failure.is_none();
     let resolved_project_id = match known_project_id {
         Some(project_id) => Some(project_id),
         None => match db.find_project_for_url_result(environment_url) {
@@ -238,7 +236,7 @@ pub(crate) async fn post_scan_persist(
         let environment_url = environment_url.to_string();
         let page_url = page_url.to_string();
         let result = result.clone();
-        let browser_build = browser_build.map(str::to_owned);
+        let browser_runtime = browser_runtime.clone();
         crate::commands::run_blocking(move || {
             persist_scan_blocking(
                 &db,
@@ -247,8 +245,11 @@ pub(crate) async fn post_scan_persist(
                 scan_type,
                 resolved_project_id,
                 execution_id,
-                browser_ran,
-                browser_build.as_deref(),
+                axe_enabled,
+                browser_runtime.ran,
+                browser_runtime.axe_ran,
+                browser_runtime.build.as_deref(),
+                browser_runtime.failure.as_deref(),
                 &result,
             )
         })
@@ -269,8 +270,10 @@ pub(crate) async fn post_scan_persist(
     if let Some(notice) = regression_notice {
         super::notify_deploy_regression(app, &notice).await;
     }
-    if let Some(project_id) = resolved_project_id {
-        super::issue_link_resolve::spawn_issue_link_auto_resolves(app, db, project_id, result);
+    if complete_browser_coverage {
+        if let Some(project_id) = resolved_project_id {
+            super::issue_link_resolve::spawn_issue_link_auto_resolves(app, db, project_id, result);
+        }
     }
 
     outcome
@@ -286,8 +289,11 @@ fn persist_scan_blocking(
     scan_type: ScanType,
     resolved_project_id: Option<i64>,
     execution_id: i64,
+    axe_enabled: bool,
     browser_ran: bool,
+    axe_ran: bool,
     browser_build: Option<&str>,
+    browser_failure: Option<&str>,
     result: &scanner::ScanResult,
 ) -> (
     PostScanOutcome,
@@ -331,7 +337,7 @@ fn persist_scan_blocking(
 
     // Capture the pre-run active set before the canonical persistence
     // transaction reconciles the current projection.
-    let blame_snapshot = if scan_type == ScanType::Health {
+    let blame_snapshot = if should_capture_regression_snapshot(scan_type, browser_failure) {
         resolved_project_id.and_then(|project_id| {
             let previous = db
                 .get_scan_history_for_project(project_id, environment_url, 5)
@@ -385,7 +391,9 @@ fn persist_scan_blocking(
             );
         }
     };
+    batch.diagnostics.axe_enabled = Some(axe_enabled);
     batch.diagnostics.browser_ran = Some(browser_ran);
+    batch.diagnostics.axe_ran = Some(axe_ran);
     batch.diagnostics.browser_build = browser_build.map(str::to_owned);
     batch.environment_url = Some(environment_url.to_string());
     batch.environment_scope_key = crate::db::normalize_env_url(Some(environment_url));
@@ -400,6 +408,12 @@ fn persist_scan_blocking(
         &outcomes,
         crate::core::normalized_scan::ClaimBasis::PerRoute,
     );
+    if let Some(failure) = browser_failure {
+        batch.status = ScanRunStatus::Failed;
+        batch.raw_score = None;
+        batch.coverage.successful = false;
+        batch.status_detail = Some(format!("Browser analysis failed: {failure}"));
+    }
     let scan_id = match db.persist_normalized_scan_run(batch) {
         Ok(run_id) => run_id,
         Err(error) => {
@@ -415,7 +429,9 @@ fn persist_scan_blocking(
         }
     };
     tracing::info!("Canonical Web Scan saved: run_id={}", scan_id);
-    super::baseline::record_baseline_observation(db, site_id, Some(scan_id), result);
+    if browser_failure.is_none() {
+        super::baseline::record_baseline_observation(db, site_id, Some(scan_id), result);
+    }
 
     let mut outcome = PostScanOutcome {
         scan_id: Ok(scan_id),
@@ -458,19 +474,27 @@ fn persist_scan_blocking(
                 blame_snapshot,
             )
         });
-        crate::core::native_alerts::emit_web_scan_alerts(
-            db.as_ref(),
-            project_id,
-            environment_url,
-            scan_id,
-            result,
-            notice.is_some(),
-        );
+        if browser_failure.is_none() {
+            crate::core::native_alerts::emit_web_scan_alerts(
+                db.as_ref(),
+                project_id,
+                environment_url,
+                scan_id,
+                result,
+                notice.is_some(),
+            );
+        }
         outcome.blame_notified = notice.is_some();
         regression_notice = notice;
     }
-    auto_export_sitecmd_scan(project_path_for_export.as_deref(), result);
+    if browser_failure.is_none() {
+        auto_export_sitecmd_scan(project_path_for_export.as_deref(), result);
+    }
     (outcome, regression_notice)
+}
+
+fn should_capture_regression_snapshot(scan_type: ScanType, browser_failure: Option<&str>) -> bool {
+    scan_type == ScanType::Health && browser_failure.is_none()
 }
 
 #[cfg(test)]
@@ -561,13 +585,81 @@ mod tests {
             ScanType::Health,
             None,
             execution_id,
-            false,
+            true,
+            true,
+            true,
+            Some("test-browser"),
             None,
             &result,
         );
 
         let scan_id = outcome.scan_id.expect("scan persistence should succeed");
+        let diagnostics_json: String = db
+            .execute(move |conn| {
+                conn.query_row(
+                    "SELECT diagnostics_json FROM scan_runs WHERE id = ?1",
+                    [scan_id],
+                    |row| row.get(0),
+                )
+                .expect("stored diagnostics")
+            })
+            .expect("database worker");
+        let diagnostics: crate::core::normalized_scan::NormalizedRunDiagnostics =
+            serde_json::from_str(&diagnostics_json).expect("run diagnostics");
         assert!(scan_id > 0);
+        assert_eq!(diagnostics.axe_enabled, Some(true));
+        assert_eq!(diagnostics.browser_ran, Some(true));
+        assert_eq!(diagnostics.axe_ran, Some(true));
+        assert_eq!(diagnostics.browser_build.as_deref(), Some("test-browser"));
+        assert!(!outcome.blame_notified);
+        assert!(notice.is_none());
+    }
+
+    #[test]
+    fn persist_scan_blocking_marks_browser_failure_as_incomplete() {
+        let db = crate::db::test_helpers::temp_db_arc();
+        let result = scan_result_fixture("https://example.com");
+        let execution_id = execution_fixture(&db.db, "web-browser-failure");
+
+        let (outcome, notice) = persist_scan_blocking(
+            &db.db,
+            "https://example.com",
+            "https://example.com",
+            ScanType::Health,
+            None,
+            execution_id,
+            true,
+            false,
+            false,
+            None,
+            Some("Failed to create webview: unavailable"),
+            &result,
+        );
+
+        let scan_id = outcome
+            .scan_id
+            .expect("partial scan persistence should succeed");
+        let stored: (String, Option<i64>, String, Option<String>) = db
+            .execute(move |conn| {
+                conn.query_row(
+                    "SELECT status, raw_score, coverage_json, status_detail
+                     FROM scan_runs WHERE id = ?1",
+                    [scan_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("stored partial run")
+            })
+            .expect("database worker");
+        let coverage: crate::core::normalized_scan::ScanCoverageManifest =
+            serde_json::from_str(&stored.2).expect("stored coverage");
+
+        assert_eq!(stored.0, "failed");
+        assert_eq!(stored.1, None);
+        assert!(!coverage.successful);
+        assert_eq!(
+            stored.3.as_deref(),
+            Some("Browser analysis failed: Failed to create webview: unavailable")
+        );
         assert!(!outcome.blame_notified);
         assert!(notice.is_none());
     }
@@ -601,6 +693,9 @@ mod tests {
             Some(second),
             execution_id,
             false,
+            false,
+            false,
+            None,
             None,
             &scan_result_fixture(URL),
         );
@@ -617,104 +712,6 @@ mod tests {
             .expect("database worker");
 
         assert_eq!(stored, (Some(second), Some(selected_site)));
-    }
-
-    #[test]
-    fn persist_scan_blocking_keeps_environment_scope_separate_from_the_target_page() {
-        const ENVIRONMENT_URL: &str = "https://scoped-persist.example";
-        const PAGE_URL: &str = "https://scoped-persist.example/about";
-        const EFFECTIVE_URL: &str = "https://scoped-persist.example/about/";
-        let db = crate::db::test_helpers::temp_db_arc();
-        let project_id = db
-            .upsert_project("Scoped", "/tmp/scoped-persist", None)
-            .expect("project");
-        db.add_environment(
-            project_id,
-            ENVIRONMENT_URL,
-            "Production",
-            "production",
-            "manual",
-        )
-        .expect("environment");
-        let expected_site_id = db
-            .get_or_create_site_for_project(project_id, ENVIRONMENT_URL)
-            .expect("environment site");
-        let execution_id = project_execution_fixture(
-            &db.db,
-            "web-persist-child-page",
-            project_id,
-            ENVIRONMENT_URL,
-        );
-        let mut result = scan_result_fixture(EFFECTIVE_URL);
-        result.issues.push(crate::checks::CheckResult {
-            check_id: "seo.title".into(),
-            category: crate::checks::ScanCategory::Seo,
-            title: "Title".into(),
-            description: "Title could not be verified".into(),
-            status: crate::checks::CheckStatus::Skipped,
-            severity: crate::checks::Severity::Medium,
-            fix_prompt: None,
-            manual_fix: None,
-            raw_data: None,
-            confidence: crate::checks::IssueConfidence::Confirmed,
-            confidence_reason: None,
-            why_it_matters: None,
-        });
-
-        let (outcome, _) = persist_scan_blocking(
-            &db.db,
-            ENVIRONMENT_URL,
-            PAGE_URL,
-            ScanType::Health,
-            Some(project_id),
-            execution_id,
-            false,
-            None,
-            &result,
-        );
-        let run_id = outcome.scan_id.expect("child-page persistence");
-        let stored: (
-            Option<i64>,
-            Option<i64>,
-            Option<String>,
-            String,
-            String,
-            Option<String>,
-        ) = db
-            .execute(move |conn| {
-                conn.query_row(
-                    "SELECT project_id, site_id, environment_url, coverage_json, diagnostics_json,
-                            (SELECT page_url FROM scan_findings
-                              WHERE run_id = scan_runs.id AND canonical_check_id = 'seo.title')
-                       FROM scan_runs WHERE id = ?1",
-                    [run_id],
-                    |row| {
-                        Ok((
-                            row.get(0)?,
-                            row.get(1)?,
-                            row.get(2)?,
-                            row.get(3)?,
-                            row.get(4)?,
-                            row.get(5)?,
-                        ))
-                    },
-                )
-                .expect("stored run")
-            })
-            .expect("database worker");
-        let coverage: crate::core::normalized_scan::ScanCoverageManifest =
-            serde_json::from_str(&stored.3).expect("coverage");
-        let diagnostics: crate::core::normalized_scan::NormalizedRunDiagnostics =
-            serde_json::from_str(&stored.4).expect("diagnostics");
-
-        assert_eq!(stored.0, Some(project_id));
-        assert_eq!(stored.1, Some(expected_site_id));
-        assert_eq!(stored.2.as_deref(), Some(ENVIRONMENT_URL));
-        assert_eq!(coverage.page_urls, vec![PAGE_URL, EFFECTIVE_URL]);
-        assert!(!coverage.covers(Some(PAGE_URL), "seo.title"));
-        assert!(!coverage.covers(Some(EFFECTIVE_URL), "seo.title"));
-        assert_eq!(diagnostics.page_url.as_deref(), Some(PAGE_URL));
-        assert_eq!(stored.5.as_deref(), Some(EFFECTIVE_URL));
     }
 
     #[test]
@@ -738,6 +735,9 @@ mod tests {
             None,
             execution_id,
             false,
+            false,
+            false,
+            None,
             None,
             &result,
         );
@@ -763,5 +763,18 @@ mod tests {
             command_error.contains("Failed to save canonical Web Scan run"),
             "got: {command_error}"
         );
+    }
+
+    #[test]
+    fn browser_failure_disables_regression_comparison() {
+        assert!(should_capture_regression_snapshot(ScanType::Health, None));
+        assert!(!should_capture_regression_snapshot(
+            ScanType::Health,
+            Some("unavailable")
+        ));
+        assert!(!should_capture_regression_snapshot(
+            ScanType::Security,
+            None
+        ));
     }
 }

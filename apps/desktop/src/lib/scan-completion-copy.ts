@@ -48,6 +48,10 @@ interface MultiScanCompletionCopyInput {
 
 interface ScheduledScanCompletionCopyInput {
   scanType?: string | null;
+  status?: "complete" | "partial";
+  completedPages?: number | null;
+  totalPages?: number | null;
+  incompleteDetail?: string | null;
   score: number;
   issueCount: number;
   host: string;
@@ -187,10 +191,13 @@ export function buildScheduledScanCompletionCopy(
   input: ScheduledScanCompletionCopyInput,
 ): CompletionCopy {
   const label = getScheduledScanLabel(input.scanType);
+  const partial = input.status === "partial";
+  const titleLabel = partial ? `${label} Partially` : label;
+  let copy: CompletionCopy;
   if (input.scanType === "code") {
     const topDomainMeta = input.topDomain ? CODE_SCAN_DOMAIN_META[input.topDomain] : null;
-    return buildCodeScanCompletionCopy({
-      titleLabel: label,
+    copy = buildCodeScanCompletionCopy({
+      titleLabel,
       jobLabel: label,
       score: input.score,
       issueCount: input.issueCount,
@@ -207,15 +214,39 @@ export function buildScheduledScanCompletionCopy(
       domainTrendLabel: input.domainTrendLabel,
       workflowCue: input.workflowCue,
     });
+  } else {
+    copy = buildWebScanCompletionCopy({
+      titleLabel,
+      jobLabel: label,
+      score: input.score,
+      issueCount: input.issueCount,
+      scoreMessage: input.scoreMessage,
+      host: input.host,
+      workflowCue: input.workflowCue,
+    });
   }
 
-  return buildWebScanCompletionCopy({
-    titleLabel: label,
-    jobLabel: label,
-    score: input.score,
-    issueCount: input.issueCount,
-    scoreMessage: input.scoreMessage,
-    host: input.host,
-    workflowCue: input.workflowCue,
-  });
+  if (!partial) return copy;
+
+  const hasPageCounts =
+    input.completedPages != null && input.totalPages != null && input.totalPages > 0;
+  const coverageLabel = hasPageCounts
+    ? `${input.completedPages} of ${input.totalPages} pages`
+    : "Partial coverage";
+  const incompleteDetail = input.incompleteDetail?.trim();
+  const coverageSentence = incompleteDetail
+    ? /[.!?]$/.test(incompleteDetail)
+      ? incompleteDetail
+      : `${incompleteDetail}.`
+    : hasPageCounts
+      ? `${coverageLabel} scanned.`
+      : "The scheduled scan finished with incomplete coverage.";
+  const incompletePageCount =
+    hasPageCounts && input.completedPages !== input.totalPages ? coverageLabel : null;
+
+  return {
+    ...copy,
+    body: `${coverageSentence} ${copy.body}`,
+    jobDetail: joinDetail([copy.jobDetail, incompleteDetail, incompletePageCount]),
+  };
 }

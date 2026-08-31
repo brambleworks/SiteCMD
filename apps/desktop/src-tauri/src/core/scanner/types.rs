@@ -195,6 +195,8 @@ pub struct MultiScanResult {
     pub completed_pages: usize,
     pub overall_score: u32,
     pub duration_ms: u64,
+    #[serde(default)]
+    pub incomplete_detail: Option<String>,
     pub page_results: Vec<PageScanSummary>,
     /// Canonical issue groups activated during this session.
     #[serde(default)]

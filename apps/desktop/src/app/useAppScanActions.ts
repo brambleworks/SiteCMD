@@ -163,21 +163,6 @@ export function useAppScanActions({
         setScanRunStep(null);
         return;
       }
-      if (outcome.result.execution.status === "partial") {
-        const detail = [
-          outcome.result.execution.webStatus === "failed" ||
-          outcome.result.execution.webStatus === "cancelled"
-            ? `Web Scan: ${outcome.result.execution.webDetail ?? "failed"}`
-            : null,
-          outcome.result.execution.codeStatus === "failed" ||
-          outcome.result.execution.codeStatus === "cancelled"
-            ? `Code Scan: ${outcome.result.execution.codeDetail ?? "failed"}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        toast.error("Full Scan completed partially", detail);
-      }
     },
     [
       activeEnv,
@@ -216,10 +201,11 @@ export function useAppScanActions({
         projectId: activeProject?.id ?? null,
         environmentId: activeEnv?.id ?? null,
         environmentUrl: activeEnv?.url ?? url,
+        retention: prefs.retentionLimit,
         trigger: "manual",
       });
     },
-    [activeEnv, activeProject, refuseWhileScanning, scan],
+    [activeEnv, activeProject, prefs.retentionLimit, refuseWhileScanning, scan],
   );
 
   return {

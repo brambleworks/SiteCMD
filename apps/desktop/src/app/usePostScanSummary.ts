@@ -9,14 +9,22 @@ import { loadCurrentScoreSnapshot } from "@/lib/current-score";
 import type { ProjectIssueSummary } from "@/lib/project-issue-summary";
 import { buildProjectIssueSummaryFromSnapshot } from "@/lib/project-nav-badges";
 import { getProjectNavBadgeSnapshot } from "@/lib/project-summary-signals";
-import type { CodeScanResult, CodeScanSummary, ScanResult, ScoreSnapshot } from "@/lib/types";
+import type {
+  CodeScanResult,
+  CodeScanSummary,
+  RunScanExecutionRequest,
+  ScanResult,
+  ScoreSnapshot,
+} from "@/lib/types";
 import { fetchInactiveKeys } from "@/pages/issues/useInactiveIssueKeys";
 
 interface UsePostScanSummaryParams {
   state: ScanState;
+  currentExecutionMode: RunScanExecutionRequest["requestedMode"] | null;
   result: ScanResult | null;
   codeResult: CodeScanResult | null;
   multiResult: MultiScanResult | null;
+  executionIncompleteDetail: string | null;
   activeProjectId: number | null;
   activeEnvUrl: string | null;
   activeScanScope: string;
@@ -39,9 +47,11 @@ interface UsePostScanSummaryReturn {
 
 export function usePostScanSummary({
   state,
+  currentExecutionMode,
   result,
   codeResult,
   multiResult,
+  executionIncompleteDetail,
   activeProjectId,
   activeEnvUrl,
   activeScanScope,
@@ -161,6 +171,8 @@ export function usePostScanSummary({
       result,
       codeResult,
       multiResult,
+      incompleteDetail: executionIncompleteDetail,
+      requestedMode: currentExecutionMode,
       sitecmdScore: persistedScore?.overall ?? null,
       history,
       codeHistory,
@@ -178,6 +190,8 @@ export function usePostScanSummary({
     fullScanStillRunning,
     history,
     multiResult,
+    executionIncompleteDetail,
+    currentExecutionMode,
     postScanScore,
     result,
     scanBackgrounded,

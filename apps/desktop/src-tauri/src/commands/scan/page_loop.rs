@@ -3,12 +3,31 @@
 
 use crate::core::scanner;
 
+use super::web_scan::BrowserRuntime;
+
+#[derive(Debug)]
+pub(super) struct PageScanOutput {
+    pub(super) result: scanner::ScanResult,
+    pub(super) browser_runtime: BrowserRuntime,
+}
+
+impl PageScanOutput {
+    #[cfg(test)]
+    fn transport_only(result: scanner::ScanResult) -> Self {
+        Self {
+            result,
+            browser_runtime: BrowserRuntime::default(),
+        }
+    }
+}
+
 /// What the per-page loop produced: one summary per attempted page, the
 /// scores of the pages that actually completed, and the cross-page signals
 /// for session analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PageLoopStatus {
     Complete,
+    Partial,
     Failed,
     Cancelled,
 }
@@ -22,6 +41,7 @@ pub(super) struct PageLoopOutcome {
     pub(super) completed_scores: Vec<u32>,
     pub(super) session_signals: Vec<crate::core::page_signals::PageSignals>,
     pub(super) session_site_facts: Vec<sitecmd_engine::profile::Observation>,
+    pub(super) browser_runtimes: Vec<BrowserRuntime>,
 }
 
 /// Average completed pages only; `None` distinguishes an unscored session from
@@ -40,11 +60,11 @@ pub(super) async fn run_page_loop<ScanFut, PersistFut>(
     session_id: i64,
     is_cancelled: impl Fn() -> bool,
     mut scan_page: impl FnMut(usize, &str, bool) -> ScanFut,
-    mut persist_page: impl FnMut(usize, &str, scanner::ScanResult) -> PersistFut,
+    mut persist_page: impl FnMut(usize, &str, scanner::ScanResult, BrowserRuntime) -> PersistFut,
     mut emit_progress: impl FnMut(scanner::MultiScanProgress),
 ) -> Result<PageLoopOutcome, String>
 where
-    ScanFut: std::future::Future<Output = Result<scanner::ScanResult, scanner::ScanError>>,
+    ScanFut: std::future::Future<Output = Result<PageScanOutput, scanner::ScanError>>,
     PersistFut: std::future::Future<Output = Result<i64, String>>,
 {
     use scanner::MultiScanProgress;
@@ -55,6 +75,7 @@ where
         completed_scores: Vec::new(),
         session_signals: Vec::new(),
         session_site_facts: Vec::new(),
+        browser_runtimes: Vec::new(),
     };
 
     for (i, url) in urls.iter().enumerate() {
@@ -90,7 +111,10 @@ where
         // run on the entry page only; repeating them for every page re-probes
         // the same origin state and dominated multi-scan wall time.
         match scan_page(i, url, i > 0).await {
-            Ok(mut result) => {
+            Ok(PageScanOutput {
+                mut result,
+                browser_runtime,
+            }) => {
                 // Cross-page signals never persist (serde-skipped); pull
                 // them off before the result moves into the persist task.
                 if let Some(signals) = result.page_signals.take() {
@@ -105,7 +129,13 @@ where
                 // runs, not the selected-page index. A failed first page
                 // followed by one success is 1/2 complete, never 2/2.
                 let completed_page_count = outcome.completed_scores.len() + 1;
-                let scan_id = persist_page(completed_page_count, url, result).await?;
+                let scan_id =
+                    persist_page(completed_page_count, url, result, browser_runtime.clone())
+                        .await?;
+
+                if browser_runtime.failure.is_some() && outcome.status == PageLoopStatus::Complete {
+                    outcome.status = PageLoopStatus::Partial;
+                }
 
                 if let Some(mut facts) = site_facts {
                     facts.scan_id = Some(scan_id);
@@ -113,6 +143,7 @@ where
                 }
 
                 outcome.completed_scores.push(overall_score);
+                outcome.browser_runtimes.push(browser_runtime);
                 outcome.page_results.push(scanner::PageScanSummary {
                     url: url.clone(),
                     score: overall_score,
@@ -149,6 +180,9 @@ where
                 break;
             }
             Err(e) => {
+                if outcome.status == PageLoopStatus::Complete {
+                    outcome.status = PageLoopStatus::Partial;
+                }
                 tracing::error!(
                     "Multi-scan error for {}: {}",
                     crate::log_sanitizer::log_safe_url_target(url),
@@ -177,8 +211,10 @@ where
         }
     }
 
-    if outcome.status == PageLoopStatus::Complete
-        && outcome.completed_scores.is_empty()
+    if matches!(
+        outcome.status,
+        PageLoopStatus::Complete | PageLoopStatus::Partial
+    ) && outcome.completed_scores.is_empty()
         && !outcome.page_results.is_empty()
     {
         outcome.status = PageLoopStatus::Failed;
@@ -232,7 +268,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_pages_are_excluded_from_the_session_average() {
+    async fn failed_pages_make_the_session_partial_without_affecting_the_average() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let persisted = Arc::new(Mutex::new(Vec::<(usize, String)>::new()));
 
@@ -248,11 +284,14 @@ mod tests {
                     if i == 1 {
                         Err(scanner::ScanError::ScanFailed("fixture failure".into()))
                     } else {
-                        Ok(scan_result(&url, if i == 0 { 80 } else { 60 }))
+                        Ok(PageScanOutput::transport_only(scan_result(
+                            &url,
+                            if i == 0 { 80 } else { 60 },
+                        )))
                     }
                 }
             },
-            |completed_pages, url, _result| {
+            |completed_pages, url, _result, _browser_runtime| {
                 let persisted = persisted_sink.clone();
                 let url = url.to_string();
                 async move {
@@ -268,7 +307,7 @@ mod tests {
         // The failed page appears in the summaries (score 0, no scan row)
         // but must not drag the session average down as a zero.
         assert_eq!(outcome.completed_scores, vec![80, 60]);
-        assert_eq!(outcome.status, PageLoopStatus::Complete);
+        assert_eq!(outcome.status, PageLoopStatus::Partial);
         assert_eq!(session_average(&outcome.completed_scores), Some(70));
         assert_eq!(outcome.page_results.len(), 3);
         assert_eq!(outcome.page_results[1].score, 0);
@@ -319,9 +358,9 @@ mod tests {
             || false,
             |_, _, _| {
                 let result = result.clone();
-                async move { Ok(result) }
+                async move { Ok(PageScanOutput::transport_only(result)) }
             },
-            |_, _, _| async { Ok(1) },
+            |_, _, _, _| async { Ok(1) },
             |_| {},
         )
         .await
@@ -348,10 +387,10 @@ mod tests {
                 let url = url.to_string();
                 async move {
                     flags.lock().unwrap().push(skip_origin_checks);
-                    Ok(scan_result(&url, 50))
+                    Ok(PageScanOutput::transport_only(scan_result(&url, 50)))
                 }
             },
-            |_, _, _| async { Ok(1) },
+            |_, _, _, _| async { Ok(1) },
             |_| {},
         )
         .await
@@ -373,9 +412,9 @@ mod tests {
             || polls.fetch_add(1, Ordering::SeqCst) >= 1,
             |_, url, _| {
                 let url = url.to_string();
-                async move { Ok(scan_result(&url, 90)) }
+                async move { Ok(PageScanOutput::transport_only(scan_result(&url, 90))) }
             },
-            |_, _, _| async { Ok(1) },
+            |_, _, _, _| async { Ok(1) },
             |p| events_sink.lock().unwrap().push(p),
         )
         .await
@@ -398,7 +437,7 @@ mod tests {
             7,
             || false,
             |_, _, _| async { Err(scanner::ScanError::Cancelled) },
-            |_, _, _| async { Ok(1) },
+            |_, _, _, _| async { Ok(1) },
             |p| events_sink.lock().unwrap().push(p),
         )
         .await
@@ -423,9 +462,9 @@ mod tests {
             || false,
             |_, url, _| {
                 let url = url.to_string();
-                async move { Ok(scan_result(&url, 70)) }
+                async move { Ok(PageScanOutput::transport_only(scan_result(&url, 70))) }
             },
-            |_, _, result| async move {
+            |_, _, result, _| async move {
                 // The persist effect must never see the serde-skipped
                 // cross-page signals; the loop takes them first.
                 assert!(result.page_signals.is_none());
@@ -457,10 +496,10 @@ mod tests {
                         ]))],
                         scan_id: None,
                     });
-                    Ok(result)
+                    Ok(PageScanOutput::transport_only(result))
                 }
             },
-            |completed_pages, _, result| async move {
+            |completed_pages, _, result, _| async move {
                 assert!(
                     result.site_facts.is_none(),
                     "page persistence must not compare a partial site observation"
@@ -485,9 +524,9 @@ mod tests {
             || false,
             |_, url, _| {
                 let url = url.to_string();
-                async move { Ok(scan_result(&url, 90)) }
+                async move { Ok(PageScanOutput::transport_only(scan_result(&url, 90))) }
             },
-            |_, _, _| async { Err("canonical issue persistence failed".to_string()) },
+            |_, _, _, _| async { Err("canonical issue persistence failed".to_string()) },
             |_| {},
         )
         .await
@@ -497,13 +536,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn browser_runtime_reaches_page_persistence() {
+        let observed = Arc::new(Mutex::new(None));
+        let observed_runtime = observed.clone();
+
+        run_page_loop(
+            &["https://example.com/page-0".to_string()],
+            7,
+            || false,
+            |_, url, _| {
+                let url = url.to_string();
+                async move {
+                    Ok(PageScanOutput {
+                        result: scan_result(&url, 90),
+                        browser_runtime: super::super::web_scan::BrowserRuntime {
+                            ran: true,
+                            axe_ran: true,
+                            build: Some("test-browser".into()),
+                            failure: None,
+                        },
+                    })
+                }
+            },
+            |_, _, _, browser_runtime| {
+                let observed = observed_runtime.clone();
+                async move {
+                    *observed.lock().unwrap() = Some(browser_runtime);
+                    Ok(1)
+                }
+            },
+            |_| {},
+        )
+        .await
+        .expect("page scan succeeds");
+
+        let runtime = observed.lock().unwrap().clone().expect("browser runtime");
+        assert!(runtime.ran);
+        assert!(runtime.axe_ran);
+        assert_eq!(runtime.build.as_deref(), Some("test-browser"));
+    }
+
+    #[tokio::test]
+    async fn browser_failure_makes_a_transport_success_partial() {
+        let outcome = run_page_loop(
+            &["https://example.com/page-0".to_string()],
+            7,
+            || false,
+            |_, url, _| {
+                let url = url.to_string();
+                async move {
+                    Ok(PageScanOutput {
+                        result: scan_result(&url, 90),
+                        browser_runtime: super::super::web_scan::BrowserRuntime {
+                            ran: false,
+                            axe_ran: false,
+                            build: None,
+                            failure: Some("Failed to create webview: unavailable".into()),
+                        },
+                    })
+                }
+            },
+            |_, _, _, _| async { Ok(100) },
+            |_| {},
+        )
+        .await
+        .expect("transport result persists");
+
+        assert_eq!(outcome.status, PageLoopStatus::Partial);
+        assert_eq!(outcome.completed_scores, vec![90]);
+    }
+
+    #[tokio::test]
     async fn an_all_failed_page_set_has_a_failed_terminal_status() {
         let outcome = run_page_loop(
             &urls(2),
             7,
             || false,
             |_, _, _| async { Err(scanner::ScanError::ScanFailed("fixture failure".into())) },
-            |_, _, _| async { Ok(1) },
+            |_, _, _, _| async { Ok(1) },
             |_| {},
         )
         .await

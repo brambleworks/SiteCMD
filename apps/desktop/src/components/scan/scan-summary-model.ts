@@ -2,7 +2,12 @@ import type { MultiScanResult } from "@/hooks/useScan";
 import type { ScanSummary, ScanSessionSummary } from "@/hooks/useHistory";
 import { normalizeAppUrlForOptionalKey } from "@/lib/app-targets";
 import { addSeverityCounts, createSeverityCounts, type SeverityCounts } from "@/lib/severity";
-import type { CodeScanResult, CodeScanSummary, ScanResult } from "@/lib/types";
+import type {
+  CodeScanResult,
+  CodeScanSummary,
+  RunScanExecutionRequest,
+  ScanResult,
+} from "@/lib/types";
 import { formatUrlHost } from "@/lib/utils";
 import { countActionableCheckResults, isActionableCheckResult } from "@/lib/issues";
 import { buildProjectIssueSummary, type ProjectIssueSummary } from "@/lib/project-issue-summary";
@@ -38,6 +43,7 @@ export interface ScanSummaryModel {
   estimatedNewIssues: number | null;
   resolvedIssues: number | null;
   regressionCount: number;
+  incompleteDetail: string | null;
   // Code-scan scopes the walker skipped.
   note: string | null;
 }
@@ -46,6 +52,8 @@ interface BuildScanSummaryModelInput {
   result: ScanResult | null;
   codeResult: CodeScanResult | null;
   multiResult: MultiScanResult | null;
+  incompleteDetail?: string | null;
+  requestedMode?: RunScanExecutionRequest["requestedMode"] | null;
   sitecmdScore: number | null;
   history: ScanSummary[];
   codeHistory: CodeScanSummary[];
@@ -267,9 +275,20 @@ function buildSummaryId(input: BuildScanSummaryModelInput): string {
   return parts.join("|");
 }
 
-function buildTitle(sections: ScanSummarySectionModel[]): string {
+function buildTitle(
+  sections: ScanSummarySectionModel[],
+  incomplete: boolean,
+  requestedMode: RunScanExecutionRequest["requestedMode"] | null | undefined,
+): string {
   const hasWeb = sections.some((section) => section.kind === "web" || section.kind === "multi");
   const hasCode = sections.some((section) => section.kind === "code");
+  if (incomplete && requestedMode === "full") return "Full scan partially complete";
+  if (incomplete && hasWeb && hasCode) return "Full scan partially complete";
+  if (incomplete && sections.some((section) => section.kind === "multi")) {
+    return "Page scan partially complete";
+  }
+  if (incomplete && hasCode) return "Code scan partially complete";
+  if (incomplete) return "Web scan partially complete";
   if (hasWeb && hasCode) return "Full scan complete";
   if (hasCode) return "Code scan complete";
   if (sections.some((section) => section.kind === "multi")) return "Page scan complete";
@@ -328,6 +347,7 @@ export function buildScanSummaryModel(input: BuildScanSummaryModelInput): ScanSu
         ? { ...section, issueCount: summary.codeCount }
         : section,
   );
+  const incompleteDetail = input.incompleteDetail ?? input.multiResult?.incompleteDetail ?? null;
 
   const estimatedNewValues = reconciledSections
     .map((section) => section.issueDelta)
@@ -346,7 +366,7 @@ export function buildScanSummaryModel(input: BuildScanSummaryModelInput): ScanSu
 
   return {
     id: buildSummaryId(input),
-    title: buildTitle(reconciledSections),
+    title: buildTitle(reconciledSections, incompleteDetail != null, input.requestedMode),
     scopeLabel:
       formatUrlHost(input.result?.url) ||
       formatUrlHost(input.codeResult?.environmentUrl) ||
@@ -356,12 +376,15 @@ export function buildScanSummaryModel(input: BuildScanSummaryModelInput): ScanSu
     totalIssues,
     severityCounts,
     estimatedNewIssues:
-      estimatedNewValues.length > 0
+      incompleteDetail == null && estimatedNewValues.length > 0
         ? estimatedNewValues.reduce((sum, value) => sum + value, 0)
         : null,
     resolvedIssues:
-      resolvedValues.length > 0 ? resolvedValues.reduce((sum, value) => sum + value, 0) : null,
-    regressionCount,
+      incompleteDetail == null && resolvedValues.length > 0
+        ? resolvedValues.reduce((sum, value) => sum + value, 0)
+        : null,
+    regressionCount: incompleteDetail == null ? regressionCount : 0,
+    incompleteDetail,
     note,
   };
 }

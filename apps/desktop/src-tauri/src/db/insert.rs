@@ -15,20 +15,22 @@ pub(crate) struct GroupedCounts {
     pub(crate) low: u32,
 }
 
-pub(crate) fn grouped_issue_counts(issues: &[CheckResult]) -> GroupedCounts {
+fn grouped_counts<'a>(
+    issues: impl IntoIterator<Item = (&'a str, Severity, CheckStatus)>,
+) -> GroupedCounts {
     let mut by_check: HashMap<&str, Severity> = HashMap::new();
-    for issue in issues {
-        if issue.status != CheckStatus::Fail && issue.status != CheckStatus::Warn {
+    for (check_id, severity, status) in issues {
+        if status != CheckStatus::Fail && status != CheckStatus::Warn {
             continue;
         }
         by_check
-            .entry(&issue.check_id)
+            .entry(check_id)
             .and_modify(|current| {
-                if issue.severity.sort_rank() < current.sort_rank() {
-                    *current = issue.severity;
+                if severity.sort_rank() < current.sort_rank() {
+                    *current = severity;
                 }
             })
-            .or_insert(issue.severity);
+            .or_insert(severity);
     }
     let mut counts = GroupedCounts::default();
     for severity in by_check.into_values() {
@@ -41,6 +43,26 @@ pub(crate) fn grouped_issue_counts(issues: &[CheckResult]) -> GroupedCounts {
         }
     }
     counts
+}
+
+pub(crate) fn grouped_issue_counts(issues: &[CheckResult]) -> GroupedCounts {
+    grouped_counts(
+        issues
+            .iter()
+            .map(|issue| (issue.check_id.as_str(), issue.severity, issue.status)),
+    )
+}
+
+pub(crate) fn grouped_normalized_finding_counts(
+    findings: &[crate::core::normalized_scan::NormalizedFinding],
+) -> GroupedCounts {
+    grouped_counts(findings.iter().map(|finding| {
+        (
+            finding.producer_check_id.as_str(),
+            finding.severity,
+            finding.verdict,
+        )
+    }))
 }
 
 #[cfg(test)]

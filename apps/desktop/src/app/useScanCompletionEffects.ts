@@ -4,7 +4,6 @@ import { loadLatestSessionSummary, loadLatestWebScanId } from "@/app/scan-histor
 import type { ScanJobContext } from "@/app/useScanShellStatus";
 import type { MultiScanResult, ScanState } from "@/hooks/useScan";
 import type { ScanSummary } from "@/hooks/useHistory";
-import type { ScanRunStep } from "@/lib/scan-run-status";
 import type { AppTarget } from "@/lib/app-targets";
 import { completeJob, failJob } from "@/lib/jobs";
 import { getScanProgressSnapshot } from "@/lib/scan-progress-store";
@@ -18,7 +17,13 @@ import {
 import { markFirstScanCompleted } from "@/lib/onboarding-flags";
 import { formatScanError, parseScanError } from "@/lib/scan-error";
 import type { PostScanFollowUpBanner } from "@/lib/scan-follow-up";
-import type { CodeScanResult, CodeScanSummary, ScanResult, ScheduledScanType } from "@/lib/types";
+import type {
+  CodeScanResult,
+  CodeScanSummary,
+  RunScanExecutionRequest,
+  ScanResult,
+  ScheduledScanType,
+} from "@/lib/types";
 
 interface ToastApi {
   success: (title: string, body?: string) => void;
@@ -28,9 +33,12 @@ interface ToastApi {
 interface UseScanCompletionEffectsParams {
   state: ScanState;
   currentScanType: ScheduledScanType | null;
+  currentExecutionMode: RunScanExecutionRequest["requestedMode"] | null;
   result: ScanResult | null;
   codeResult: CodeScanResult | null;
   multiResult: MultiScanResult | null;
+  executionIncompleteDetail: string | null;
+  codeResultFromBackground: boolean;
   error: string | null;
   activeEnvUrl: string | null | undefined;
   activeProjectId: number | null | undefined;
@@ -38,7 +46,6 @@ interface UseScanCompletionEffectsParams {
   activeScanScope: string;
   history: ScanSummary[];
   codeHistory: CodeScanSummary[];
-  scanRunStep: ScanRunStep | null;
   scanBackgroundedRef: RefObject<boolean>;
   scanJobContextRef: RefObject<ScanJobContext | null>;
   desktopNotificationsEnabled: boolean;
@@ -52,9 +59,12 @@ interface UseScanCompletionEffectsParams {
 export function useScanCompletionEffects({
   state,
   currentScanType,
+  currentExecutionMode,
   result,
   codeResult,
   multiResult,
+  executionIncompleteDetail,
+  codeResultFromBackground,
   error,
   activeEnvUrl,
   activeProjectId,
@@ -62,7 +72,6 @@ export function useScanCompletionEffects({
   activeScanScope,
   history,
   codeHistory,
-  scanRunStep,
   scanBackgroundedRef,
   scanJobContextRef,
   desktopNotificationsEnabled,
@@ -75,15 +84,17 @@ export function useScanCompletionEffects({
   const handledScanRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (codeResultFromBackground) return;
+
     if (state !== "complete" && state !== "error") {
       handledScanRef.current = null;
       return;
     }
 
     // Either web result shape identifies a Full Scan completion.
-    const isFullSingleCompletion = scanRunStep?.mode === "full" && Boolean(result && codeResult);
+    const isFullSingleCompletion = currentExecutionMode === "full" && Boolean(result && codeResult);
     const isFullMultiCompletion =
-      scanRunStep?.mode === "full" && !result && Boolean(multiResult && codeResult);
+      currentExecutionMode === "full" && !result && Boolean(multiResult && codeResult);
     const scanKey =
       isFullSingleCompletion && result && codeResult
         ? `full-${result.url}-${result.overallScore}-${codeResult.id}-${codeResult.overallScore}-${codeResult.issueCount}`
@@ -104,6 +115,28 @@ export function useScanCompletionEffects({
 
     if (state === "complete" && (result || codeResult || multiResult)) {
       markFirstScanCompleted();
+    }
+
+    if (state === "complete" && executionIncompleteDetail) {
+      const scanContext = scanJobContextRef.current;
+      const scanLabel =
+        currentExecutionMode === "full"
+          ? "Full Scan"
+          : currentScanType === "code"
+            ? "Code Scan"
+            : "Web Scan";
+      failJob("scan", {
+        label: scanLabel,
+        scopeLabel: scanContext?.scopeLabel || activeScanScope || "Current site",
+        detail: executionIncompleteDetail,
+        target: {
+          page: "issues",
+          projectId: scanContext?.projectId ?? activeProjectId,
+          url: scanContext?.url ?? activeEnvUrl,
+        },
+      });
+      toast.error(`${scanLabel} completed partially`, executionIncompleteDetail);
+      return;
     }
 
     if (state === "complete" && isFullSingleCompletion && result && codeResult) {
@@ -236,6 +269,8 @@ export function useScanCompletionEffects({
     codeHistory,
     result,
     multiResult,
+    executionIncompleteDetail,
+    codeResultFromBackground,
     error,
     activeEnvUrl,
     activeProjectId,
@@ -245,8 +280,8 @@ export function useScanCompletionEffects({
     loadHistory,
     refreshProjects,
     toast,
-    scanRunStep,
     currentScanType,
+    currentExecutionMode,
     desktopNotificationsEnabled,
     openAppTarget,
     setScanFollowUpBanner,

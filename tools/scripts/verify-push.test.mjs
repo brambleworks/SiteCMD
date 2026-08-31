@@ -4,10 +4,24 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyBindError,
   missingBrowserPaths,
   parseBrowserInstallLocations,
   resolveRepositoryRoot,
 } from "./verify-push-lib.mjs";
+
+describe("push-gate port preflight", () => {
+  it("distinguishes an occupied port from other bind failures", () => {
+    expect(classifyBindError({ code: "EADDRINUSE" })).toBe("occupied");
+    expect(classifyBindError({ code: "EACCES" })).toBe("denied");
+    expect(classifyBindError({ code: "EPERM" })).toBe("denied");
+    expect(classifyBindError(new Error("network unavailable"))).toBe("unavailable");
+  });
+
+  it("does not report an unusable address as a permission failure", () => {
+    expect(classifyBindError({ code: "EADDRNOTAVAIL" })).toBe("unavailable");
+  });
+});
 
 describe("repository root resolution", () => {
   it("decodes spaces in checkout paths", () => {

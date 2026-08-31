@@ -34,6 +34,12 @@ public updater key, and verifies its SHA-256 checksum and reported version.
 
 ```bash
 curl -fsSL https://sitecmd.com/install.sh | sh
+```
+
+The installer prints where it placed the binary. If that directory is not on
+your `PATH`, run the `export` command it prints before continuing:
+
+```bash
 sitecmd audit .
 sitecmd audit . --format github --fail-on high
 ```
@@ -72,11 +78,18 @@ Verify the manifest signature first, on macOS, Windows, or Linux:
 minisign -Vm SHA256SUMS -x SHA256SUMS.minisig -P RWTtzNh0gmMU/8O1AJBbQbUEy9oD5lpqL/dV0qRqlpsCldfWNWgxr5kE
 ```
 
-Then check the file you downloaded against the manifest you just trusted
-(macOS and Linux):
+Then check the file you downloaded against the manifest you just trusted.
+
+On macOS:
 
 ```bash
 shasum -a 256 -c --ignore-missing SHA256SUMS
+```
+
+On Linux:
+
+```bash
+sha256sum -c --ignore-missing SHA256SUMS
 ```
 
 The macOS DMG is Apple-signed as well, and its checksum is listed in the same
@@ -89,11 +102,14 @@ back-filled by hand before the workflow change carry none.
 
 ## Where your data lives
 
-Everything in this repository runs on your machine. Source code and raw file
-paths stay there. Integration credentials are stored locally and sent only to
-the provider they authenticate, never to SiteCMD. Scan findings stay local
-unless you explicitly connect a site to the connected service, which is off
-until you set it up.
+Source-processing code in this repository runs on the execution host: your
+machine for the desktop app and CLI, or the CI runner executing an action.
+SiteCMD does not upload source code or raw file paths from that host to its
+connected service. Report output that you configure a CI workflow to publish is
+handled by that CI provider. Desktop integration credentials are stored locally
+by the desktop app and sent only to the provider they authenticate, never to
+SiteCMD. SiteCMD does not transmit scan findings to its connected service unless
+you explicitly connect a site, which is off until you set it up.
 
 That claim is checkable rather than asserted, which is the reason this
 repository is public:
@@ -101,10 +117,13 @@ repository is public:
 - The filesystem and network boundaries are in this source. What the scanner
   requests, what the code audit reads, and where either can send anything are
   all here to be read, and [sitecmd.com/trust](https://sitecmd.com/trust)
-  enumerates every outbound call by name.
-- The sync payload builder is in this source too, and the app and CLI render
-  its exact output before anything is sent. What you read in the payload
-  inspector is the bytes, not a description of them.
+  names each fixed host and describes dynamic destinations by class.
+- The sync payload builder is in this source too. The app and CLI inspection
+  commands render a concrete snapshot with the same public wire schema and
+  serializer used for transmission, without sending it. The displayed bytes
+  are the exact serialization of that inspected snapshot. A later sync rebuilds
+  the payload from current local and connected state, so its values may have
+  changed.
 - Site operators reading SiteCMD's identity out of an access log get the same
   treatment at [sitecmd.com/scanner](https://sitecmd.com/scanner): every kind
   of request, why some look hostile, and how to block them.
@@ -189,6 +208,17 @@ pnpm quality:mcp
 pnpm sitecmd -- audit .
 ```
 
+`pnpm build` builds the desktop web frontend and validates and bundles the MCP
+server. It does not create a native desktop package. Contributors can build the
+native app without an updater signing key with:
+
+```bash
+pnpm tauri:build:contributor
+```
+
+Tauri prints the generated artifact locations. `pnpm tauri:build:release` is
+reserved for release operators with the required signing credentials.
+
 Direct workspace examples:
 
 ```bash
@@ -209,10 +239,12 @@ apps/desktop/src-tauri/    Rust backend, Tauri config, capabilities, CLI
 apps/desktop/e2e/          Playwright smoke tests
 ```
 
-Rust checks can be run directly with the moved manifest path:
+Run the complete Rust workspace from its directory so rustup applies the pinned
+toolchain:
 
 ```bash
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+cd apps/desktop/src-tauri
+cargo test --workspace
 ```
 
 ## Code Scan audit
@@ -255,8 +287,7 @@ requires a reason; `expires` is optional and uses `YYYY-MM-DD`.
           "path": "examples/**",
           "rule": "code_scan.tls-verification-disabled"
         },
-        "reason": "The insecure client is an instructional fixture.",
-        "expires": "2026-12-31"
+        "reason": "The insecure client is an instructional fixture."
       }
     ]
   }

@@ -775,6 +775,7 @@
   }
   .scan-terminal-status-running,
   .scan-terminal-status-skipped,
+  .scan-terminal-status-error,
   .scan-terminal-status-complete {
     display: inline-flex;
     height: 1.25rem;
@@ -795,6 +796,10 @@
   .scan-terminal-status-skipped {
     background-color: color-mix(in oklab, white 5%, transparent);
     color: var(--muted-foreground);
+  }
+  .scan-terminal-status-error {
+    background-color: color-mix(in oklab, var(--red-500) 18%, transparent);
+    color: var(--red-300);
   }
   .scan-terminal-status-complete {
     background-color: color-mix(in oklab, white 8%, transparent);

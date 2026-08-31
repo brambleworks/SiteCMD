@@ -63,6 +63,7 @@ const multiResult: MultiScanResult = {
   completedPages: 3,
   overallScore: 80,
   durationMs: 5_000,
+  incompleteDetail: null,
   newIssueCount: null,
   resolvedIssueCount: null,
   pageResults: [],
@@ -72,9 +73,11 @@ const multiResult: MultiScanResult = {
 function buildParams(overrides: Partial<PostScanSummaryParams> = {}): PostScanSummaryParams {
   return {
     state: "complete",
+    currentExecutionMode: "web",
     result: webResult,
     codeResult: null,
     multiResult: null,
+    executionIncompleteDetail: null,
     activeProjectId: 1,
     activeEnvUrl: "https://example.com",
     activeScanScope: "Example • example.com",
@@ -136,6 +139,17 @@ describe("usePostScanSummary", () => {
     expect(input.persistedSummary).toEqual({ totalCount: 3 });
     expect(input.scopeLabel).toBe("Example • example.com");
     expect(result.current.showScanSummary).toBe(true);
+  });
+
+  it("passes incomplete execution context into the summary model", async () => {
+    renderSummaryHook({
+      executionIncompleteDetail: "Web Scan: Browser analysis failed: unavailable",
+    });
+
+    await waitFor(() => expect(buildScanSummaryModelMock).toHaveBeenCalled());
+    expect(lastSummaryModelInput().incompleteDetail).toBe(
+      "Web Scan: Browser analysis failed: unavailable",
+    );
   });
 
   it("still builds the summary without a score when the persisted-score load fails", async () => {

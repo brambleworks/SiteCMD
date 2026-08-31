@@ -46,10 +46,12 @@ function renderScanActions(
   const scanHook = {
     state: "idle",
     currentScanType: null,
+    currentExecutionMode: null,
     result: null,
     codeResult: null,
     codeResultFromBackground: false,
     multiResult: null,
+    executionIncompleteDetail: null,
     error: null,
     progress: null,
     multiProgress: null,
@@ -87,7 +89,7 @@ function renderScanActions(
 }
 
 describe("useAppScanActions", () => {
-  it("reports a partial Full execution after the backend still runs Code when Web fails", async () => {
+  it("leaves partial Full execution reporting to the completion lifecycle", async () => {
     const { result, scanHook, toast } = renderScanActions({
       scanExecution: vi.fn().mockResolvedValue({
         ok: true,
@@ -116,10 +118,38 @@ describe("useAppScanActions", () => {
     });
 
     expect(scanHook.scanExecution).toHaveBeenCalledTimes(1);
-    expect(toast.error).toHaveBeenCalledWith(
-      "Full Scan completed partially",
-      "Web Scan: Network error: Failed to fetch",
-    );
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate incomplete Web coverage notifications", async () => {
+    const { result, toast } = renderScanActions({
+      scanExecution: vi.fn().mockResolvedValue({
+        ok: true,
+        result: {
+          execution: {
+            id: 3,
+            status: "partial",
+            webStatus: "complete",
+            webDetail: "Browser analysis failed: unavailable",
+            codeStatus: "complete",
+          },
+          reused: false,
+          webResult: { overallScore: 80 },
+          multiResult: null,
+          codeResult: { id: 10 },
+        },
+      }),
+    });
+
+    await act(async () => {
+      await result.current.handleScan({
+        urls: ["https://example.com"],
+        axeEnabled: true,
+        scanType: "full",
+      });
+    });
+
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("runs nothing at all when the daily scan limit blocks the run", async () => {
@@ -262,6 +292,19 @@ describe("useAppScanActions", () => {
     expect(toast.error).toHaveBeenCalledWith(
       "A scan is already running",
       expect.stringContaining("cancel it"),
+    );
+  });
+
+  it("applies the saved retention preference to shortcut scans", async () => {
+    const { result, scanHook } = renderScanActions({});
+
+    await act(async () => {
+      await result.current.handleShortcutScan("https://example.com");
+    });
+
+    expect(scanHook.scan).toHaveBeenCalledWith(
+      "https://example.com",
+      expect.objectContaining({ retention: prefs.retentionLimit }),
     );
   });
 

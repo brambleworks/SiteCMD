@@ -1,7 +1,20 @@
 import React from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeIssue, CodeScanResult } from "@/lib/types";
+
+const commandMocks = vi.hoisted(() => ({
+  runScanExecution: vi.fn(),
+}));
+
+vi.mock("@/lib/commands", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/commands")>();
+  return { ...actual, runScanExecution: commandMocks.runScanExecution };
+});
+
+vi.mock("@/hooks/useScanPrefs", () => ({
+  useScanPrefs: () => ({ prefs: { retentionLimit: 37 } }),
+}));
 
 vi.mock("@/lib/tauri-invoke", () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
 
@@ -32,8 +45,30 @@ vi.mock("@/components/ui/score-ring", () => ({
 }));
 
 vi.mock("@/components/issues/IssueActionBar", () => ({
-  IssueActionBar: ({ extraActions }: { extraActions?: React.ReactNode }) =>
-    React.createElement("div", null, "IssueActionBar", extraActions),
+  IssueActionBar: ({
+    extraActions,
+    verifyAction,
+  }: {
+    extraActions?: React.ReactNode;
+    verifyAction?: { label: string; onClick: () => void; verifying: boolean };
+  }) =>
+    React.createElement(
+      "div",
+      null,
+      "IssueActionBar",
+      verifyAction
+        ? React.createElement(
+            "button",
+            {
+              type: "button",
+              disabled: verifyAction.verifying,
+              onClick: verifyAction.onClick,
+            },
+            verifyAction.label,
+          )
+        : null,
+      extraActions,
+    ),
 }));
 
 vi.mock("@/components/issues/FixWithAgentAction", () => ({
@@ -148,6 +183,14 @@ function buildIssue(index: number): CodeIssue {
 }
 
 describe("CodeScanResults behavior", () => {
+  beforeEach(() => {
+    commandMocks.runScanExecution.mockReset();
+    commandMocks.runScanExecution.mockResolvedValue({
+      execution: { codeDetail: null },
+      codeResult: buildResult({ id: 92, issues: [], issueCount: 0, highCount: 0 }),
+    });
+  });
+
   it("shows the real empty state when the latest Code Scan finds no issues", () => {
     render(
       <CodeScanResults
@@ -230,6 +273,25 @@ describe("CodeScanResults behavior", () => {
     fireEvent.click(within(dossier).getByRole("tab", { name: "Evidence" }));
     expect(within(dossier).getByText(issue.sourceExcerpt)).toBeInTheDocument();
     expect(within(dossier).queryByText("CodeScanLockedCallout")).not.toBeInTheDocument();
+  });
+
+  it("applies the saved retention preference to Code verification", async () => {
+    const issue = buildIssue(1);
+    render(
+      <CodeScanResults result={buildResult({ issues: [issue] })} projectPath="/tmp/project" />,
+    );
+
+    fireEvent.click(screen.getByText(issue.title).closest("button")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Verify" }));
+
+    await waitFor(() => expect(commandMocks.runScanExecution).toHaveBeenCalledTimes(1));
+    expect(commandMocks.runScanExecution).toHaveBeenCalledWith({
+      request: expect.objectContaining({
+        requestedMode: "code",
+        retention: 37,
+        trigger: "verification",
+      }),
+    });
   });
 
   it("shows the grouped source count in the Locations tab", () => {

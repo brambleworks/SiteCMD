@@ -98,10 +98,12 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
   const {
     state,
     currentScanType,
+    currentExecutionMode,
     result,
     codeResult,
     codeResultFromBackground,
     multiResult,
+    executionIncompleteDetail,
     error,
     cancelScan,
   } = scanHook;
@@ -207,9 +209,12 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
   useScanCompletionEffects({
     state,
     currentScanType,
+    currentExecutionMode,
     result,
     codeResult,
     multiResult,
+    executionIncompleteDetail,
+    codeResultFromBackground,
     error,
     activeEnvUrl: activeEnv?.url,
     activeProjectId: activeProject?.id,
@@ -217,7 +222,6 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
     activeScanScope,
     history,
     codeHistory,
-    scanRunStep,
     scanBackgroundedRef,
     scanJobContextRef,
     desktopNotificationsEnabled: desktopPrefs.desktopNotifications,
@@ -294,9 +298,11 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
 
   const { closeScanSummary, scanSummary, showScanSummary } = usePostScanSummary({
     state,
+    currentExecutionMode,
     result,
     codeResult,
     multiResult,
+    executionIncompleteDetail,
     activeProjectId,
     activeEnvUrl,
     activeScanScope,

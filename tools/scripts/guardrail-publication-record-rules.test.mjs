@@ -222,6 +222,24 @@ describe("the maintained-surface matrix", () => {
   });
 });
 
+describe("public network-boundary wording", () => {
+  it("rejects claims that every dynamic destination is named", () => {
+    expect(
+      failures((files) => {
+        files["README.md"] += "\nThe Trust page enumerates every outbound call by name.\n";
+      }),
+    ).toContain("dynamic destinations by class");
+  });
+
+  it("accepts a sentence that denies complete enumeration", () => {
+    expect(
+      failures((files) => {
+        files["README.md"] += "\nThe Trust page does not enumerate every outbound call by name.\n";
+      }),
+    ).not.toContain("dynamic destinations by class");
+  });
+});
+
 describe("layout maps against the tree", () => {
   it("fails when a map names a workspace that moved out", () => {
     expect(

@@ -3,6 +3,17 @@ import { fileURLToPath } from "node:url";
 
 const INSTALL_LOCATION_PATTERN = /^[ \t]*Install location:[ \t]*(.+)$/gm;
 
+/**
+ * Classify a socket bind failure so the gate reports the remediation that
+ * actually applies: a held port, a denied bind, or an address the host cannot
+ * offer at all.
+ */
+export function classifyBindError(error) {
+  if (error?.code === "EADDRINUSE") return "occupied";
+  if (error?.code === "EACCES" || error?.code === "EPERM") return "denied";
+  return "unavailable";
+}
+
 /** Resolve the repository root without leaving URL-encoded path segments intact. */
 export function resolveRepositoryRoot(moduleUrl) {
   return path.resolve(path.dirname(fileURLToPath(moduleUrl)), "../..");

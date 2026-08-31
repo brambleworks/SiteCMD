@@ -27,6 +27,10 @@ interface ScheduledScanCompletePayload {
   score: number;
   issues: number;
   scanType?: "health" | "security" | "code" | "full" | string;
+  status: "complete" | "partial";
+  completedPages?: number | null;
+  totalPages?: number | null;
+  incompleteDetail?: string | null;
   timestamp?: string;
   topDomain?: CodeScanDomain | null;
   topDomainCount?: number;

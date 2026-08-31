@@ -86,6 +86,35 @@ fn full_execution_admits_and_completes_both_children() {
     assert_eq!(history[0].code_status, Some(ScanComponentStatus::Complete));
 }
 
+#[test]
+fn completed_component_with_incomplete_coverage_makes_the_execution_partial() {
+    let db = temp_db();
+    let admitted = db
+        .admit_scan_execution(
+            request("partial-web", ScanExecutionMode::Web, ScanTrigger::Manual),
+            SCAN_IDEMPOTENCY_RETRY_WINDOW_SECS,
+        )
+        .expect("admit Web execution");
+
+    db.start_scan_execution_component(admitted.execution.id, ScanComponent::Web)
+        .expect("start Web child");
+    let finished = db
+        .finish_scan_execution_component(
+            admitted.execution.id,
+            ScanComponent::Web,
+            ScanComponentStatus::Complete,
+            Some("Some selected pages failed to scan.".into()),
+            NOW_MS + 1_000,
+        )
+        .expect("finish partial Web child");
+
+    assert_eq!(finished.status, ScanExecutionStatus::Partial);
+    assert_eq!(
+        finished.web_detail.as_deref(),
+        Some("Some selected pages failed to scan.")
+    );
+}
+
 fn completed_execution_with_run(
     db: &crate::db::Database,
     key: &str,

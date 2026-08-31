@@ -52,6 +52,12 @@ mod scan_runs;
 mod scan_scope;
 pub use scan_scope::{scan_scope_urls, scan_scope_urls_for_project, ConnectedScanScopeTarget};
 mod scans;
+#[cfg(any(test, feature = "desktop"))]
+mod scheduled_scan_baseline;
+#[cfg(any(test, feature = "desktop"))]
+pub(crate) use scheduled_scan_baseline::{
+    web_execution_matches_comparison_profile, WebRunComparisonProfile,
+};
 mod schedules;
 mod score_snapshots;
 mod sessions;

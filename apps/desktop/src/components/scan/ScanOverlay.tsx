@@ -75,12 +75,14 @@ function getWebScanStageIndex(progress: ScanProgressEvent | null): number {
 function getActivityStatusLabel(status: ScanProgressEvent["status"]) {
   if (status === "running") return "Running";
   if (status === "skipped") return "Skipped";
+  if (status === "error") return "Failed";
   return "Done";
 }
 
 function getTerminalStatusClass(status: ScanProgressEvent["status"]) {
   if (status === "running") return "scan-terminal-status-running";
   if (status === "skipped") return "scan-terminal-status-skipped";
+  if (status === "error") return "scan-terminal-status-error";
   return "scan-terminal-status-complete";
 }
 

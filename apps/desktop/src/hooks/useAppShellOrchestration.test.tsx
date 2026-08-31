@@ -71,7 +71,7 @@ const refreshProjectsStub = vi.fn(async () => ({
   projects: [] as ProjectRecord[],
   newProject: null,
 }));
-const toast = { success: vi.fn(), info: vi.fn() };
+const toast = { success: vi.fn(), warning: vi.fn(), info: vi.fn() };
 const desktopPrefs = {
   backgroundMonitoring: false,
   desktopNotifications: false,
@@ -159,6 +159,7 @@ describe("useAppShellOrchestration listener stability", () => {
     selectProject.mockClear();
     refreshProjectsStub.mockClear();
     toast.success.mockClear();
+    toast.warning.mockClear();
     toast.info.mockClear();
     loadPrimaryWorkflowCue.mockClear();
     window.localStorage.clear();
@@ -284,6 +285,7 @@ describe("useAppShellOrchestration listener stability", () => {
           score: 88,
           issues: 2,
           scanType: "health",
+          status: "complete",
         },
       });
     });
@@ -291,5 +293,42 @@ describe("useAppShellOrchestration listener stability", () => {
     await waitFor(() => {
       expect(loadHistory).toHaveBeenCalledWith(secondEnv.url, project.id);
     });
+  });
+
+  it("warns when a scheduled scan completes with partial coverage", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      throw new Error(`unmocked command: ${command}`);
+    });
+
+    const project = buildProject(1);
+    renderHook(() => useAppShellOrchestration(buildHookOptions({ projects: [project] })));
+
+    await waitFor(() => {
+      expect(registeredHandlers.get("scheduled-scan-complete")).toHaveLength(1);
+    });
+
+    const handler = registeredHandlers.get("scheduled-scan-complete")?.[0];
+    expect(handler).toBeDefined();
+    await act(async () => {
+      handler?.({
+        payload: {
+          projectId: project.id,
+          url: project.environments[0].url,
+          score: 61,
+          issues: 2,
+          scanType: "health",
+          status: "partial",
+          completedPages: 2,
+          totalPages: 2,
+          incompleteDetail: "Browser analysis failed: browser unavailable",
+        },
+      });
+    });
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      "Scheduled Web Scan Partially Complete - 61/100",
+      "Browser analysis failed: browser unavailable. 2 issues found on project-1.example.com. Some issues to address.",
+    );
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

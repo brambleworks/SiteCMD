@@ -135,6 +135,11 @@ pub(super) fn component_failure_status(message: &str) -> ScanComponentStatus {
     }
 }
 
+fn incomplete_page_scope_detail(completed_pages: usize, total_pages: usize) -> Option<String> {
+    (total_pages > 0 && completed_pages < total_pages)
+        .then(|| format!("{completed_pages} of {total_pages} selected pages completed."))
+}
+
 fn project_scope_key(project_id: i64) -> String {
     format!("project:{project_id}")
 }
@@ -325,8 +330,12 @@ pub(crate) async fn run_scan_execution_internal(
     app: AppHandle,
     db: Arc<Database>,
     scan_control: &ScanControlState,
-    request: RunScanExecutionRequest,
+    mut request: RunScanExecutionRequest,
 ) -> Result<RunScanExecutionResult, ScanExecutionError> {
+    request.retention = Some(super::policy::resolve_scan_retention(
+        request.retention,
+        super::policy::configured_scan_retention(&app),
+    ));
     let request_guard = scan_control.begin_execution(request.scan_request_id);
     let scan_request_id = request_guard.request_id();
     let plan = validate_plan(&db, request).await?;
@@ -392,7 +401,11 @@ pub(crate) async fn run_scan_execution_internal(
             )
             .await
             .map(|result| {
+                let detail = result.incomplete_detail.clone().or_else(|| {
+                    incomplete_page_scope_detail(result.completed_pages, result.total_pages)
+                });
                 multi_result = Some(result);
+                detail
             })
             .map_err(|error| error.to_string())
         } else {
@@ -411,13 +424,14 @@ pub(crate) async fn run_scan_execution_internal(
                 execution_id,
             )
             .await
-            .map(|result| {
-                web_result = Some(result);
+            .map(|output| {
+                web_result = Some(output.result);
+                output.incomplete_detail
             })
             .map_err(|error| error.to_string())
         };
         let (status, detail) = match web_outcome {
-            Ok(()) => (ScanComponentStatus::Complete, None),
+            Ok(detail) => (ScanComponentStatus::Complete, detail),
             Err(error) => (component_failure_status(&error), Some(error)),
         };
         execution = db

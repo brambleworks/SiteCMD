@@ -45,7 +45,7 @@ fn persist(
     key: &str,
     authored: &str,
     result: &scanner::ScanResult,
-) {
+) -> i64 {
     let key = key.to_string();
     let execution_id = db
         .execute(move |conn| {
@@ -72,10 +72,13 @@ fn persist(
         Some(project_id),
         execution_id,
         false,
+        false,
+        false,
+        None,
         None,
         result,
     );
-    outcome.scan_id.expect("scan persistence");
+    outcome.scan_id.expect("scan persistence")
 }
 
 // The pages still carrying an open finding, in page order.
@@ -142,4 +145,68 @@ fn a_fix_on_a_redirecting_page_resolves_on_a_clean_rescan() {
         vec![SIBLING_URL],
         "the redirected page's finding resolves; the page nobody rescanned stays open"
     );
+}
+
+#[test]
+fn persistence_keeps_environment_scope_separate_from_the_target_page() {
+    let db = crate::db::test_helpers::temp_db_arc();
+    let project_id = db
+        .upsert_project("Redirect", "/tmp/redirect-scope", None)
+        .expect("project");
+    db.add_environment(
+        project_id,
+        ENVIRONMENT_URL,
+        "Production",
+        "production",
+        "manual",
+    )
+    .expect("environment");
+    let expected_site_id = db
+        .get_or_create_site_for_project(project_id, ENVIRONMENT_URL)
+        .expect("environment site");
+    let result = scan_result(EFFECTIVE_URL, CheckStatus::Skipped);
+    let run_id = persist(&db.db, project_id, "redirect-scope", AUTHORED_URL, &result);
+
+    let stored: (
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+    ) = db
+        .execute(move |conn| {
+            conn.query_row(
+                "SELECT project_id, site_id, environment_url, coverage_json, diagnostics_json,
+                        (SELECT page_url FROM scan_findings
+                          WHERE run_id = scan_runs.id AND canonical_check_id = 'seo.title')
+                   FROM scan_runs WHERE id = ?1",
+                [run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("stored run")
+        })
+        .expect("database worker");
+    let coverage: crate::core::normalized_scan::ScanCoverageManifest =
+        serde_json::from_str(&stored.3).expect("coverage");
+    let diagnostics: crate::core::normalized_scan::NormalizedRunDiagnostics =
+        serde_json::from_str(&stored.4).expect("diagnostics");
+
+    assert_eq!(stored.0, Some(project_id));
+    assert_eq!(stored.1, Some(expected_site_id));
+    assert_eq!(stored.2.as_deref(), Some(ENVIRONMENT_URL));
+    assert_eq!(coverage.page_urls, vec![AUTHORED_URL, EFFECTIVE_URL]);
+    assert!(!coverage.covers(Some(AUTHORED_URL), "seo.title"));
+    assert!(!coverage.covers(Some(EFFECTIVE_URL), "seo.title"));
+    assert_eq!(diagnostics.page_url.as_deref(), Some(AUTHORED_URL));
+    assert_eq!(stored.5.as_deref(), Some(EFFECTIVE_URL));
 }

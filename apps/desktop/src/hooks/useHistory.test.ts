@@ -35,6 +35,7 @@ const diagnostics: NormalizedRunDiagnostics = {
   completedPages: null,
   axeEnabled: null,
   browserRan: null,
+  axeRan: null,
   browserBuild: null,
 };
 

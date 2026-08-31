@@ -18,13 +18,14 @@ pub(crate) mod work_items;
 
 pub use control::{cancel_scan, ScanControlState};
 pub(crate) use domain_summary::{
-    describe_code_scan_domain_trend, select_relevant_previous_code_scan_summary,
-    top_code_scan_domain_from_summaries,
+    describe_code_scan_domain_trend, top_code_scan_domain_from_summaries,
 };
 pub use execution::run_scan_execution;
 pub use history::{
     get_resolved_issues, get_scan_execution_detail, get_scan_executions, get_score_trend,
 };
+pub(crate) use policy::configured_scan_retention;
+pub(crate) use policy::webview_analysis_profile;
 pub use schedule::{
     get_due_schedules, get_pagespeed_report, get_scan_schedule, mark_schedule_run,
     pagespeed_api_key_is_set, save_scan_schedule, set_pagespeed_api_key,
@@ -53,7 +54,7 @@ pub(super) async fn notify_deploy_regression(
 }
 
 #[cfg(test)]
-use domain_summary::build_domain_summaries;
+use domain_summary::{build_domain_summaries, select_relevant_previous_code_scan_summary};
 #[cfg(test)]
 use policy::{
     sanitize_history_limit, should_run_accessibility_webview_analysis, should_run_webview_analysis,

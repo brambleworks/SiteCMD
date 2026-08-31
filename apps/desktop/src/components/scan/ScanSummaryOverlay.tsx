@@ -72,6 +72,9 @@ export function ScanSummaryOverlay({ summary, onClose, onReviewIssues }: ScanSum
           </div>
         </div>
 
+        {summary.incompleteDetail ? (
+          <p className="scan-summary-section-note">{summary.incompleteDetail}</p>
+        ) : null}
         {summary.note ? <p className="scan-summary-section-note">{summary.note}</p> : null}
 
         <div className="scan-summary-severity">

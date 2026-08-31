@@ -479,6 +479,27 @@ describe("ScanOverlay", () => {
     expect(screen.getByText("1 issue")).toBeInTheDocument();
   });
 
+  it("shows failed browser analysis as failed instead of done", () => {
+    render(
+      <ScanOverlay
+        progress={{
+          check_id: "browser-analysis",
+          category: "performance",
+          status: "error",
+          results_count: 0,
+          checks_done: 0,
+          checks_total: 0,
+        }}
+        scanType="health"
+        url="https://example.com"
+      />,
+    );
+
+    const failed = screen.getByText("Failed");
+    expect(failed).toHaveClass("scan-terminal-status-error");
+    expect(screen.queryByText("Done")).not.toBeInTheDocument();
+  });
+
   it("keeps the current web scan phase in the status block between checks instead of flashing the preparing state", () => {
     const securityDetail = "Checking HTTPS, headers, redirects, cookies, and exposed files.";
     const { rerender } = render(

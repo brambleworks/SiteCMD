@@ -9,7 +9,9 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 
 use super::control::ScanControlState;
-use super::page_loop::{run_page_loop, session_average, PageLoopOutcome, PageLoopStatus};
+use super::page_loop::{
+    run_page_loop, session_average, PageLoopOutcome, PageLoopStatus, PageScanOutput,
+};
 use crate::commands::{emit_event, sanitize_error, validate_url_async};
 
 pub(crate) async fn scan_multi_for_execution(
@@ -101,6 +103,8 @@ pub(crate) async fn scan_multi_for_execution(
             |_, url, skip_origin_checks| {
                 let st = focus;
                 let progress_app = app.clone();
+                let browser_app = app.clone();
+                let page_url = url.to_string();
                 let progress_fn: std::sync::Arc<scanner::ProgressFn> =
                     std::sync::Arc::new(move |p| {
                         let _ = progress_app.emit("scan-progress", p);
@@ -108,17 +112,33 @@ pub(crate) async fn scan_multi_for_execution(
                 let scan_control_clone = scan_control.clone();
                 let cancel_fn: std::sync::Arc<crate::scan_runtime::CancelFn> =
                     std::sync::Arc::new(move || scan_control_clone.is_cancelled(scan_request_id));
-                crate::scan_runtime::run_scan_low_priority(
-                    url.to_string(),
-                    Some(progress_fn),
-                    enabled_categories.clone(),
-                    timeout_secs,
-                    st,
-                    skip_origin_checks,
-                    Some(cancel_fn),
-                )
+                let enabled_categories = enabled_categories.clone();
+                async move {
+                    let mut result = crate::scan_runtime::run_scan_low_priority(
+                        page_url.clone(),
+                        Some(progress_fn),
+                        enabled_categories,
+                        timeout_secs,
+                        st,
+                        skip_origin_checks,
+                        Some(cancel_fn),
+                    )
+                    .await?;
+                    let browser_runtime = super::web_scan::apply_webview_layer(
+                        &browser_app,
+                        &mut result,
+                        &page_url,
+                        st,
+                        axe_enabled,
+                    )
+                    .await?;
+                    Ok(PageScanOutput {
+                        result,
+                        browser_runtime,
+                    })
+                }
             },
-            |completed_pages, url, result| {
+            |completed_pages, url, result, browser_runtime| {
                 // Persist this page off the async-runtime worker threads: the
                 // scan save + work-items upsert + session-progress update are
                 // synchronous SQLite round-trips that would otherwise park a
@@ -138,6 +158,8 @@ pub(crate) async fn scan_multi_for_execution(
                             &page_url,
                             project_id,
                             site_id,
+                            axe_enabled.unwrap_or(false),
+                            &browser_runtime,
                             &result,
                         )
                     })
@@ -157,6 +179,7 @@ pub(crate) async fn scan_multi_for_execution(
             completed_scores,
             session_signals,
             session_site_facts,
+            browser_runtimes,
         } = loop_outcome;
 
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -168,7 +191,7 @@ pub(crate) async fn scan_multi_for_execution(
         // page is re-fetched.
         let mut site_issues: Vec<crate::checks::CheckResult> = Vec::new();
         let session_analyzed =
-            loop_status == PageLoopStatus::Complete && session_signals.len() >= 2;
+            should_analyze_session(loop_status, urls.len(), session_signals.len());
         if session_analyzed {
             let sitemap_urls = match url::Url::parse(base_url) {
                 Ok(parsed) => {
@@ -220,9 +243,27 @@ pub(crate) async fn scan_multi_for_execution(
             session_analyzed,
         )
         .map_err(|error| format!("failed to normalize multi-page scan: {error}"))?;
+        let browser_runtime =
+            super::web_scan::BrowserRuntime::for_scope(&browser_runtimes, urls.len());
+        let page_scope_detail = (successful_page_urls.len() < urls.len()).then(|| {
+            format!(
+                "{} of {} selected pages completed.",
+                successful_page_urls.len(),
+                urls.len()
+            )
+        });
+        let incomplete_detail = match (page_scope_detail, browser_runtime.incomplete_detail()) {
+            (Some(page), Some(browser)) => Some(format!("{page} {browser}")),
+            (Some(detail), None) | (None, Some(detail)) => Some(detail),
+            (None, None) => None,
+        };
+        parent_batch.diagnostics.browser_ran = Some(browser_runtime.ran);
+        parent_batch.diagnostics.axe_ran = Some(browser_runtime.axe_ran);
+        parent_batch.diagnostics.browser_build = browser_runtime.build;
         parent_batch.environment_scope_key = crate::db::normalize_env_url(Some(base_url));
         parent_batch.status = match loop_status {
             PageLoopStatus::Complete => ScanRunStatus::Complete,
+            PageLoopStatus::Partial => ScanRunStatus::Failed,
             PageLoopStatus::Failed => ScanRunStatus::Failed,
             PageLoopStatus::Cancelled => ScanRunStatus::Cancelled,
         };
@@ -231,6 +272,9 @@ pub(crate) async fn scan_multi_for_execution(
             parent_batch.coverage.successful = false;
             parent_batch.status_detail = Some(
                 match loop_status {
+                    PageLoopStatus::Partial => incomplete_detail
+                        .as_deref()
+                        .unwrap_or("The selected scan scope did not complete."),
                     PageLoopStatus::Failed => "all_selected_pages_failed",
                     PageLoopStatus::Cancelled => "cancelled_by_user",
                     PageLoopStatus::Complete => unreachable!(),
@@ -276,6 +320,7 @@ pub(crate) async fn scan_multi_for_execution(
         match loop_status {
             PageLoopStatus::Cancelled => return Err("Multi-page scan cancelled".into()),
             PageLoopStatus::Failed => return Err("Every selected page failed to scan".into()),
+            PageLoopStatus::Partial => {}
             PageLoopStatus::Complete => {}
         }
 
@@ -293,6 +338,7 @@ pub(crate) async fn scan_multi_for_execution(
             // The live command uses zero when persistence records no score as NULL.
             overall_score: session_score.unwrap_or(0),
             duration_ms,
+            incomplete_detail,
             page_results,
             new_issue_count,
             resolved_issue_count,
@@ -343,6 +389,18 @@ fn issue_group_change_counts(before: &HashSet<String>, after: &HashSet<String>) 
     )
 }
 
+fn should_analyze_session(
+    loop_status: PageLoopStatus,
+    selected_pages: usize,
+    collected_signals: usize,
+) -> bool {
+    matches!(
+        loop_status,
+        PageLoopStatus::Complete | PageLoopStatus::Partial
+    ) && selected_pages >= 2
+        && collected_signals == selected_pages
+}
+
 /// Synchronous per-page persistence for a multi-page scan. The child run,
 /// immutable findings, and coverage-scoped issue projection commit together.
 /// Returns the canonical child run id.
@@ -355,6 +413,8 @@ fn persist_multi_page_blocking(
     page_url: &str,
     project_id: Option<i64>,
     site_id: i64,
+    axe_enabled: bool,
+    browser_runtime: &super::web_scan::BrowserRuntime,
     result: &scanner::ScanResult,
 ) -> Result<i64, String> {
     let completed_at = chrono::Utc::now().timestamp_millis();
@@ -372,6 +432,10 @@ fn persist_multi_page_blocking(
     batch.environment_url = Some(environment_url.to_string());
     batch.environment_scope_key = crate::db::normalize_env_url(Some(environment_url));
     batch.diagnostics.page_url = Some(page_url.to_string());
+    batch.diagnostics.axe_enabled = Some(axe_enabled);
+    batch.diagnostics.browser_ran = Some(browser_runtime.ran);
+    batch.diagnostics.axe_ran = Some(browser_runtime.axe_ran);
+    batch.diagnostics.browser_build = browser_runtime.build.clone();
     // Claim authored and effective URLs: coverage exceptions use the authored
     // route, while findings and resolution use the post-redirect URL.
     let routes = covered_routes(page_url, &result.url);
@@ -382,6 +446,12 @@ fn persist_multi_page_blocking(
         &outcomes,
         ClaimBasis::PerRoute,
     );
+    if let Some(detail) = browser_runtime.incomplete_detail() {
+        batch.status = ScanRunStatus::Failed;
+        batch.raw_score = None;
+        batch.coverage.successful = false;
+        batch.status_detail = Some(detail);
+    }
     let run_id = db
         .persist_normalized_scan_run(batch)
         .map_err(|error| format!("failed to save canonical page run: {error}"))?;
@@ -392,7 +462,7 @@ fn persist_multi_page_blocking(
 
 #[cfg(test)]
 mod tests {
-    use super::issue_group_change_counts;
+    use super::{issue_group_change_counts, should_analyze_session, PageLoopStatus};
     use std::collections::HashSet;
 
     #[test]
@@ -408,5 +478,11 @@ mod tests {
         ]);
 
         assert_eq!(issue_group_change_counts(&before, &after), (2, 1));
+    }
+
+    #[test]
+    fn complete_signal_scope_is_analyzed_despite_partial_browser_coverage() {
+        assert!(should_analyze_session(PageLoopStatus::Partial, 2, 2));
+        assert!(!should_analyze_session(PageLoopStatus::Partial, 2, 1));
     }
 }

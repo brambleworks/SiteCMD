@@ -11,6 +11,18 @@ public repository history.
 
 ## [Unreleased]
 
+### Fixed
+
+- A scan that cannot finish everything it was asked to run now reports as
+  partially complete and names what fell short, instead of presenting a partial
+  run as a clean one. New, resolved, and regression counts are withheld from a
+  partial run rather than compared against full history.
+- Scheduled scan notifications no longer report a regression when the two runs
+  did not cover the same ground. A run whose in-app browser or accessibility
+  layer did not execute is compared only against runs with the same coverage.
+- The scan history limit set in Settings now applies to scans started from the
+  app, which previously kept the built-in default instead.
+
 ## [1.1.0] - 2026-08-25
 
 ### Added
