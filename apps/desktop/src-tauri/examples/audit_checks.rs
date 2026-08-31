@@ -25,7 +25,7 @@ async fn main() {
         let response = match client.get(site_url.to_owned()).send().await {
             Ok(r) => r,
             Err(e) => {
-                println!("  ❌ FETCH FAILED: {}\n", e);
+                println!("  FETCH FAILED: {}\n", e);
                 continue;
             }
         };
@@ -36,11 +36,11 @@ async fn main() {
             match tokio::time::timeout(std::time::Duration::from_secs(15), response.text()).await {
                 Ok(Ok(b)) => b,
                 Ok(Err(e)) => {
-                    println!("  ❌ BODY READ FAILED: {}\n", e);
+                    println!("  BODY READ FAILED: {}\n", e);
                     continue;
                 }
                 Err(_) => {
-                    println!("  ❌ BODY READ TIMED OUT\n");
+                    println!("  BODY READ TIMED OUT\n");
                     continue;
                 }
             };
@@ -92,7 +92,7 @@ async fn main() {
             let results =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)))
                     .unwrap_or_else(|_| {
-                        println!("  💥 PANIC in sync check: {}", check.id());
+                        println!("  PANIC in sync check: {}", check.id());
                         vec![]
                     });
             all_results.extend(results);
@@ -102,7 +102,7 @@ async fn main() {
             let results = tokio::time::timeout(std::time::Duration::from_secs(15), check.run(&ctx))
                 .await
                 .unwrap_or_else(|_| {
-                    println!("  ⏱️  TIMEOUT on async check: {}", check.id());
+                    println!("  TIMEOUT on async check: {}", check.id());
                     vec![]
                 });
             all_results.extend(results);
@@ -120,16 +120,16 @@ async fn main() {
         for (cat, results) in &by_category {
             println!("  ── {} ({} checks) ──", cat, results.len());
             for r in results {
-                let icon = match r.status {
-                    CheckStatus::Pass => "✅",
-                    CheckStatus::Fail => "❌",
-                    CheckStatus::Warn => "⚠️ ",
-                    CheckStatus::Skipped => "⏭️ ",
+                let marker = match r.status {
+                    CheckStatus::Pass => "pass",
+                    CheckStatus::Fail => "FAIL",
+                    CheckStatus::Warn => "warn",
+                    CheckStatus::Skipped => "skip",
                 };
                 let sev = format!("{:?}", r.severity);
                 println!(
                     "    {} [{}] {} - {}",
-                    icon,
+                    marker,
                     sev,
                     r.check_id,
                     truncate(&r.description, 100)
@@ -160,7 +160,7 @@ async fn main() {
             .filter(|r| r.status == CheckStatus::Skipped)
             .count();
         println!(
-            "  TOTAL: {} checks - ✅ {} pass, ❌ {} fail, ⚠️  {} warn, ⏭️  {} skip\n",
+            "  TOTAL: {} checks - {} pass, {} fail, {} warn, {} skip\n",
             all_results.len(),
             pass,
             fail,

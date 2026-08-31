@@ -11,6 +11,11 @@ public repository history.
 
 ## [Unreleased]
 
+### Changed
+
+- Fix guides and MCP scan comparisons now use plain words instead of
+  emoji, so status and severity read the same everywhere they are quoted.
+
 ### Fixed
 
 - A scan that cannot finish everything it was asked to run now reports as

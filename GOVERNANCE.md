@@ -1,6 +1,6 @@
 # Governance
 
-SiteCMD is maintained by Brambleworks LLC. Brambleworks sets the product direction, appoints maintainers, owns the release infrastructure, and has final responsibility for repository and security decisions.
+SiteCMD is maintained by Brambleworks LLC. Brambleworks sets the product direction, appoints maintainers, owns the release infrastructure, and has final responsibility for repository and security decisions. Kyle Piontek, the founder of Brambleworks, is currently SiteCMD's sole maintainer.
 
 ## Decision-making
 
