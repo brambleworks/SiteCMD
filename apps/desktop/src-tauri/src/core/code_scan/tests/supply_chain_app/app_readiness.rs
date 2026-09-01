@@ -307,7 +307,9 @@ fn detects_missing_launch_release_safety_infrastructure() {
         .iter()
         .find(|issue| issue.id.starts_with("pre-commit-hooks-missing:"))
         .expect("expected optional hook review");
-    assert_eq!(hook_issue.severity, Severity::Low);
+    // No CI gate exists in this fixture, so the missing hook is the only
+    // automated gate and grades Medium.
+    assert_eq!(hook_issue.severity, Severity::Medium);
     assert_eq!(
         hook_issue.confidence,
         crate::checks::IssueConfidence::NeedsReview

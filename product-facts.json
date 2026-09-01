@@ -20,10 +20,10 @@
   "checkCounts": {
     "web": 157,
     "polish": 30,
-    "codeScan": 168,
+    "codeScan": 170,
     "axe": 55,
     "dependencyEcosystems": 8,
-    "total": 418
+    "total": 420
   },
   "polishSignals": [
     {

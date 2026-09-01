@@ -223,11 +223,12 @@ pub const CODE_CHECKS: &[CodeCheckDescriptor] = &[
     // Graduated: Django DEBUG=True / WP_DEBUG / APP_DEBUG=true are High;
     // an ALLOWED_HOSTS wildcard alone is Medium.
     d("framework-debug-enabled", "security", Dom::Security, Ph::Operations, None, false, Cls::Risk),
-    d("no-automated-tests", "architecture", Dom::Architecture, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
+    // Graduated: Medium when the project has routes or data access, Low for a
+    // static site that can ship on build and lint gates alone.
+    d("no-automated-tests", "architecture", Dom::Architecture, Ph::Operations, None, false, Cls::Advisory),
     // Process-hygiene gaps grade Medium alongside no-automated-tests. A missing
     // env ignore rule only reduces accidental staging; a separate detector
-    // owns actual credential material. Optional local hooks are Low because
-    // required CI is the enforcement point.
+    // owns actual credential material.
     d("gitignore-missing", "operations", Dom::Operations, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
     d("gitignore-missing-env", "security", Dom::Security, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
     d("linter-missing", "architecture", Dom::Architecture, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
@@ -235,8 +236,12 @@ pub const CODE_CHECKS: &[CodeCheckDescriptor] = &[
     d("ci-quality-gate-missing", "operations", Dom::Operations, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
     d("build-script-missing", "operations", Dom::Operations, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
     d("ci-only-builds", "operations", Dom::Operations, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
-    d("pre-commit-hooks-missing", "operations", Dom::Operations, Ph::Operations, Some(Sev::Low), false, Cls::Advisory),
-    d("pre-commit-hooks-weak", "operations", Dom::Operations, Ph::Operations, Some(Sev::Low), false, Cls::Advisory),
+    d("tests-not-enforced", "operations", Dom::Operations, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
+    // Hook findings graduate: Low when a CI quality gate is the enforcement
+    // point, Medium when the hook would be the only automated gate.
+    d("pre-commit-hooks-missing", "operations", Dom::Operations, Ph::Operations, None, false, Cls::Advisory),
+    d("pre-commit-hooks-weak", "operations", Dom::Operations, Ph::Operations, None, false, Cls::Advisory),
+    d("pre-commit-hooks-not-installed", "operations", Dom::Operations, Ph::Operations, None, false, Cls::Advisory),
     d("placeholder-density", "architecture", Dom::Architecture, Ph::Operations, None, false, Cls::Advisory),
     d("critical-path-no-test", "architecture", Dom::Architecture, Ph::Operations, Some(Sev::Medium), false, Cls::Advisory),
     d("runtime-version-eol", "operations", Dom::Operations, Ph::Operations, None, false, Cls::Advisory),

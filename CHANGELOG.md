@@ -15,8 +15,24 @@ public repository history.
 
 - The web scan now flags meta refresh redirects and timed reloads, and asks
   for review when a single page carries more than a thousand links.
+- Code Scan reports a test suite that exists but never runs automatically, when
+  CI or a commit hook runs other quality commands and skips the tests.
+- Code Scan reports a checked-in git hook that was never installed in the
+  scanned clone, so the hook config promises a guardrail it does not provide.
 
 ### Changed
+
+- Project hygiene checks (tests, linter, CI workflow, commit hooks, and
+  .gitignore) now cover static sites, single-page apps, and Composer-based PHP
+  projects that have no server routes, instead of only apps with API routes.
+  A static site with no tests is reported as Low rather than Medium.
+- A missing or decorative commit hook is now Medium when no CI workflow runs
+  the project's build, lint, or tests, since the hook would be the only
+  automated gate. It stays Low when CI already enforces those checks.
+- npm's default `echo "Error: no test specified"` script, and any script that
+  only echoes or exits, no longer counts as a test, lint, or build command.
+- CI and hook commands for PHP (Pint, PHPStan, PHPUnit, Pest, `composer test`),
+  Python (tox, nox, pyright), and task runners are recognized as quality gates.
 
 - A page with several H1 headings, or none, is now reported as an SEO issue,
   matching how search consoles classify it. The accessibility check keeps
