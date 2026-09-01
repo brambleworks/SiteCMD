@@ -6,6 +6,13 @@ fn has_host_token(host: &str, token: &str) -> bool {
         .any(|part| part == token)
 }
 
+/// Hostnames local dev environments publish for a site served from this
+/// machine. They resolve to loopback but do not read as local, so inference
+/// has to know them by name: DDEV, Lando, Docksal, and the RFC 6761 `.test`
+/// TLD used by Valet/Herd and hand-rolled Docker setups.
+/// Mirrored by LOCAL_DEV_HOST_SUFFIXES in src/lib/project-environments.ts.
+const LOCAL_DEV_HOST_SUFFIXES: &[&str] = &[".ddev.site", ".lndo.site", ".docksal.site", ".test"];
+
 fn environment_from_host(host: &str) -> &'static str {
     let lower = host.to_lowercase();
 
@@ -16,6 +23,9 @@ fn environment_from_host(host: &str) -> &'static str {
         || lower == "[::1]"
         || lower.ends_with(".local")
         || lower.ends_with(".localhost")
+        || LOCAL_DEV_HOST_SUFFIXES
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
     {
         return "local";
     }
@@ -103,6 +113,11 @@ mod tests {
             ("http://myapp.local", true),
             ("http://myapp.localhost:3000", true),
             ("http://[::1]:5173", true),
+            ("https://myapp.ddev.site", true),
+            ("https://myapp.lndo.site", true),
+            ("https://myapp.docksal.site", true),
+            ("https://myapp.test", true),
+            ("https://ddev.site.example.com", false),
             ("https://localhost.example.com", false),
             ("https://example.com", false),
             ("https://www.google.com", false),
@@ -124,6 +139,9 @@ mod tests {
             ("http://0.0.0.0:5173", false),
             ("http://myapp.local", false),
             ("http://myapp.localhost:3000", false),
+            // A dev-environment hostname is a local environment, but it is
+            // resolved through DNS, so it never earns the loopback exception.
+            ("https://myapp.ddev.site", false),
             // Obviously not localhost
             ("https://example.com", false),
             ("https://www.google.com", false),
@@ -150,7 +168,12 @@ mod tests {
             ("https://marketing-stage.example.com", "staging"),
             ("https://preview-my-app.vercel.app", "staging"),
             ("https://qa.example.com", "staging"),
+            ("https://smarthomeu.ddev.site", "local"),
+            ("https://myapp.lndo.site", "local"),
+            ("http://myapp.docksal.site", "local"),
+            ("http://myapp.test", "local"),
             ("https://localhost.example.com", "production"),
+            ("https://ddev.site.example.com", "production"),
             ("https://upstage.example.com", "production"),
             ("https://example.com", "production"),
             ("not-a-url", "production"),
@@ -205,6 +228,12 @@ mod tests {
             ("https://example.com", Some("staging"), "staging"),
             ("https://example.com", Some("custom"), "production"),
             ("https://qa.example.com", None, "staging"),
+            // A dev-environment hostname keeps the label its config file
+            // declared instead of being downgraded to production.
+            ("https://smarthomeu.ddev.site", Some("local"), "local"),
+            ("https://myapp.lndo.site", Some("local"), "local"),
+            ("http://myapp.docksal.site", Some("local"), "local"),
+            ("http://myapp.test", Some("local"), "local"),
         ];
 
         for (url, provided, expected) in cases {

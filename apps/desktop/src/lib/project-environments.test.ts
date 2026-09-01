@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { getProjectUrlIdentityKey, normalizeProjectUrlInput } from "./project-environments";
+import {
+  getProjectUrlIdentityKey,
+  inferProjectEnvironmentFromUrl,
+  normalizeProjectUrlInput,
+  resolveProjectEnvironmentForUrl,
+} from "./project-environments";
 
 describe("normalizeProjectUrlInput", () => {
   it("prefixes https:// onto bare domains and lowercases the host", () => {
@@ -42,5 +47,30 @@ describe("getProjectUrlIdentityKey", () => {
     expect(getProjectUrlIdentityKey("https://MySite.com/")).toBe(
       getProjectUrlIdentityKey("mysite.com"),
     );
+  });
+});
+
+describe("inferProjectEnvironmentFromUrl", () => {
+  it("labels local dev environment hostnames as local", () => {
+    // These resolve to loopback, so a detected DDEV/Lando/Docksal URL has to
+    // land on Local rather than being read as another production site.
+    expect(inferProjectEnvironmentFromUrl("https://smarthomeu.ddev.site")).toBe("local");
+    expect(inferProjectEnvironmentFromUrl("https://myapp.lndo.site")).toBe("local");
+    expect(inferProjectEnvironmentFromUrl("http://myapp.docksal.site")).toBe("local");
+    expect(inferProjectEnvironmentFromUrl("http://myapp.test")).toBe("local");
+  });
+
+  it("keeps a public host that merely contains a dev suffix on production", () => {
+    expect(inferProjectEnvironmentFromUrl("https://ddev.site.example.com")).toBe("production");
+  });
+});
+
+describe("resolveProjectEnvironmentForUrl", () => {
+  it("keeps the detected local label for a DDEV URL", () => {
+    expect(resolveProjectEnvironmentForUrl("https://smarthomeu.ddev.site", "local")).toBe("local");
+  });
+
+  it("still corrects a local label on a public host", () => {
+    expect(resolveProjectEnvironmentForUrl("https://example.com", "local")).toBe("production");
   });
 });

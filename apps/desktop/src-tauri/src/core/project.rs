@@ -233,9 +233,14 @@ mod tests {
 
         let info = detect_project(&tmp);
         assert_eq!(info.framework, Some("Drupal".into()));
+        // The DDEV hostname resolves to loopback, so normalization has to keep
+        // the label the config file declared instead of reading it as a
+        // second production site.
         assert!(
-            info.urls.iter().any(|u| u.url.contains("mysite.ddev.site")),
-            "Expected DDEV URL, got: {:?}",
+            info.urls
+                .iter()
+                .any(|u| u.url.contains("mysite.ddev.site") && u.environment == "local"),
+            "Expected a local DDEV URL, got: {:?}",
             info.urls
         );
         assert!(

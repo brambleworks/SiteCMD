@@ -16,6 +16,7 @@ const {
   ambientClockFailures,
   appShellNavFailures,
   codeScanInventoryFailures,
+  crossSurfaceContractFailures,
   desktopCategoryLabelFailures,
   desktopFrontendDisplayFailures,
   desktopFrontendStateFailures,
@@ -992,6 +993,18 @@ describe.concurrent(
           );
         },
         "Project detection and AI framework detection must use the shared bounded no-follow reader for repository-controlled metadata.",
+      );
+    });
+
+    it("requires local dev environment hostname inference to stay in sync across surfaces", () => {
+      expectGuardrailFailure(
+        crossSurfaceContractFailures,
+        (fixtureRoot) => {
+          const frontendPath = "apps/desktop/src/lib/project-environments.ts";
+          const source = readFixtureFile(fixtureRoot, frontendPath);
+          writeFixtureFile(fixtureRoot, frontendPath, mustMutate(source, '", ".test"]', '"]'));
+        },
+        "Local dev environment hostname suffixes must stay identical between",
       );
     });
 

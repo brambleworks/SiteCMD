@@ -52,6 +52,31 @@ export function crossSurfaceContractFailures(read) {
     `Deploy-regression detail fixtures must stay byte-identical: ${alertModelTestsPath} RUST_FIXTURE has drifted from ${rustBlameTestsPath} DETAIL_FIXTURE.`,
   );
 
+  // Both surfaces label a project URL's environment: Rust when detection
+  // normalizes what it found in the repo, the frontend when it renders the
+  // environment dropdown. If only one knows a dev-environment hostname, a
+  // detected DDEV/Lando/Docksal URL is labeled Local on one side and
+  // Production on the other, and the stricter side wins silently.
+  const rustLocalhostPath = "apps/desktop/src-tauri/src/core/localhost.rs";
+  const frontendEnvironmentsPath = "apps/desktop/src/lib/project-environments.ts";
+  const suffixList = (source) =>
+    source.match(/LOCAL_DEV_HOST_SUFFIXES[^=]*=\s*&?\[([\s\S]*?)\]/)?.[1];
+  const rustSuffixes = suffixList(read(rustLocalhostPath));
+  const frontendSuffixes = suffixList(read(frontendEnvironmentsPath));
+  const suffixEntries = (list) =>
+    list === undefined ? undefined : [...list.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  check(
+    rustSuffixes !== undefined && frontendSuffixes !== undefined,
+    `Both ${rustLocalhostPath} and ${frontendEnvironmentsPath} must declare a LOCAL_DEV_HOST_SUFFIXES list; environment inference for local dev environments is a two-surface contract.`,
+  );
+  check(
+    rustSuffixes === undefined ||
+      frontendSuffixes === undefined ||
+      JSON.stringify(suffixEntries(rustSuffixes)) ===
+        JSON.stringify(suffixEntries(frontendSuffixes)),
+    `Local dev environment hostname suffixes must stay identical between ${rustLocalhostPath} and ${frontendEnvironmentsPath}: a suffix only one surface knows labels the same URL Local in one place and Production in the other.`,
+  );
+
   for (const { capability, identifier, broker } of [
     {
       capability: "apps/desktop/src-tauri/capabilities/data-admin.json",
