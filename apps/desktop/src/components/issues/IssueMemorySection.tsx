@@ -53,8 +53,16 @@ function useIssueMemory({ projectId, checkId, currentStatus }: IssueMemorySectio
 
       const { firstSeen, lastFailed, lastVerified } = lifecycle;
 
+      // Regression means the check passed and then failed again. An issue that
+      // was never verified has nothing to regress from, so it never claims one
+      // no matter how many deploys precede it.
       let regressedAfterDeploy: { occurredAtMs: number; title: string } | null = null;
-      if (isActionableCheckStatus(currentStatus) && lastFailed) {
+      const regressed =
+        isActionableCheckStatus(currentStatus) &&
+        lastFailed != null &&
+        lastVerified != null &&
+        lastFailed > lastVerified;
+      if (regressed) {
         const endMs = Date.now();
         const startMs = endMs - 180 * MS_PER_DAY;
         const deployEvents = await getEvents({
@@ -65,10 +73,9 @@ function useIssueMemory({ projectId, checkId, currentStatus }: IssueMemorySectio
         });
         regressedAfterDeploy =
           (Array.isArray(deployEvents) ? deployEvents : [])
-            .filter((event) => {
-              const verifiedAt = lastVerified ?? Number.NEGATIVE_INFINITY;
-              return event.occurredAtMs <= lastFailed && event.occurredAtMs > verifiedAt;
-            })
+            .filter(
+              (event) => event.occurredAtMs <= lastFailed && event.occurredAtMs > lastVerified,
+            )
             .sort((a, b) => b.occurredAtMs - a.occurredAtMs)
             .map((event) => ({ occurredAtMs: event.occurredAtMs, title: event.title }))
             .at(0) ?? null;

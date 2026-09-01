@@ -410,7 +410,6 @@ export function IssuesPage({
             />
           ) : activeTab === "issues" ? (
             <IssuesQueuePanel
-              detectedStack={coerceJsonRecord(latestResult?.detectedStack)}
               rankedIssues={rankedIssues}
               initialFocus={initialFocus}
               issueLinks={effectiveIssueLinks}
@@ -433,7 +432,6 @@ export function IssuesPage({
               statusResourceError={statusResourceError}
               statusResourceLoading={statusResourceLoading}
               onRetryStatusResource={retryStatusResource}
-              url={url}
             />
           ) : (
             <IssuesHistoryPanel projectId={projectId} url={url} openScanConfig={openScanConfig} />

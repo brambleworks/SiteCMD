@@ -6,9 +6,6 @@
     gap: var(--space-base);
     padding: var(--space-card) 1.25rem;
   }
-  .issue-toolbar-trailing {
-    margin-left: auto;
-  }
   .issue-no-match {
     padding: var(--space-section) 1.25rem;
     font-size: var(--text-md);

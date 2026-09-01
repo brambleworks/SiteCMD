@@ -11,6 +11,25 @@ public repository history.
 
 ## [Unreleased]
 
+### Changed
+
+- The Issues list drops the web/code scan filter. One category filter now covers
+  findings from both scanners, a search box narrows the list by title, and the
+  list pages twenty issues at a time.
+- The Issues list and Code Scan results share one pager with numbered page links.
+  Previous and Next sit beside the numbers and are hidden at the ends rather than
+  shown as dead controls.
+
+### Fixed
+
+- Adding a project folder that runs on DDEV, Lando, Docksal, or a `.test`
+  hostname now labels the detected URL as Local instead of listing it as
+  another production site.
+- Code findings in the Issues list now name their category, such as Database or
+  Architecture, instead of every row reading "Code".
+- Issue history no longer claims an issue regressed after a deploy when the
+  issue had never passed. A regression now requires an earlier verified pass.
+
 ## [1.1.1] - 2026-08-31
 
 ### Changed

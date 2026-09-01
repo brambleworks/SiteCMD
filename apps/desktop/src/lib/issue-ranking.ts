@@ -1,4 +1,5 @@
-import { CODE_SCAN_DOMAIN_META, getCodeIssueDomain } from "@/lib/code-scan-domains";
+import { getCodeIssueDomain } from "@/lib/code-scan-domains";
+import { issueCategoryLabel } from "@/lib/issue-categories";
 import type { FixEffort, FixGuideMeta } from "@/lib/fix-guide-shared";
 import {
   createSeverityCounts,
@@ -32,7 +33,7 @@ export type UnifiedFixIssue =
       occurrenceCount: number;
       occurrenceLabels: string[];
       impact: number;
-      sourceLabel: string;
+      categoryLabel: string;
       effort: FixEffort | null;
       effortMinutes: number | null;
       /** Canonical backend projection. Present for the active Issues surface. */
@@ -46,7 +47,7 @@ export type UnifiedFixIssue =
       occurrenceCount: number;
       occurrenceLabels: string[];
       impact: number;
-      sourceLabel: string;
+      categoryLabel: string;
       effort: FixEffort | null;
       effortMinutes: number | null;
       /** Canonical backend projection. Present for the active Issues surface. */
@@ -57,7 +58,7 @@ export type UnifiedFixIssue =
       id: string;
       issue: AlertItem;
       impact: number;
-      sourceLabel: string;
+      categoryLabel: string;
       effort: null;
       effortMinutes: null;
     };
@@ -69,11 +70,6 @@ const ALERT_PRIORITY_IMPACT: Record<string, number> = {
   warning: 4,
   info: 0.5,
 };
-
-function titleCaseCategory(category: string): string {
-  if (category === "seo") return "SEO";
-  return category.charAt(0).toUpperCase() + category.slice(1);
-}
 
 type WebGroupingEntry = { checkId: string };
 type CodeGroupingEntry = { checkId: string; severity: string };
@@ -217,7 +213,7 @@ export function rankUnified(
         occurrenceCount,
         occurrenceLabels,
         impact,
-        sourceLabel: titleCaseCategory(issue.category),
+        categoryLabel: issueCategoryLabel(issue.category),
         effort: guide?.effort ?? null,
         effortMinutes: guide?.effortMinutes ?? null,
       };
@@ -237,7 +233,6 @@ export function rankUnified(
       const sortedIssues = [...groupedIssues].sort(sortCodeIssuesForGrouping);
       const issue = sortedIssues[0];
       const domain = getCodeIssueDomain(issue);
-      const meta = CODE_SCAN_DOMAIN_META[domain];
       const occurrenceCount = sortedIssues.length;
       const impact = Math.max(
         1,
@@ -256,7 +251,7 @@ export function rankUnified(
         occurrenceCount,
         occurrenceLabels,
         impact,
-        sourceLabel: meta?.shortLabel ?? "Code",
+        categoryLabel: issueCategoryLabel(domain),
         effort: null,
         effortMinutes: null,
       };
@@ -268,7 +263,7 @@ export function rankUnified(
     id: `alert:${alert.id}`,
     issue: alert,
     impact: ALERT_PRIORITY_IMPACT[alert.priority] ?? 1,
-    sourceLabel: "Alert",
+    categoryLabel: "Alert",
     effort: null,
     effortMinutes: null,
   }));
@@ -328,12 +323,14 @@ function groupCodeDomain(group: IssueGroup): CodeScanDomain {
   return candidate && CODE_DOMAINS.has(candidate) ? candidate : "architecture";
 }
 
-function groupSourceLabel(group: IssueGroup): string {
-  const hasCode = group.instances.some((instance) => instance.source === "code_scan");
-  const hasOther = group.instances.some((instance) => instance.source !== "code_scan");
-  if (hasCode && hasOther) return "Web + Code";
-  if (hasCode) return "Code";
-  return titleCaseCategory(group.category);
+/**
+ * The list row names the issue's category, never its scanner: a code-only group
+ * reads as its code domain, everything else as its web category.
+ */
+function groupCategoryLabel(group: IssueGroup, codeOnly: boolean): string {
+  return codeOnly
+    ? issueCategoryLabel(groupCodeDomain(group))
+    : issueCategoryLabel(groupWebCategory(group));
 }
 
 /** Builds the active queue from canonical backend issue groups. */
@@ -345,7 +342,7 @@ export function rankIssueGroups(
     .filter((group) => group.status === "new" || group.status === "regressed")
     .map((group): ScanUnifiedFixIssue => {
       const codeOnly = group.instances.every((instance) => instance.source === "code_scan");
-      const sourceLabel = groupSourceLabel(group);
+      const categoryLabel = groupCategoryLabel(group, codeOnly);
       const impact = Math.max(1, Math.round(group.impactScore));
 
       if (codeOnly) {
@@ -387,7 +384,7 @@ export function rankIssueGroups(
               : (instance.pageUrl ?? instance.source),
           ),
           impact,
-          sourceLabel,
+          categoryLabel,
           effort: null,
           effortMinutes: null,
           group,
@@ -424,7 +421,7 @@ export function rankIssueGroups(
             instance.pageUrl ?? instance.relativePath ?? instance.url ?? instance.source,
         ),
         impact,
-        sourceLabel,
+        categoryLabel,
         effort: guide?.effort ?? null,
         effortMinutes: guide?.effortMinutes ?? null,
         group,

@@ -18,6 +18,11 @@ const BANNED_LINE_PATTERNS = [
     re: /\bqueues?\b/i,
     reason: 'user-facing copy says "list", not "queue"',
   },
+  {
+    re: /\bBatch prompt\b/,
+    reason:
+      "names the retired Batch prompt control, removed from the Issues toolbar along with its prompt builder",
+  },
 ];
 
 export function onboardingCopyFailures(read) {

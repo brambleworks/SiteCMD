@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, CheckCircle, ChevronLeft, ChevronRight, Copy } from "lucide-react";
-import { copyToClipboard } from "@/lib/clipboard";
+import { CheckCircle, ChevronRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { buildBatchFixPrompt } from "@/lib/fix-copilot-batch";
-import { recordWorkflowHealthEvent } from "@/lib/observability";
-import type { CodeScanDomain, IssueLink, ScanCategory } from "@/lib/types";
+import type { IssueLink } from "@/lib/types";
 import type { ProjectIssueSummary } from "@/lib/project-issue-summary";
 import {
   formatSeverityLabel,
@@ -13,32 +10,28 @@ import {
   severityToneClass,
 } from "@/lib/severity";
 import type { FixQueueSource, UnifiedFixIssue } from "@/lib/issue-ranking";
-import { FilterSelect } from "@/components/issues/IssueListFilters";
+import { FilterSearch, FilterSelect } from "@/components/issues/IssueListFilters";
 import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
 import {
-  buildBatchFixItems,
-  buildCodeFilterCounts,
-  buildSubfilterOptions,
-  buildWebFilterCounts,
+  buildCategoryFilterCounts,
+  buildCategoryOptions,
+  filterIssuesByTitle,
   filterScanIssues,
-  getActiveSubfilterValue,
-  ISSUE_SOURCE_LABELS,
   ISSUE_STATUS_LABELS,
-  parseIssueFilterFocus,
-  parseIssueSourceFocus,
+  parseIssueCategoryFocus,
   parseSeverityFocus,
   SEVERITY_FILTER_LABELS,
   sortScanItems,
-  type IssueFilter,
-  type IssueSourceFilter,
   type IssueStatusFilter,
   type SeverityFilter,
 } from "@/components/issues/issue-list-model";
+import type { IssueCategoryKey } from "@/lib/issue-categories";
 
 export type { UnifiedFixIssue };
 export type { IssueStatusFilter } from "@/components/issues/issue-list-model";
 
-const ISSUE_PAGE_SIZE = 100;
+const ISSUE_PAGE_SIZE = 20;
 
 interface IssueListProps {
   // Ranked from the canonical IssueGroup projection by the owning page so the
@@ -52,8 +45,6 @@ interface IssueListProps {
   onSelect: (item: UnifiedFixIssue) => void;
   onClearSelection?: () => void;
   hideControls?: boolean;
-  url?: string;
-  detectedStack?: Record<string, unknown> | null;
   statusFilter?: IssueStatusFilter;
   onStatusChange?: (next: IssueStatusFilter) => void;
 }
@@ -68,24 +59,24 @@ export function IssueList({
   focus = null,
   onClearSelection,
   hideControls = false,
-  url,
-  detectedStack,
   statusFilter,
   onStatusChange,
 }: IssueListProps) {
-  const [batchCopied, setBatchCopied] = useState(false);
-  const [activeSource, setActiveSource] = useState<IssueSourceFilter>("all");
-  const [activeFilter, setActiveFilter] = useState<IssueFilter | null>(null);
+  const [activeCategory, setActiveCategory] = useState<IssueCategoryKey | null>(null);
+  const [search, setSearch] = useState("");
   const [activeSeverity, setActiveSeverity] = useState<SeverityFilter>("all");
   const [issuePage, setIssuePage] = useState(1);
   const showsScanQueue = !statusFilter || statusFilter === "active" || statusFilter === "all";
 
   const filtered = useMemo(
-    () => filterScanIssues(rankedIssues, activeSource, activeSeverity, activeFilter),
-    [rankedIssues, activeFilter, activeSource, activeSeverity],
+    () => filterScanIssues(rankedIssues, activeSeverity, activeCategory),
+    [rankedIssues, activeCategory, activeSeverity],
   );
 
-  const scanItems = useMemo(() => sortScanItems(filtered), [filtered]);
+  const scanItems = useMemo(
+    () => sortScanItems(filterIssuesByTitle(filtered, search)),
+    [filtered, search],
+  );
   const totalIssuePages = Math.max(1, Math.ceil(scanItems.length / ISSUE_PAGE_SIZE));
   const currentIssuePage = Math.min(issuePage, totalIssuePages);
   const issuePageStart = (currentIssuePage - 1) * ISSUE_PAGE_SIZE;
@@ -93,7 +84,7 @@ export function IssueList({
 
   // Reset to the first page when the active filters change, adjusting state
   // during render instead of via an effect.
-  const filterPageKey = `${activeFilter ?? ""}:${activeSeverity}:${activeSource}:${statusFilter ?? ""}`;
+  const filterPageKey = `${activeCategory ?? ""}:${activeSeverity}:${statusFilter ?? ""}:${search}`;
   const [pagedFilterKey, setPagedFilterKey] = useState(filterPageKey);
   if (pagedFilterKey !== filterPageKey) {
     setPagedFilterKey(filterPageKey);
@@ -110,52 +101,20 @@ export function IssueList({
     return map;
   }, [issueLinks]);
 
-  const webCount = issueSummary.webCount;
-  const codeCount = issueSummary.codeCount;
+  const categoryCounts = useMemo(() => buildCategoryFilterCounts(rankedIssues), [rankedIssues]);
 
-  const webFilterCounts = useMemo(() => buildWebFilterCounts(rankedIssues), [rankedIssues]);
-  const codeFilterCounts = useMemo(() => buildCodeFilterCounts(rankedIssues), [rankedIssues]);
-
-  const subfilterOptions = useMemo(() => {
-    return buildSubfilterOptions({
-      activeSource,
-      webCount,
-      codeCount,
-      webFilterCounts,
-      codeFilterCounts,
-    });
-  }, [activeSource, codeCount, codeFilterCounts, webCount, webFilterCounts]);
-
-  const activeSubfilterValue = useMemo(() => getActiveSubfilterValue(activeFilter), [activeFilter]);
+  const categoryOptions = useMemo(() => buildCategoryOptions(categoryCounts), [categoryCounts]);
 
   useEffect(() => {
     const severityFocus = parseSeverityFocus(focus);
     if (severityFocus) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- derives the active filters from the focus prop; applies the initial focus on mount too
       setActiveSeverity(severityFocus);
-      setActiveFilter(null);
-      setActiveSource("all");
+      setActiveCategory(null);
       return;
     }
-    const sourceFocus = parseIssueSourceFocus(focus);
-    if (sourceFocus) {
-      setActiveSource(sourceFocus);
-      setActiveFilter(null);
-      setActiveSeverity("all");
-      return;
-    }
-    const nextFilter = parseIssueFilterFocus(focus);
-    setActiveFilter(nextFilter);
+    setActiveCategory(parseIssueCategoryFocus(focus));
     setActiveSeverity("all");
-    if (nextFilter?.kind === "web-category") {
-      setActiveSource("web");
-      return;
-    }
-    if (nextFilter?.kind === "code-domain") {
-      setActiveSource("code");
-      return;
-    }
-    setActiveSource("all");
   }, [focus]);
 
   useEffect(() => {
@@ -163,54 +122,9 @@ export function IssueList({
     onClearSelection?.();
   }, [onClearSelection, scanItems, selectedId]);
 
-  const handleSourceChange = useCallback((value: string) => {
-    const nextSource: IssueSourceFilter = value === "web" || value === "code" ? value : "all";
-    setActiveSource(nextSource);
-    setActiveFilter((current) => {
-      if (!current) return null;
-      if (nextSource === "web" && current.kind === "web-category") return current;
-      if (nextSource === "code" && current.kind === "code-domain") return current;
-      return null;
-    });
+  const handleCategoryChange = useCallback((value: string) => {
+    setActiveCategory(value === "all" ? null : (value as IssueCategoryKey));
   }, []);
-
-  const handleSubfilterChange = useCallback(
-    (value: string) => {
-      if (value === "all" || activeSource === "all") {
-        setActiveFilter(null);
-        return;
-      }
-      if (activeSource === "web" && value.startsWith("web:")) {
-        setActiveFilter({ kind: "web-category", category: value.slice(4) as ScanCategory });
-        return;
-      }
-      if (activeSource === "code" && value.startsWith("code:")) {
-        setActiveFilter({ kind: "code-domain", domain: value.slice(5) as CodeScanDomain });
-        return;
-      }
-      setActiveFilter(null);
-    },
-    [activeSource],
-  );
-
-  const handleCopyBatch = useCallback(async () => {
-    if (scanItems.length === 0) return;
-    recordWorkflowHealthEvent("copy_guidance", "started", {
-      source: "batch_prompt",
-      issueCount: scanItems.length,
-    });
-    const items = buildBatchFixItems(scanItems);
-    const prompt = buildBatchFixPrompt(items, { url, detectedStack });
-    const ok = await copyToClipboard(prompt);
-    recordWorkflowHealthEvent("copy_guidance", ok ? "succeeded" : "failed", {
-      source: "batch_prompt",
-      issueCount: scanItems.length,
-    });
-    if (ok) {
-      setBatchCopied(true);
-      setTimeout(() => setBatchCopied(false), 2000);
-    }
-  }, [scanItems, url, detectedStack]);
 
   if (loading) {
     return <IssueListLoadingContent statusFilter={statusFilter ?? "active"} />;
@@ -245,17 +159,6 @@ export function IssueList({
             />
           ) : null}
           <FilterSelect
-            label="Show"
-            ariaLabel="Issue source"
-            value={activeSource}
-            options={[
-              { value: "all", label: `${ISSUE_SOURCE_LABELS.all} (${webCount + codeCount})` },
-              { value: "web", label: `${ISSUE_SOURCE_LABELS.web} (${webCount})` },
-              { value: "code", label: `${ISSUE_SOURCE_LABELS.code} (${codeCount})` },
-            ]}
-            onChange={handleSourceChange}
-          />
-          <FilterSelect
             label="Severity"
             ariaLabel="Issue severity"
             value={activeSeverity}
@@ -279,27 +182,18 @@ export function IssueList({
           />
           <FilterSelect
             label="Category"
-            ariaLabel="Issue subcategory"
-            value={activeSubfilterValue}
-            options={subfilterOptions}
-            onChange={handleSubfilterChange}
-            disabled={activeSource === "all"}
+            ariaLabel="Issue category"
+            value={activeCategory ?? "all"}
+            options={categoryOptions}
+            onChange={handleCategoryChange}
           />
-          {scanItems.length > 0 ? (
-            <Button
-              unstyled
-              type="button"
-              onClick={handleCopyBatch}
-              className="queue-tool-button issue-toolbar-trailing"
-              title={`Copy a single AI prompt covering all ${scanItems.length} visible issues`}>
-              {batchCopied ? (
-                <Check className="icon-xs text-score-excellent" />
-              ) : (
-                <Copy className="icon-xs" />
-              )}
-              <span>{batchCopied ? "Copied" : "Batch prompt"}</span>
-            </Button>
-          ) : null}
+          <FilterSearch
+            label="Search"
+            ariaLabel="Search issue titles"
+            placeholder="Search titles…"
+            value={search}
+            onChange={setSearch}
+          />
         </div>
       ) : null}
 
@@ -330,7 +224,7 @@ export function IssueList({
                 <div className="issue-row-text">
                   <div className="text-micro issue-row-meta">
                     <span className={severityClass}>{severityLabel}</span>
-                    {item.sourceLabel ? ` - ${item.sourceLabel}` : ""}
+                    {item.categoryLabel ? ` - ${item.categoryLabel}` : ""}
                   </div>
                   <div className="list-row__title text-body issue-row-title">{title}</div>
                 </div>
@@ -346,30 +240,15 @@ export function IssueList({
           );
         })}
 
-      {showsScanQueue && totalIssuePages > 1 ? (
-        <div className="row-between subtle-divider-top issue-pager">
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label="Previous issues page"
-            onClick={() => setIssuePage((page) => Math.max(1, page - 1))}
-            disabled={currentIssuePage === 1}>
-            <ChevronLeft />
-            Previous
-          </Button>
-          <span className="subtitle-xs">
-            {currentIssuePage}/{totalIssuePages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label="Next issues page"
-            onClick={() => setIssuePage((page) => Math.min(totalIssuePages, page + 1))}
-            disabled={currentIssuePage === totalIssuePages}>
-            Next
-            <ChevronRight />
-          </Button>
-        </div>
+      {showsScanQueue ? (
+        <Pager
+          page={currentIssuePage}
+          totalPages={totalIssuePages}
+          onChange={setIssuePage}
+          label="Issues pages"
+          itemLabel="issues"
+          className="subtle-divider-top issue-pager"
+        />
       ) : null}
     </div>
   );
@@ -378,16 +257,16 @@ export function IssueList({
 function IssueListLoadingContent({ statusFilter }: { statusFilter: IssueStatusFilter }) {
   const filterShells = [
     { label: "Status", value: ISSUE_STATUS_LABELS[statusFilter] },
-    { label: "Show", value: ISSUE_SOURCE_LABELS.all },
     { label: "Severity", value: SEVERITY_FILTER_LABELS.all },
-    { label: "Category", value: "All subcategories" },
+    { label: "Category", value: "All categories" },
+    { label: "Search", value: "" },
   ];
   const loadingRows = [
-    { severity: "Critical", source: "Web scan" },
-    { severity: "High", source: "Code scan" },
-    { severity: "Medium", source: "Web scan" },
-    { severity: "Low", source: "Code scan" },
-    { severity: "Critical", source: "Web scan" },
+    { severity: "Critical", category: "Security" },
+    { severity: "High", category: "Database" },
+    { severity: "Medium", category: "Performance" },
+    { severity: "Low", category: "Accessibility" },
+    { severity: "Critical", category: "Architecture" },
   ];
 
   return (
@@ -415,7 +294,7 @@ function IssueListLoadingContent({ statusFilter }: { statusFilter: IssueStatusFi
                 </div>
                 <Skeleton variant="line-lg" width="lg" />
                 <div className="issue-loading-src">
-                  <span className="text-micro issue-loading-src-label">{row.source}</span>
+                  <span className="text-micro issue-loading-src-label">{row.category}</span>
                   <span className="text-micro issue-loading-dot">·</span>
                   <Skeleton variant="line" width="md" />
                 </div>

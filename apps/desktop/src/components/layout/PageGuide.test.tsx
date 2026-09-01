@@ -43,7 +43,7 @@ describe("PageGuideButton", () => {
   it("uses the current issue lifecycle and agent workflow", async () => {
     const dialog = await openGuide("issues");
 
-    expect(within(dialog).getByText(/Fix with Agent or Batch prompt/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Fix with Agent/)).toBeInTheDocument();
     expect(within(dialog).getByText(/Ignore a finding only/)).toBeInTheDocument();
     expect(within(dialog).getByText(/Reopen an ignored or blocked finding/)).toBeInTheDocument();
     expect(within(dialog).queryByText(/Dismiss only/)).not.toBeInTheDocument();

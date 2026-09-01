@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { runScanExecution } from "@/lib/commands";
 import { getCodeScanDetail } from "@/lib/scan-execution-adapters";
 import { createScanActionKey } from "@/lib/scan-action-key";
-import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
 import type { CodeIssue, CodeScanResult, CodeScanSummary } from "@/lib/types";
 import { normalizeCodeScanResult } from "@/lib/code-scan-result-normalize";
 import { buildPendingVerificationId, resolvePendingVerification } from "@/lib/pending-verification";
@@ -345,31 +344,14 @@ export function CodeScanResults({
             ))}
           </div>
 
-          {totalIssuePages > 1 ? (
-            <div className="panel panel--flush panel--muted code-scan-pager">
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label="Previous issues page"
-                onClick={() => setIssuePage((page) => Math.max(1, page - 1))}
-                disabled={currentIssuePage === 1}>
-                <ChevronLeft className="icon-sm" />
-                Previous
-              </Button>
-              <span className="subtitle-xs">
-                {currentIssuePage}/{totalIssuePages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label="Next issues page"
-                onClick={() => setIssuePage((page) => Math.min(totalIssuePages, page + 1))}
-                disabled={currentIssuePage === totalIssuePages}>
-                Next
-                <ChevronRight className="icon-sm" />
-              </Button>
-            </div>
-          ) : null}
+          <Pager
+            page={currentIssuePage}
+            totalPages={totalIssuePages}
+            onChange={setIssuePage}
+            label="Issues pages"
+            itemLabel="issues"
+            className="panel panel--flush panel--muted code-scan-pager"
+          />
         </>
       )}
 

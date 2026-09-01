@@ -13,7 +13,6 @@ import { IssuePanelSkeleton } from "@/components/issues/IssuePanelSkeleton";
 // derivations keep their identities across renders.
 const NO_RANKED_ISSUES: UnifiedFixIssue[] = [];
 interface IssuesQueuePanelProps {
-  detectedStack?: Record<string, unknown> | null;
   rankedIssues: UnifiedFixIssue[];
   initialFocus?: string | null;
   issueLinks: IssueLink[];
@@ -36,11 +35,9 @@ interface IssuesQueuePanelProps {
   statusResourceError: string | null;
   statusResourceLoading: boolean;
   onRetryStatusResource: () => void;
-  url: string;
 }
 
 export function IssuesQueuePanel({
-  detectedStack,
   rankedIssues,
   initialFocus,
   issueLinks,
@@ -63,7 +60,6 @@ export function IssuesQueuePanel({
   statusResourceError,
   statusResourceLoading,
   onRetryStatusResource,
-  url,
 }: IssuesQueuePanelProps) {
   if (showIssuesFailure) {
     return (
@@ -128,8 +124,6 @@ export function IssuesQueuePanel({
         focus={initialFocus}
         onSelect={onSelect}
         onClearSelection={onClearSelection}
-        url={url}
-        detectedStack={detectedStack}
         statusFilter={statusFilter}
         onStatusChange={onStatusChange}
       />

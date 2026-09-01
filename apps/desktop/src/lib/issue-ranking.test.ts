@@ -3,10 +3,11 @@ import {
   countGroupedCodeIssues,
   countGroupedWebIssues,
   findUnifiedByCheckId,
+  rankIssueGroups,
   rankUnified,
 } from "@/lib/issue-ranking";
 import { getCodeIssueDomain, type ClassifiableCodeIssue } from "@/lib/code-scan-domains";
-import type { CheckResult, CodeIssue } from "@/lib/types";
+import type { CheckResult, CodeIssue, IssueGroup } from "@/lib/types";
 
 function webIssue(overrides: Partial<CheckResult> = {}): CheckResult {
   return {
@@ -169,7 +170,7 @@ describe("rankUnified", () => {
 
   it("labels SEO issues correctly (all-caps, not 'Seo')", () => {
     const ranked = rankUnified([webIssue({ category: "seo", severity: "high" })], [], [], {});
-    expect(ranked[0].sourceLabel).toBe("SEO");
+    expect(ranked[0].categoryLabel).toBe("SEO");
   });
 
   it("groups duplicate web issues by check id", () => {
@@ -290,5 +291,91 @@ describe("rankUnified", () => {
         },
       ]),
     ).toBe(2);
+  });
+});
+
+function issueGroup(
+  overrides: Partial<IssueGroup> & Pick<IssueGroup, "checkId" | "category" | "instances">,
+): IssueGroup {
+  return {
+    severity: "high",
+    title: "Group title",
+    description: "",
+    sources: overrides.instances.map((instance) => instance.source),
+    status: "new",
+    snoozeUntil: null,
+    blockReason: null,
+    impactScore: 8,
+    likelyCauses: [],
+    suggestedIntegrations: [],
+    fixLocations: [],
+    transitiveCauses: [],
+    downstreamEffects: [],
+    recentEvents: [],
+    enrichments: [],
+    correlationEvidence: [],
+    affectedPages: [],
+    crossEnvSignal: null,
+    crossProjectPattern: null,
+    displayConfidence: null,
+    observationCount: 1,
+    anomalyScore: null,
+    ...overrides,
+  };
+}
+
+function groupInstance(
+  overrides: Partial<IssueGroup["instances"][number]> &
+    Pick<IssueGroup["instances"][number], "source">,
+): IssueGroup["instances"][number] {
+  return {
+    id: 1,
+    signalId: "signal-1",
+    producerCheckId: null,
+    url: "https://example.com",
+    pageUrl: null,
+    severity: "high",
+    title: "Instance title",
+    description: "",
+    detailJson: null,
+    firstSeenAt: 1,
+    lastSeenAt: 2,
+    confidence: "high",
+    domain: null,
+    relativePath: null,
+    line: null,
+    ...overrides,
+  };
+}
+
+describe("rankIssueGroups", () => {
+  it("names a code group by its domain instead of the generic scanner label", () => {
+    const [ranked] = rankIssueGroups([
+      issueGroup({
+        checkId: "code_scan.db-index-hints",
+        category: "data",
+        instances: [
+          groupInstance({
+            source: "code_scan",
+            domain: "database",
+            relativePath: "app/api/list/route.ts",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(ranked.categoryLabel).toBe("Database");
+  });
+
+  it("names a web group by its category", () => {
+    const [ranked] = rankIssueGroups([
+      issueGroup({
+        checkId: "missing-hsts",
+        category: "security",
+        instances: [groupInstance({ source: "web_scan", category: "security" })],
+      }),
+    ]);
+
+    expect(ranked.categoryLabel).toBe("Security");
   });
 });
