@@ -11,7 +11,16 @@ public repository history.
 
 ## [Unreleased]
 
+### Added
+
+- The web scan now flags meta refresh redirects and timed reloads, and asks
+  for review when a single page carries more than a thousand links.
+
 ### Changed
+
+- A page with several H1 headings, or none, is now reported as an SEO issue,
+  matching how search consoles classify it. The accessibility check keeps
+  reviewing heading order.
 
 - The Issues list drops the web/code scan filter. One category filter now covers
   findings from both scanners, a search box narrows the list by title, and the

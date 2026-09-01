@@ -30,15 +30,11 @@ pub struct Runner {
 /// Artifact-lane manifest entries intentionally excluded from runner coverage,
 /// paired with the required reason.
 pub const EXCLUDED_ARTIFACT_CHECKS: &[(&str, &str)] = &[
-    // accessibility.headings is the sole static heading authority across
-    // desktop and hosted lanes.
-    (
-        "seo.headings.h1",
-        "HeadingCheck is unregistered on the desktop; accessibility.headings is the authority",
-    ),
+    // Heading-order review stays with accessibility.headings; the H1 count
+    // runs separately as the SEO-owned seo.headings.h1.
     (
         "seo.headings.hierarchy",
-        "HeadingCheck is unregistered on the desktop; accessibility.headings is the authority",
+        "HeadingCheck is unregistered on the desktop; accessibility.headings owns heading order",
     ),
 ];
 
@@ -167,6 +163,18 @@ pub const RUNNERS: &[Runner] = &[
     Runner {
         covers: &["seo.url_structure"],
         run: |inputs| crate::checks::seo::url_structure::UrlStructureCheck.run(inputs.page),
+    },
+    Runner {
+        covers: &["seo.headings.h1"],
+        run: |inputs| crate::checks::seo::headings::H1Check.run(inputs.page),
+    },
+    Runner {
+        covers: &["seo.meta_refresh"],
+        run: |inputs| crate::checks::seo::meta_refresh::MetaRefreshCheck.run(inputs.page),
+    },
+    Runner {
+        covers: &["seo.link_count"],
+        run: |inputs| crate::checks::seo::link_count::LinkCountCheck.run(inputs.page),
     },
     Runner {
         covers: &["seo.thin_content"],

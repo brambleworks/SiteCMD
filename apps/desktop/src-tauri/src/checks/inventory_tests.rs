@@ -48,9 +48,10 @@ fn every_emitted_web_check_id_has_a_manifest_contract() {
 /// Runner shells whose `emitted_ids` still returns only the shell id. Lower as
 /// overrides land; the manifest completeness test only sees sub-ids once the
 /// override exists. `seo.headings` is a fifth `RUNNER_IDS` entry, but it is
-/// not counted here: `seo::sync_checks()` deliberately excludes it in favor
-/// of `accessibility.headings` (see `src/checks/seo/mod.rs` tests), so it
-/// never appears as a bare id in `web_check_ids()` to begin with.
+/// not counted here: `seo::sync_checks()` deliberately excludes the shell.
+/// Its H1 half runs as the registered `seo.headings.h1`, and heading order
+/// stays with `accessibility.headings` (see `src/checks/seo/mod.rs` tests),
+/// so the bare shell id never appears in `web_check_ids()` to begin with.
 const RUNNER_SHELLS_WITHOUT_EMITTED_IDS: usize = 0;
 
 #[test]

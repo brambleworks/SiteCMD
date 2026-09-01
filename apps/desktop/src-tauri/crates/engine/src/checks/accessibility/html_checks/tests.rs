@@ -234,6 +234,35 @@ fn heading_order_issues_are_best_practice_not_wcag() {
 }
 
 #[test]
+fn heading_order_leaves_h1_count_to_the_seo_check() {
+    let html = "<html><body><h1>One</h1><h1>Two</h1><h2>Sub</h2></body></html>";
+    let results = HeadingOrderCheck.run(&ctx(html));
+    assert_eq!(
+        results[0].status,
+        CheckStatus::Pass,
+        "H1 count belongs to seo.headings.h1: {}",
+        results[0].description
+    );
+    let raw = results[0].raw_data.as_ref().unwrap();
+    assert!(
+        raw.get("h1_count").is_none(),
+        "H1 count authority is seo.headings.h1: {raw}"
+    );
+}
+
+#[test]
+fn heading_order_missing_h1_is_not_an_order_issue() {
+    let html = "<html><body><h2>Sub</h2><h3>Detail</h3></body></html>";
+    let results = HeadingOrderCheck.run(&ctx(html));
+    assert_eq!(
+        results[0].status,
+        CheckStatus::Pass,
+        "{}",
+        results[0].description
+    );
+}
+
+#[test]
 fn test_landmarks_all_present_pass() {
     let html =
         "<html><body><header></header><nav></nav><main></main><footer></footer></body></html>";

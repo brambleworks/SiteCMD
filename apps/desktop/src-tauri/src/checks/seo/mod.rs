@@ -5,7 +5,9 @@ pub use sitecmd_engine::checks::seo::canonical_meta;
 pub use sitecmd_engine::checks::seo::content;
 pub mod geo;
 pub use sitecmd_engine::checks::seo::headings;
+pub use sitecmd_engine::checks::seo::link_count;
 pub mod links;
+pub use sitecmd_engine::checks::seo::meta_refresh;
 pub mod meta;
 pub mod redirects;
 pub mod robots;
@@ -29,8 +31,12 @@ pub fn sync_checks() -> Vec<Box<dyn Check>> {
         Box::new(meta::NoindexCheck),
         Box::new(meta::HreflangCheck),
         Box::new(meta::DuplicateMetaCheck),
-        // HeadingCheck remains for history compatibility but is unregistered;
-        // HeadingOrderCheck owns the same static signals.
+        // The HeadingCheck shell remains for history compatibility but is
+        // unregistered: the H1 count runs as the SEO-owned seo.headings.h1,
+        // and HeadingOrderCheck owns heading order under accessibility.
+        Box::new(headings::H1Check),
+        Box::new(meta_refresh::MetaRefreshCheck),
+        Box::new(link_count::LinkCountCheck),
         Box::new(links::UrlStructureCheck),
         Box::new(structured_data::StructuredDataCheck),
         Box::new(content::ThinContentCheck),
@@ -75,12 +81,28 @@ mod tests {
     }
 
     #[test]
-    fn seo_registration_does_not_duplicate_the_accessibility_heading_check() {
+    fn h1_count_is_an_seo_check_and_heading_order_stays_with_accessibility() {
         let checks = super::sync_checks();
         let ids: Vec<&str> = checks.iter().map(|check| check.id()).collect();
         assert!(
-            !ids.contains(&"seo.headings"),
-            "heading structure has one authority: accessibility.headings"
+            ids.contains(&"seo.headings.h1"),
+            "the H1 count is an SEO signal with its own registered check"
         );
+        assert!(
+            !ids.contains(&"seo.headings"),
+            "the HeadingCheck shell stays unregistered"
+        );
+        assert!(
+            !ids.contains(&"seo.headings.hierarchy"),
+            "heading order has one authority: accessibility.headings"
+        );
+    }
+
+    #[test]
+    fn meta_refresh_and_link_count_are_registered_seo_checks() {
+        let checks = super::sync_checks();
+        let ids: Vec<&str> = checks.iter().map(|check| check.id()).collect();
+        assert!(ids.contains(&"seo.meta_refresh"), "{ids:?}");
+        assert!(ids.contains(&"seo.link_count"), "{ids:?}");
     }
 }
