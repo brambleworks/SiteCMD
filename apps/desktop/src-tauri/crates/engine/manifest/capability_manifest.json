@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "manifest_digest": "e3fc195f7718d1eb",
+  "manifest_digest": "e4ecca30c90c8a42",
   "entries": [
     {
       "check": "accessibility.aria_usage",
@@ -1262,6 +1262,15 @@
       "compare_on": []
     },
     {
+      "check": "seo.link_count",
+      "contract": "e9c335f557983216",
+      "hosted": "artifact",
+      "class": "deterministic",
+      "scope": "page",
+      "requires": ["page_artifact"],
+      "compare_on": []
+    },
+    {
       "check": "seo.llms_txt",
       "contract": "7a2ebfabfa924821",
       "hosted": "probe_adapter",
@@ -1286,6 +1295,15 @@
       "class": "deterministic",
       "scope": "page",
       "requires": [],
+      "compare_on": []
+    },
+    {
+      "check": "seo.meta_refresh",
+      "contract": "e91bc8ed01139655",
+      "hosted": "artifact",
+      "class": "deterministic",
+      "scope": "page",
+      "requires": ["page_artifact"],
       "compare_on": []
     },
     {
