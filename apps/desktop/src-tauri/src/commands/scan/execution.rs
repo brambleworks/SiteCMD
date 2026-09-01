@@ -1,6 +1,6 @@
 //! Execution-first orchestration over the existing Web and Code collectors.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -49,6 +49,17 @@ pub struct RunScanExecutionResult {
     pub web_result: Option<ScanResult>,
     pub multi_result: Option<MultiScanResult>,
     pub code_result: Option<CodeScanResult>,
+    pub issue_changes: Option<ScanIssueChanges>,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "ipc-bindings.ts")]
+pub struct ScanIssueChanges {
+    pub previous_open_issues: usize,
+    pub open_issues: usize,
+    pub new_issues: usize,
+    pub resolved_issues: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -313,6 +324,32 @@ fn apply_execution_retention(db: &Database, plan: &ValidatedExecutionPlan, execu
     }
 }
 
+pub(super) fn load_active_issue_group_ids(
+    db: &Database,
+    project_id: i64,
+    environment_scope_key: &str,
+) -> Result<HashSet<String>, crate::db::DbError> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    Ok(db
+        .get_active_issue_groups(project_id, Some(environment_scope_key), now_ms)?
+        .into_iter()
+        .filter(|group| !group.status.is_inactive_for_scoring())
+        .map(|group| group.check_id)
+        .collect())
+}
+
+pub(super) fn build_scan_issue_changes(
+    before: &HashSet<String>,
+    after: &HashSet<String>,
+) -> ScanIssueChanges {
+    ScanIssueChanges {
+        previous_open_issues: before.len(),
+        open_issues: after.len(),
+        new_issues: after.difference(before).count(),
+        resolved_issues: before.difference(after).count(),
+    }
+}
+
 #[tracing::instrument(skip(app, db, scan_control, request), fields(mode = %request.requested_mode, trigger = request.trigger.as_str()))]
 pub async fn run_scan_execution(
     app: AppHandle,
@@ -352,6 +389,7 @@ pub(crate) async fn run_scan_execution_internal(
             web_result: None,
             multi_result: None,
             code_result: None,
+            issue_changes: None,
         });
     }
 
@@ -360,6 +398,18 @@ pub(crate) async fn run_scan_execution_internal(
     let mut web_result = None;
     let mut multi_result = None;
     let mut code_result = None;
+    let issues_before = plan.project_id.and_then(|project_id| {
+        match load_active_issue_group_ids(&db, project_id, &plan.environment_scope_key) {
+            Ok(issue_ids) => Some(issue_ids),
+            Err(error) => {
+                tracing::warn!(
+                    execution_id,
+                    "Could not capture pre-scan issue state: {error}"
+                );
+                None
+            }
+        }
+    });
 
     if scan_control.is_cancelled(scan_request_id) {
         execution = db
@@ -378,6 +428,7 @@ pub(crate) async fn run_scan_execution_internal(
             web_result,
             multi_result,
             code_result,
+            issue_changes: None,
         });
     }
 
@@ -494,6 +545,21 @@ pub(crate) async fn run_scan_execution_internal(
 
     let has_completed_child = execution.web_status == Some(ScanComponentStatus::Complete)
         || execution.code_status == Some(ScanComponentStatus::Complete);
+    let issue_changes = match (has_completed_child, plan.project_id, issues_before) {
+        (true, Some(project_id), Some(before)) => {
+            match load_active_issue_group_ids(&db, project_id, &plan.environment_scope_key) {
+                Ok(after) => Some(build_scan_issue_changes(&before, &after)),
+                Err(error) => {
+                    tracing::warn!(
+                        execution_id,
+                        "Could not capture post-scan issue state: {error}"
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
     if has_completed_child {
         if let Some(project_id) = plan.project_id {
             match crate::commands::issues::compute_and_record_current_score(
@@ -540,6 +606,7 @@ pub(crate) async fn run_scan_execution_internal(
         web_result,
         multi_result,
         code_result,
+        issue_changes,
     })
 }
 

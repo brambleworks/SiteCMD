@@ -133,42 +133,6 @@
   .issues-score-copy > * + * {
     margin-top: var(--space-snug);
   }
-  /* Score breakdown: a closed-by-default ledger under the ring. */
-  .score-breakdown {
-    margin-top: var(--space-snug);
-  }
-  .score-breakdown-summary {
-    cursor: pointer;
-    font-size: var(--text-sm);
-    color: var(--muted-foreground);
-  }
-  .score-breakdown-summary:hover {
-    color: var(--foreground);
-  }
-  .score-breakdown-list {
-    display: grid;
-    max-width: 20rem;
-    gap: var(--space-hair);
-    margin-top: var(--space-tight);
-  }
-  .score-breakdown-row {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-base);
-    font-size: var(--text-sm);
-  }
-  .score-breakdown-points {
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-  }
-  .score-breakdown-total {
-    border-top: 1px solid var(--border);
-    padding-top: var(--space-tight);
-  }
-  .score-breakdown-note {
-    font-size: var(--text-sm);
-    color: var(--muted-foreground);
-  }
   .filter-select-field {
     display: flex;
     min-width: 12rem;

@@ -1,8 +1,6 @@
-import type { Ecosystem, PackageUpdate, SiteEvent, UpdateReport } from "@/lib/types";
+import type { PackageUpdate, SiteEvent, UpdateReport } from "@/lib/types";
 import { parseJsonRecord } from "@/lib/json-record";
-import { buildUpdateQueueSummary } from "@/lib/update-summary";
 import type { UpdateQueueBreakdown } from "@/lib/update-summary";
-import { formatPackageUpdateSummary, getPackageUpdateTargetVersion } from "@/lib/update-priority";
 
 const UPDATE_HISTORY_DEDUPE_WINDOW_MS = 15 * 60 * 1000;
 
@@ -21,18 +19,6 @@ function parseEventDetail(detail: string | null): Record<string, unknown> | null
 
 function getCurrentPackageNames(report: UpdateReport | null): Set<string> {
   return new Set((report?.packages ?? []).map((pkg) => pkg.name));
-}
-
-function getCurrentEcosystems(report: UpdateReport | null): Set<Ecosystem> {
-  return new Set(report?.ecosystemsDetected ?? []);
-}
-
-function toAppliedUpdateHistoryRows(updates: PackageUpdate[]): AppliedUpdateHistoryRow[] {
-  return updates.map((update) => ({
-    name: update.name,
-    fromVersion: update.currentVersion,
-    toVersion: getPackageUpdateTargetVersion(update) ?? "resolved",
-  }));
 }
 
 export function withParsedEventDetail(event: SiteEvent): SiteEvent {
@@ -100,47 +86,6 @@ export function getAppliedUpdateHistoryRows(
   }
 
   return [];
-}
-
-export function getTrustedPreviousUpdates(
-  previousUpdates: PackageUpdate[] | null | undefined,
-  report: UpdateReport | null,
-): PackageUpdate[] {
-  if (!previousUpdates || previousUpdates.length === 0) return [];
-
-  const currentPackageNames = getCurrentPackageNames(report);
-  if (
-    currentPackageNames.size > 0 &&
-    !previousUpdates.some((update) => currentPackageNames.has(update.name))
-  ) {
-    return [];
-  }
-
-  const currentEcosystems = getCurrentEcosystems(report);
-  if (
-    currentEcosystems.size > 0 &&
-    !previousUpdates.some((update) => currentEcosystems.has(update.ecosystem))
-  ) {
-    return [];
-  }
-
-  return previousUpdates;
-}
-
-export function buildAppliedUpdateEventSourceId(
-  prefix: "updates-refresh",
-  projectId: number,
-  appliedUpdates: PackageUpdate[],
-  remainingUpdates: number,
-  securityUpdates: number,
-): string {
-  const tokens = [...appliedUpdates]
-    .map(
-      (update) =>
-        `${update.ecosystem}:${update.name}:${update.currentVersion}->${getPackageUpdateTargetVersion(update) ?? "resolved"}`,
-    )
-    .sort();
-  return `${prefix}:${projectId}:${remainingUpdates}:${securityUpdates}:${tokens.join("|")}`;
 }
 
 export function getUpdateHistoryTitle(event: SiteEvent, rows: AppliedUpdateHistoryRow[]): string {
@@ -234,60 +179,4 @@ export function getVisibleUpdateHistoryEvents(events: SiteEvent[]): SiteEvent[] 
   return collapseDuplicateUpdateHistoryEvents(
     events.filter((event) => !isHiddenUpdateHistoryEvent(event)),
   );
-}
-
-function summarizeUpdateLabels(updates: PackageUpdate[], verb: "left" | "entered"): string | null {
-  const labels = updates.map((update) => formatPackageUpdateSummary(update));
-  if (labels.length === 0) return null;
-  if (labels.length === 1) return `${labels[0]} ${verb} the list.`;
-  if (labels.length === 2) return `${labels[0]} and ${labels[1]} ${verb} the list.`;
-  return `${labels[0]}, ${labels[1]}, and ${labels.length - 2} more ${verb} the list.`;
-}
-
-export function buildUpdateRefreshHistoryDraft(
-  previousUpdates: PackageUpdate[],
-  nextUpdates: PackageUpdate[],
-) {
-  const cleared = getClearedUpdates(previousUpdates, nextUpdates);
-  if (cleared.length === 0) return null;
-
-  const beforeSummary = buildUpdateQueueSummary(previousUpdates);
-  const afterSummary = buildUpdateQueueSummary(nextUpdates);
-  const leadCleared = cleared[0] ? formatPackageUpdateSummary(cleared[0]) : null;
-  const clearedSummary = summarizeUpdateLabels(cleared, "left");
-
-  return {
-    title: `${cleared.length} Update${cleared.length === 1 ? "" : "s"} Applied`,
-    summary: [
-      clearedSummary,
-      afterSummary.total > 0
-        ? `${afterSummary.total} update${afterSummary.total === 1 ? "" : "s"} still pending.`
-        : "No pending updates remain.",
-    ]
-      .filter(Boolean)
-      .join(" "),
-    detail: {
-      page: "updates",
-      reason: "updates-applied",
-      verified_count: cleared.length,
-      cleared_count: cleared.length,
-      remaining_updates: afterSummary.total,
-      security_updates: afterSummary.security,
-      critical_updates: afterSummary.breakdown.critical,
-      major_updates: afterSummary.breakdown.major,
-      minor_updates: afterSummary.breakdown.minor,
-      patch_updates: afterSummary.breakdown.patch,
-      item_label: leadCleared,
-      applied_updates: toAppliedUpdateHistoryRows(cleared).map((update) => ({
-        name: update.name,
-        from_version: update.fromVersion,
-        to_version: update.toVersion,
-      })),
-      pending_updates_before: beforeSummary.total,
-      pending_updates_after: afterSummary.total,
-      security_updates_before: beforeSummary.security,
-      security_updates_after: afterSummary.security,
-    },
-    severity: afterSummary.security > 0 ? ("warning" as const) : ("info" as const),
-  };
 }

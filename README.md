@@ -1,5 +1,9 @@
 # SiteCMD
 
+[![Code Scan](https://github.com/brambleworks/SiteCMD/actions/workflows/app-guardrails.yml/badge.svg?branch=main)](https://github.com/brambleworks/SiteCMD/actions/workflows/app-guardrails.yml)
+[![CodeQL](https://github.com/brambleworks/SiteCMD/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/brambleworks/SiteCMD/actions/workflows/codeql.yml)
+[![Latest release](https://img.shields.io/github/v/release/brambleworks/SiteCMD)](https://github.com/brambleworks/SiteCMD/releases)
+
 Desktop website health scanner and command center. SiteCMD scans websites and
 linked codebases for security, performance, SEO, accessibility, compliance, and
 configuration issues, ranks them by real risk, and hands the fix to the editor
@@ -320,7 +324,10 @@ requests. Both need a site connected to the connected service.
 
 Repository documentation describes current behavior and accepted decisions.
 Generated plans, review transcripts, design-tool exports, browser captures, and
-other session artifacts are not committed.
+other session artifacts are not committed. How AI coding agents are
+directed here, and what automated review does and does not stand in for, is
+documented in
+[AI-assisted development](docs/engineering/ai-assisted-development.md).
 
 ## Contributing
 

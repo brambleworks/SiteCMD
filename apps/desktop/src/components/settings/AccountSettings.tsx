@@ -30,7 +30,7 @@ function currentPlanLabel(tier: Tier, billingInterval: BillingInterval | null) {
   return `${tierLabel} ${BILLING_INTERVAL_LABEL[billingInterval]}`;
 }
 
-const FOUNDER_BETA_FEATURES = [
+const CONNECTED_SERVICE_FEATURES = [
   "Watches every production deploy and rescans the live site minutes later",
   "Scheduled hosted scans between deploys, even while your laptop is closed",
   "Alerts only on new findings or regressions, by email or webhook",
@@ -40,7 +40,7 @@ const FOUNDER_BETA_FEATURES = [
   "Maintained check and advisory updates, delivered continuously",
 ];
 
-const FOUNDER_BETA_CONTACT_URL = "https://sitecmd.com/contact";
+const BETA_CONTACT_URL = "https://sitecmd.com/contact";
 
 export function AccountSection() {
   const { tier, licenseInfo, activateLicense, deactivateLicense, refreshLicense } = useTier();
@@ -335,13 +335,13 @@ export function AccountSection() {
             </div>
             <p className="body-muted account-plans-desc">
               {plansExpanded
-                ? "The founder beta adds hosted automation around the complete free desktop workbench. Access is comped during the founder beta while usage informs the public pricing pass."
-                : "See what the founder beta adds when you want your sites watched between sessions."}
+                ? "SiteCMD Connect adds hosted automation around the complete free desktop workbench. Access is free during the beta while real usage sets the public pricing."
+                : "See what SiteCMD Connect adds when you want your sites watched between sessions."}
             </p>
           </div>
           {licenseInfo.isActive ? (
             <Button variant="outline" size="sm" onClick={() => setShowPlans((current) => !current)}>
-              {plansExpanded ? "Hide Details" : "View Founder Beta"}
+              {plansExpanded ? "Hide Details" : "View Details"}
             </Button>
           ) : null}
         </div>
@@ -353,19 +353,19 @@ export function AccountSection() {
                   <Zap className="icon-lg" />
                 </div>
                 <div className="plan-card-title-wrap">
-                  <span className="plan-card-name text-foreground">Founder Beta</span>
+                  <span className="plan-card-name text-foreground">SiteCMD Connect</span>
                   <p className="subtitle-xs plan-card-desc">
                     Hosted scans, deploy watches, alerts, verification, and CI gates while your
                     laptop is closed.
                   </p>
                 </div>
                 <span className="text-meta account-plan-badge text-primary">
-                  Comped during the founder beta
+                  Free during the beta
                 </span>
               </div>
 
               <ul className="plan-card-features">
-                {FOUNDER_BETA_FEATURES.map((feature) => (
+                {CONNECTED_SERVICE_FEATURES.map((feature) => (
                   <li key={feature} className="plan-card-feature body-muted">
                     <Check className="icon-sm plan-card-feature-icon text-score-excellent" />
                     {feature}
@@ -379,9 +379,9 @@ export function AccountSection() {
                 </Button>
               ) : (
                 <Button
-                  onClick={() => openUrl(FOUNDER_BETA_CONTACT_URL)}
+                  onClick={() => openUrl(BETA_CONTACT_URL)}
                   className="plan-card-cta text-body">
-                  Request founder beta access
+                  Request beta access
                 </Button>
               )}
             </div>

@@ -707,8 +707,8 @@ describe.concurrent(
           const guidePath = "apps/desktop/src/components/layout/PageGuide.tsx";
           const source = readFixtureFile(fixtureRoot, guidePath);
           const mutated = source.replace(
-            "Click into Issues, Updates, or Alerts when something needs work.",
-            "Click into Issues, Launch, Security, or Updates when something needs work.",
+            "Open Issues, Updates, or Alerts when an item needs investigation or action.",
+            "Open Issues, Launch, Security, or Updates when an item needs investigation or action.",
           );
           if (mutated === source) {
             throw new Error(
@@ -765,7 +765,7 @@ describe.concurrent(
       expect(reported).not.toContain(`${excludedPath}:`);
     });
 
-    it("fails when the founder-beta commercial model publishes a speculative price", () => {
+    it("fails when the connected-service commercial model publishes a speculative price", () => {
       expectGuardrailFailure(
         pricingConsistencyFailures,
         (fixtureRoot) => {
@@ -779,11 +779,11 @@ describe.concurrent(
           }
           writeFixtureFile(fixtureRoot, filePath, mutated);
         },
-        "must match the founder-beta commercial model",
+        "must match the connected-service commercial model",
       );
     });
 
-    it("fails when the in-app founder-beta surface reintroduces checkout", () => {
+    it("fails when the in-app connected-service surface reintroduces checkout", () => {
       expectGuardrailFailure(
         pricingConsistencyFailures,
         (fixtureRoot) => {

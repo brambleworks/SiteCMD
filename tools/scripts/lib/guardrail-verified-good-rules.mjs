@@ -2,7 +2,6 @@ const PROFILE = "apps/desktop/src-tauri/crates/engine/src/profile/mod.rs";
 const PROJECTION = "apps/desktop/src-tauri/crates/engine/src/profile/projection.rs";
 const SITE_FACTS = "apps/desktop/src-tauri/src/core/scanner/site_facts.rs";
 const MIGRATION = "apps/desktop/src-tauri/src/db/migrations/018_verified_good_profile.sql";
-const CARD = "apps/desktop/src/components/dashboard/zones/SiteBaselineCard.tsx";
 
 // Return a public Rust function through its matching closing brace.
 function functionBody(source, name) {
@@ -127,18 +126,6 @@ export function verifiedGoodFailures(read) {
   if (!/drift_value_json/.test(migration) || !/good_value_json/.test(migration)) {
     failures.push(
       `${MIGRATION} must store the good value and the differing value in separate columns. One column would destroy the comparison the row exists to make.`,
-    );
-  }
-
-  const card = read(CARD);
-  if (!card.includes("confirming")) {
-    failures.push(
-      `${CARD} must confirm before accepting. Accepting is the one control here that rewrites what good means, and an unconfirmed click cannot be undone by scanning again.`,
-    );
-  }
-  if (/onDecide\(true\)/.test(card) && !/confirming \?/.test(card)) {
-    failures.push(
-      `${CARD} sends an acceptance outside the confirmation branch. The confirm step exists so a person reads what they are blessing.`,
     );
   }
 

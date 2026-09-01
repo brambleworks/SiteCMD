@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 
+import { latestMigrationVersion as parseLatestMigrationVersion } from "../../scripts/lib/schema-contract.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const SCHEMA_SNAPSHOT_PATH = join(
@@ -35,11 +37,7 @@ const MIGRATIONS_PATH = join(
 
 /** Highest `(N, include_str!("migrations/...sql"))` entry in the desktop migration table. */
 export function latestMigrationVersion() {
-  const source = readFileSync(MIGRATIONS_PATH, "utf8");
-  const versions = [...source.matchAll(/\(\s*(\d+),\s*include_str!\("migrations\//g)].map((match) =>
-    Number(match[1]),
-  );
-  return Math.max(...versions);
+  return parseLatestMigrationVersion(readFileSync(MIGRATIONS_PATH, "utf8"));
 }
 
 export function openSchemaFixtureDb(prefix) {

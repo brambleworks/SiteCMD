@@ -352,6 +352,7 @@ export function repoGuardrailFailures({ root, read, readJson, exists, listFiles 
   );
   const tauriConf = readJson("apps/desktop/src-tauri/tauri.conf.json");
   const agentToolsRust = read("apps/desktop/src-tauri/src/core/agent_tools.rs");
+  const mcpBundleScript = read("apps/mcp-server/scripts/bundle.mjs");
   check(
     mcpServerPackage.private === true && mcpServerPackage.bin === undefined,
     "apps/mcp-server must stay private with no bin: the MCP server ships inside the desktop app, not on npm.",
@@ -365,8 +366,10 @@ export function repoGuardrailFailures({ root, read, readJson, exists, listFiles 
   check(
     tauriConf.bundle?.resources?.["../../mcp-server/dist-bundle/"] === "sitecmd-mcp/" &&
       tauriConf.build?.beforeBuildCommand?.includes("pnpm --filter sitecmd-mcp run bundle") &&
-      tauriConf.build?.beforeDevCommand?.includes("pnpm --filter sitecmd-mcp run bundle"),
-    "tauri.conf.json must ship the MCP bundle as a resource and rebuild it before dev and build.",
+      tauriConf.build?.beforeDevCommand?.includes("pnpm --filter sitecmd-mcp run bundle") &&
+      mcpServerPackage.scripts?.test?.includes("pnpm run bundle") &&
+      mcpBundleScript.includes("assertRepositorySchemaContract()"),
+    "Tauri dev, builds, and MCP tests must bundle the server through its schema compatibility guard.",
   );
 
   function countLines(source) {

@@ -46,6 +46,8 @@ const SMOOTH_PROGRESS_PERCENT_PER_SECOND = 46;
 const FINAL_PROGRESS_PERCENT_PER_SECOND = 360;
 const PHASE_MIN_DWELL_MS = 320;
 const WEB_TAIL_PROGRESS_TICK_MS = 250;
+const WEB_BROWSER_RUNNING_CEILING = 96;
+const WEB_BROWSER_ESTIMATED_DURATION_MS = 10_000;
 
 function getWebScanStageIndex(progress: ScanProgressEvent | null): number {
   if (!progress) return 0;
@@ -164,13 +166,15 @@ function getProgressTargetPercent(
   if (isCodeScan) return Math.min(96, Math.max(5, rawPercent));
 
   if (progress?.check_id === "browser-analysis") {
-    if (progress.status === "complete") return 100;
-    return 93 + Math.min(5, tailElapsedMs / 1_400);
+    if (progress.status === "complete") return rawPercent;
+    const remaining = WEB_BROWSER_RUNNING_CEILING - rawPercent;
+    const elapsedShare = Math.min(1, tailElapsedMs / WEB_BROWSER_ESTIMATED_DURATION_MS);
+    return rawPercent + remaining * elapsedShare;
   }
 
   if (progress?.check_id === "polish-signals") {
-    if (progress.status === "complete") return 93;
-    return 90 + Math.min(3, tailElapsedMs / 1_400);
+    if (progress.status === "complete") return rawPercent;
+    return rawPercent + Math.min(3, tailElapsedMs / 1_400);
   }
 
   return Math.min(96, Math.max(0, rawPercent));

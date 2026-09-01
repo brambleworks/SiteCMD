@@ -14,7 +14,7 @@ async fn main() {
     let ecosystems = app_lib::updates::detected_ecosystems(&packages);
 
     println!(
-        "\n📦 Detected {} packages across {} ecosystems:",
+        "\nDetected {} packages across {} ecosystems:",
         packages.len(),
         ecosystems.len()
     );
@@ -23,19 +23,19 @@ async fn main() {
         println!("  {} - {} packages", eco.label(), count);
     }
 
-    println!("\n🔍 Checking registries + OSV for updates...\n");
+    println!("\nChecking registries + OSV for updates...\n");
     let start = std::time::Instant::now();
     let scan = app_lib::updates::registry::check_for_updates(&packages).await;
     let elapsed = start.elapsed();
 
     if !scan.install_script_packages.is_empty() {
         println!(
-            "⚙️  {} npm packages run install scripts",
+            "{} npm packages run install scripts",
             scan.install_script_packages.len()
         );
     }
     println!(
-        "📜 {} npm packages report a license posture\n",
+        "{} npm packages report a license posture\n",
         scan.licenses.len()
     );
     let updates = scan.updates;
@@ -44,21 +44,21 @@ async fn main() {
     let regular_count = updates.len() - security_count;
 
     if updates.is_empty() {
-        println!("✅ All packages are up to date! No known vulnerabilities.");
+        println!("All packages are up to date. No known vulnerabilities.");
     } else {
         println!(
-            "📋 {} updates available ({:.1}s):\n",
+            "{} updates available ({:.1}s):\n",
             updates.len(),
             elapsed.as_secs_f64()
         );
 
         if security_count > 0 {
-            println!("🛡️  SECURITY ({}):", security_count);
+            println!("Security ({}):", security_count);
             for u in updates.iter().filter(|u| u.is_security) {
-                let sev = u.advisory_severity.as_deref().unwrap_or("?");
+                let sev = u.advisory_severity.as_deref().unwrap_or("unknown");
                 println!(
-                    "  🔴 [{}] {} {} → {} ({})",
-                    sev.to_uppercase(),
+                    "  {:<8} {} {} → {} ({})",
+                    sev,
                     u.name,
                     u.current_version,
                     u.latest_version,
@@ -69,22 +69,21 @@ async fn main() {
         }
 
         if regular_count > 0 {
-            println!("📦 UPDATES ({}):", regular_count);
+            println!("Updates ({}):", regular_count);
             for u in updates.iter().filter(|u| !u.is_security) {
-                let icon = match u.update_type {
-                    app_lib::updates::types::UpdateType::Major => "🟡",
-                    app_lib::updates::types::UpdateType::Minor => "🔵",
-                    app_lib::updates::types::UpdateType::Patch => "⚪",
-                    app_lib::updates::types::UpdateType::Unknown => "⚫",
+                let kind = match u.update_type {
+                    app_lib::updates::types::UpdateType::Major => "major",
+                    app_lib::updates::types::UpdateType::Minor => "minor",
+                    app_lib::updates::types::UpdateType::Patch => "patch",
+                    app_lib::updates::types::UpdateType::Unknown => "unknown",
                 };
                 println!(
-                    "  {} {} {} → {} ({:?}{})",
-                    icon,
+                    "  {:<8} {} {} → {}{}",
+                    kind,
                     u.name,
                     u.current_version,
                     u.latest_version,
-                    u.update_type,
-                    if u.is_dev { ", dev" } else { "" }
+                    if u.is_dev { " (dev)" } else { "" }
                 );
             }
         }

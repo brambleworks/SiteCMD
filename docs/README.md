@@ -15,6 +15,7 @@ Use `docs/` only for information that should be treated as current project truth
 
 - [Connected service implementation specifications](engineering/connected-service/connected-protocol-spec.md) (protocol and state, hosted scanner, alert delivery, and maintained surfaces)
 - [Maintained-surface matrix](engineering/connected-service/maintained-surfaces.md)
+- [AI-assisted development](engineering/ai-assisted-development.md) (how coding agents are directed, and what automated review does and does not stand in for)
 - [Entitlement threat model](engineering/entitlement-threat-model.md)
 - [Privileged broker threat model](engineering/privileged-broker-threat-model.md)
 - [Public repository and release security](engineering/repository-release-security-spec.md)

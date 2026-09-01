@@ -6,6 +6,7 @@ import type {
   CodeScanResult,
   CodeScanSummary,
   RunScanExecutionRequest,
+  ScanIssueChanges,
   ScanResult,
 } from "@/lib/types";
 import { formatUrlHost } from "@/lib/utils";
@@ -42,7 +43,7 @@ export interface ScanSummaryModel {
   severityCounts: ScanSummarySeverityCounts;
   estimatedNewIssues: number | null;
   resolvedIssues: number | null;
-  regressionCount: number;
+  regressionCount: number | null;
   incompleteDetail: string | null;
   // Code-scan scopes the walker skipped.
   note: string | null;
@@ -63,6 +64,8 @@ interface BuildScanSummaryModelInput {
   inactiveCheckIds?: ReadonlySet<string>;
   // Persisted active-issue counts override the pre-hydration scan fallback.
   persistedSummary?: ProjectIssueSummary | null;
+  // Exact canonical lifecycle changes captured around the whole execution.
+  issueChanges?: ScanIssueChanges | null;
 }
 
 const EMPTY_INACTIVE_CHECK_IDS: ReadonlySet<string> = new Set();
@@ -328,9 +331,11 @@ export function buildScanSummaryModel(input: BuildScanSummaryModelInput): ScanSu
   // Multi-page occurrences never add to the canonical grouped total.
   const multiSection = sections.find((section) => section.kind === "multi");
   const hasPersistedSummary = input.persistedSummary != null;
-  const totalIssues = hasPersistedSummary
-    ? summary.totalCount
-    : summary.totalCount + (multiSection?.issueCount ?? 0);
+  const totalIssues =
+    input.issueChanges?.openIssues ??
+    (hasPersistedSummary
+      ? summary.totalCount
+      : summary.totalCount + (multiSection?.issueCount ?? 0));
   const severityCounts = hasPersistedSummary
     ? summary.severityCounts
     : addSeverityCounts(
@@ -376,14 +381,20 @@ export function buildScanSummaryModel(input: BuildScanSummaryModelInput): ScanSu
     totalIssues,
     severityCounts,
     estimatedNewIssues:
-      incompleteDetail == null && estimatedNewValues.length > 0
-        ? estimatedNewValues.reduce((sum, value) => sum + value, 0)
+      incompleteDetail == null
+        ? (input.issueChanges?.newIssues ??
+          (estimatedNewValues.length > 0
+            ? estimatedNewValues.reduce((sum, value) => sum + value, 0)
+            : null))
         : null,
     resolvedIssues:
-      incompleteDetail == null && resolvedValues.length > 0
-        ? resolvedValues.reduce((sum, value) => sum + value, 0)
+      incompleteDetail == null
+        ? (input.issueChanges?.resolvedIssues ??
+          (resolvedValues.length > 0
+            ? resolvedValues.reduce((sum, value) => sum + value, 0)
+            : null))
         : null,
-    regressionCount: incompleteDetail == null ? regressionCount : 0,
+    regressionCount: incompleteDetail == null ? regressionCount : null,
     incompleteDetail,
     note,
   };

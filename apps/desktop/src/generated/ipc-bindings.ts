@@ -499,7 +499,7 @@ export type ResolvedIssue = { checkId: string, title: string, category: string, 
 export type ResolvedProjectPath = { relativePath: string, absolutePath: string, };
 export type RiskItem = { checkId: string, severity: Severity, title: string, matchedFiles: Array<string>, confidence: Confidence, };
 export type RunScanExecutionRequest = { projectId: number | null, environmentId: number | null, environmentUrl: string | null, requestedMode: ScanExecutionMode, webFocus: ScanType | null, urls: Array<string>, enabledCategories: Array<string> | null, timeoutSecs: number | null, axeEnabled: boolean | null, inspectLocalDatabases: boolean, projectPath: string | null, scanRequestId: number | null, retention: number | null, trigger: ScanTrigger, idempotencyKey: string, };
-export type RunScanExecutionResult = { execution: ScanExecutionRecord, reused: boolean, webResult: ScanResult | null, multiResult: MultiScanResult | null, codeResult: CodeScanResult | null, };
+export type RunScanExecutionResult = { execution: ScanExecutionRecord, reused: boolean, webResult: ScanResult | null, multiResult: MultiScanResult | null, codeResult: CodeScanResult | null, issueChanges: ScanIssueChanges | null, };
 export type ScanAdmissionClass = "general_scan" | "bounded_verification" | "system_exempt";
 
 /**
@@ -517,6 +517,7 @@ export type ScanExecutionRecord = { id: number, projectId: number | null, enviro
 export type ScanExecutionStatus = "planned" | "running" | "complete" | "partial" | "failed" | "cancelled";
 export type ScanExecutionSummary = { id: number, projectId: number | null, environmentId: number | null, environmentUrl: string | null, requestedMode: ScanExecutionMode, webFocus: ScanType | null, trigger: ScanTrigger, status: ScanExecutionStatus, startedAt: number, completedAt: number | null, score: number | null, criticalCount: number | null, highCount: number | null, mediumCount: number | null, lowCount: number | null, webStatus: ScanComponentStatus | null, webDetail: string | null, codeStatus: ScanComponentStatus | null, codeDetail: string | null, webScanId: number | null, webSessionId: number | null, webPageCount: number, codeScanId: number | null, runs: Array<ScanRunSummary>, };
 export type ScanFindingLocationKind = "page" | "file" | "project" | "site" | "none";
+export type ScanIssueChanges = { previousOpenIssues: number, openIssues: number, newIssues: number, resolvedIssues: number, };
 export type ScanResult = { url: string, mode: string, scanType: ScanType, overallScore: number, categories: Array<CategoryScore>, issues: Array<CheckResult>, detectedStack: unknown, durationMs: number, timestamp: string, };
 export type ScanRunDetail = { id: number, parentRunId: number | null, source: ScanEvidenceSource, runKind: ScanRunKind, status: ScanRunStatus, timestamp: string, startedAt: number, completedAt: number | null, rawScore: number | null, durationMs: number, coverage: ScanCoverageManifest, diagnostics: NormalizedRunDiagnostics, statusDetail: string | null, detailState: string, findings: Array<NormalizedFinding>, };
 export type ScanRunKind = "single" | "multi_parent" | "page" | "code";

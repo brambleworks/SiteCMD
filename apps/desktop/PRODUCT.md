@@ -127,12 +127,14 @@ Constraints and durable product facts:
   every tier: every scan, full issue detail, fix guides, AI prompts, reports,
   and dossiers, with no meters, caps, or redaction anywhere in the client. A
   subscription buys the connected service and maintained intelligence stream,
-  enforced server-side where no fork reaches. Founder-beta access is comped
-  and public pricing is not set.
+  enforced server-side where no fork reaches. Connected-service access is
+  free during the beta and public pricing is not set.
 
 Terminology: "SiteCMD Score" (never Web Score or Code Score); "Issues" for the
 unified list (security is a category filter inside it, not its own page); "list,"
 not "queue," in user-facing copy; Web Scan and Code Scan for the two engines;
+"SiteCMD Connect" for the hosted service (lowercase "connected service" only as
+a descriptor in running prose);
 "Accessibility" always spelled out in full, never "A11y."
 
 ## Brand Commitments

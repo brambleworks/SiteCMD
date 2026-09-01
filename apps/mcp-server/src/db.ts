@@ -309,14 +309,51 @@ function loadOpenIssueRows(
   );
 }
 
+function loadLatestSkippedCodeEvidence(projectId: number, envUrl: string): Issue[] {
+  const [noSlash, withSlash] = envUrlVariants(envUrl);
+  return getDb()
+    .prepare(
+      `SELECT finding.id, finding.source, finding.category,
+              finding.canonical_check_id AS check_id, finding.severity,
+              finding.title, finding.description, finding.fix_prompt,
+              finding.page_url, finding.relative_path, finding.line,
+              finding.confidence, finding.detail_json
+       FROM scan_findings finding
+       WHERE finding.run_id = (
+         SELECT run.id
+         FROM scan_runs run
+         WHERE run.project_id = ?
+           AND run.source = 'code_scan'
+           AND run.run_kind = 'code'
+           AND run.status = 'complete'
+           AND (run.environment_scope_key IN (?, ?)
+                OR run.environment_url IN (?, ?))
+         ORDER BY run.started_at DESC, run.id DESC
+         LIMIT 1
+       )
+         AND finding.verdict = 'skipped'
+       ORDER BY finding.ordinal`,
+    )
+    .all(projectId, noSlash, withSlash, noSlash, withSlash) as unknown as Issue[];
+}
+
 export function getRepoSuppressedIssues(
   projectId: number,
   envUrl: string,
 ): Array<{ issue: Issue; reason: string }> {
-  return loadOpenIssueRows(projectId, envUrl).ignored.map(({ row, reason }) => ({
-    issue: row,
-    reason,
-  }));
+  const projectPath = getProjectPathById(projectId);
+  const open = loadOpenIssueRows(projectId, envUrl).ignored;
+  const skipped = applyRepoSuppressions(
+    projectPath,
+    loadLatestSkippedCodeEvidence(projectId, envUrl),
+    new Date(),
+  ).ignored;
+  const unique = new Map<string, { issue: Issue; reason: string }>();
+  for (const { row, reason } of [...open, ...skipped]) {
+    const key = `${row.check_id}\0${row.relative_path ?? ""}\0${row.line ?? ""}`;
+    unique.set(key, { issue: row, reason });
+  }
+  return [...unique.values()];
 }
 
 export function getIssuesForProject(

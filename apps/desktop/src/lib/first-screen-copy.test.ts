@@ -18,10 +18,10 @@ describe("first-screen copy stays in plain English", () => {
     expect(read("components/scan/ScanHistory.tsx")).not.toContain("issue baseline");
   });
 
-  it("explains what a site baseline is under the card title", () => {
-    expect(read("components/dashboard/zones/SiteBaselineCard.tsx")).toContain(
-      "What SiteCMD expects this site to keep doing.",
-    );
+  it("keeps the retired Baseline card off the Dashboard", () => {
+    const source = read("components/dashboard/Dashboard.tsx");
+    expect(source).not.toContain("SiteBaselineCard");
+    expect(source).not.toContain("useSiteBaseline");
   });
 
   it("names each web vital in words next to its acronym", () => {

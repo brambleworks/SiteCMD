@@ -1,11 +1,19 @@
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
 
 export function UpdatesLoadingState() {
   const filterLabels = ["All", "Security", "Major", "Minor"];
 
   return (
-    <LoadingRegion label="Updates loading state" className="page-content stack-hero">
+    <LoadingRegion
+      label="Updates loading state"
+      className="page-content stack-hero updates-loading-state">
+      <div className="updates-loading-status">
+        <RefreshCw className="icon-sm animate-spin" aria-hidden="true" />
+        <span>Checking project dependencies...</span>
+      </div>
+
       <div className="updates-toolbar">
         <Button unstyled type="button" disabled className="disabled-chip-button">
           Re-check
@@ -83,7 +91,7 @@ export function UpdatesStatCards({
       <div className="stat-card">
         <p className="stat-label">Active Vulnerabilities</p>
         {loading ? (
-          <span className="inline-skeleton-sm" />
+          <Skeleton variant="stat" className="updates-stat-refresh-skeleton" />
         ) : (
           <span
             className={`stat-value ${securityCount > 0 ? "text-severity-critical" : "text-foreground"}`}>
@@ -94,7 +102,7 @@ export function UpdatesStatCards({
       <div className="stat-card">
         <p className="stat-label">Packages Tracked</p>
         {loading ? (
-          <span className="inline-skeleton-sm" />
+          <Skeleton variant="stat" className="updates-stat-refresh-skeleton" />
         ) : (
           <span className="stat-value text-foreground">{packageCount}</span>
         )}
@@ -102,7 +110,10 @@ export function UpdatesStatCards({
       <div className="stat-card">
         <p className="stat-label">Last Audit</p>
         {loading ? (
-          <span className="inline-skeleton-md" />
+          <Skeleton
+            variant="stat"
+            className="updates-stat-refresh-skeleton updates-stat-refresh-skeleton--wide"
+          />
         ) : (
           <span className="stat-value text-foreground">{lastAuditLabel}</span>
         )}

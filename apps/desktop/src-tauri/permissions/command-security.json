@@ -107,8 +107,7 @@
       "open_path_in_editor",
       "register_agent_tool",
       "reveal_path",
-      "unregister_agent_tool",
-      "update_project_path"
+      "unregister_agent_tool"
     ]
   },
   "elevatedCommands": [

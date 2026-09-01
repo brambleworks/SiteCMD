@@ -76,6 +76,10 @@ static MIGRATIONS: &[(u32, &str)] = &[
     ),
     (26, include_str!("migrations/026_code_scan_provenance.sql")),
     (27, include_str!("migrations/027_agent_requests.sql")),
+    (
+        28,
+        include_str!("migrations/028_remove_inferred_update_events.sql"),
+    ),
 ];
 
 pub(crate) const UNIFIED_SCAN_CUTOVER_VERSION: u32 = 13;

@@ -111,20 +111,20 @@ describe("AccountSettings commercial boundary", () => {
     };
   });
 
-  it("offers founder-beta access instead of an invented paid plan", () => {
+  it("offers connected beta access instead of an invented paid plan", () => {
     render(<AccountSettings />, { wrapper: withQueryClient() });
 
-    fireEvent.click(screen.getByRole("button", { name: /Request founder beta access/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Request beta access/i }));
     expect(openUrlMock).toHaveBeenCalledWith("https://sitecmd.com/contact");
     expect(screen.queryByRole("button", { name: /Get Plus/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Get Professional/i })).not.toBeInTheDocument();
   });
 
-  it("states that the full local workbench is free and the connected beta is comped", () => {
+  it("states that the full local workbench is free and the connected beta is free", () => {
     render(<AccountSettings />, { wrapper: withQueryClient() });
 
     expect(screen.getByText(/desktop workbench is free and complete/i)).toBeInTheDocument();
-    expect(screen.getByText(/^comped during the founder beta$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^free during the beta$/i)).toBeInTheDocument();
     expect(screen.queryByText(/\$\d+/)).not.toBeInTheDocument();
   });
 
@@ -486,7 +486,7 @@ describe("AccountSettings commercial boundary", () => {
     expect(screen.queryByText(/activation code/i)).not.toBeInTheDocument();
   });
 
-  it("keeps founder-beta details collapsed for an existing Plus license", () => {
+  it("keeps connected-service details collapsed for an existing Plus license", () => {
     tierState.tier = "core";
     tierState.licenseInfo.tier = "core";
     tierState.licenseInfo.status = "active";
@@ -496,10 +496,10 @@ describe("AccountSettings commercial boundary", () => {
 
     render(<AccountSettings />, { wrapper: withQueryClient() });
 
-    expect(screen.queryByText("Founder Beta")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "View Founder Beta" }));
+    expect(document.querySelector(".plan-card-name")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
-    expect(screen.getByText("Founder Beta")).toBeInTheDocument();
+    expect(document.querySelector(".plan-card-name")).toHaveTextContent("SiteCMD Connect");
     expect(screen.queryByText("Professional")).not.toBeInTheDocument();
     expect(screen.getByText("PLUS MONTHLY")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connected access licensed" })).toBeDisabled();
@@ -635,9 +635,9 @@ describe("AccountSettings commercial boundary", () => {
 
     render(<AccountSettings />, { wrapper: withQueryClient() });
 
-    fireEvent.click(screen.getByRole("button", { name: "View Founder Beta" }));
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
-    expect(screen.getByText("Founder Beta")).toBeInTheDocument();
+    expect(document.querySelector(".plan-card-name")).toHaveTextContent("SiteCMD Connect");
     expect(screen.getByText("PROFESSIONAL YEARLY")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connected access licensed" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Get Plus|Get Professional/ })).toBeNull();

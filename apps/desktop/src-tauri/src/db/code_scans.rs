@@ -34,6 +34,7 @@ pub(super) const CODE_SCAN_ISSUE_ROWS_CTE: &str = "code_scan_issue_rows AS (
     FROM scan_findings finding
     JOIN scan_runs run ON run.id = finding.run_id
     WHERE run.source = 'code_scan'
+      AND finding.verdict IN ('fail', 'warn')
 )";
 
 fn code_issue_view_query(limit_one: bool) -> String {

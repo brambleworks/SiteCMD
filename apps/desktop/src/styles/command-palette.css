@@ -142,24 +142,6 @@
     border-radius: var(--radius);
     background-color: color-mix(in oklab, var(--muted) 50%, transparent);
   }
-  .inline-skeleton-sm {
-    display: inline-block;
-    height: 1.75rem;
-    width: 2.5rem;
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-    border-radius: var(--radius);
-    background-color: color-mix(in oklab, var(--muted) 60%, transparent);
-    vertical-align: middle;
-  }
-  .inline-skeleton-md {
-    display: inline-block;
-    height: 1.75rem;
-    width: 4rem;
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-    border-radius: var(--radius);
-    background-color: color-mix(in oklab, var(--muted) 60%, transparent);
-    vertical-align: middle;
-  }
   .scan-config-skeleton-icon {
     display: inline-block;
     height: 1rem;

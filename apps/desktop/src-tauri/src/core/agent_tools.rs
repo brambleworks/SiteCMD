@@ -10,8 +10,6 @@ use std::time::Instant;
 use crate::constants::{
     AGENT_CLI_OUTPUT_DRAIN_TIMEOUT, AGENT_CLI_POLL_INTERVAL, AGENT_CLI_TIMEOUT,
 };
-#[cfg(feature = "desktop")]
-use crate::constants::{MCP_HEALTH_CHECK_POLL_INTERVAL, MCP_HEALTH_CHECK_TIMEOUT};
 
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "ipc-bindings.ts")]
@@ -37,6 +35,8 @@ pub struct McpManualConfig {
 
 mod config;
 mod discovery;
+#[cfg(feature = "desktop")]
+mod health;
 pub use config::{
     codex_config_has_sitecmd, codex_config_matches_sitecmd_spec, cursor_config_has_sitecmd,
     cursor_config_matches_sitecmd_spec, remove_codex_config, remove_cursor_config,
@@ -48,6 +48,8 @@ pub use discovery::node_available;
 #[cfg(feature = "desktop")]
 use discovery::{binary_available, binary_paths};
 use discovery::{binary_on_path, home_dir};
+#[cfg(feature = "desktop")]
+use health::run_server_health_check;
 
 #[cfg(feature = "desktop")]
 const MCP_MINIMUM_NODE_VERSION: (u64, u64, u64) = (22, 22, 1);
@@ -402,54 +404,6 @@ fn windsurf_installed() -> bool {
         return true;
     }
     binary_available("windsurf")
-}
-
-#[cfg(feature = "desktop")]
-fn run_server_health_check(spec: &McpServerSpec) -> Result<(), String> {
-    let mut child = Command::new(&spec.command)
-        .args(&spec.args)
-        .arg("--sitecmd-health-check")
-        .envs(&spec.env)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| "The SiteCMD MCP server could not start".to_string())?;
-    let stdout_rx = drain_pipe(child.stdout.take());
-    let stderr_rx = drain_pipe(child.stderr.take());
-    let started_at = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started_at.elapsed() < MCP_HEALTH_CHECK_TIMEOUT => {
-                std::thread::sleep(MCP_HEALTH_CHECK_POLL_INTERVAL);
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("The SiteCMD MCP server health check timed out".to_string());
-            }
-            Err(_) => return Err("The SiteCMD MCP server health check failed".to_string()),
-        }
-    };
-    let stdout = recv_drained(&stdout_rx);
-    let stderr = recv_drained(&stderr_rx);
-    let healthy_marker = serde_json::from_str::<serde_json::Value>(stdout.trim())
-        .ok()
-        .is_some_and(|value| {
-            value.get("marker").and_then(serde_json::Value::as_str) == Some("SITECMD_MCP_HEALTH_V1")
-                && value.get("ok").and_then(serde_json::Value::as_bool) == Some(true)
-        });
-    if status.success() && healthy_marker {
-        Ok(())
-    } else {
-        tracing::warn!(
-            stderr = %crate::log_sanitizer::bounded_issue_evidence(&stderr),
-            "SiteCMD MCP health check failed"
-        );
-        Err("The SiteCMD MCP server could not open its database; repair the connection and try again"
-            .to_string())
-    }
 }
 
 #[cfg(feature = "desktop")]

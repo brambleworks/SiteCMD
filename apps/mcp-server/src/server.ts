@@ -868,7 +868,7 @@ function registerCoreTools(server: McpServer): void {
             (comparison) => comparison.newIssues.length === 0 && comparison.remaining.length === 0,
           )
         ) {
-          body.push("🎉 All issues fixed!");
+          body.push("All issues fixed.");
         }
 
         return text(

@@ -1,330 +1,292 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
 import { CircleHelp, X } from "lucide-react";
-import type { NavPage } from "@/components/layout/NavSidebar";
+import type { NavPage } from "@/components/layout/nav-page";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 
-interface PageGuideContent {
+interface PageGuideSection {
   title: string;
-  subtitle: string;
-  purpose: string;
-  lookFirst: string[];
-  useWell: string[];
-  takeAction: string[];
-  proTip: string;
+  items: readonly string[];
 }
 
-/** Nav pages plus the score strip, which has a guide without being a page. */
-export type PageGuideKey = NavPage | "score";
+interface PageGuideContent {
+  title: string;
+  summary: string;
+  sections: readonly PageGuideSection[];
+}
+
+export type PageGuideKey = NavPage;
 
 const PAGE_GUIDES: Record<PageGuideKey, PageGuideContent> = {
   dashboard: {
-    title: "Site Dashboard Guide",
-    subtitle: "A quick daily read on this site's condition and next move.",
-    purpose:
-      "The Dashboard is the fast answer to: is this site basically healthy, and what should I do next? It pulls the strongest signals from scans, connected services, and recent activity into one working view.",
-    lookFirst: [
-      "Start with the identity and health strip to see whether the selected site, environment, and latest scores look right.",
-      "Check the action items before reading every metric. Those are the items most likely to change what you do today.",
-      "Use recent activity to understand whether a scan, deploy, or integration event explains a sudden change.",
+    title: "Site Dashboard",
+    summary:
+      "See the selected site's current health, highest-priority work, key signals, and recent activity.",
+    sections: [
+      {
+        title: "Start here",
+        items: [
+          "Confirm the site and environment in the identity strip, then check the Issues and Updates cards for work that needs attention.",
+          "Use At a Glance for the SiteCMD Score, uptime, visitors, and search clicks. A missing metric means its source is not available.",
+          "Read Recent Activity when a score or connected signal changes unexpectedly.",
+        ],
+      },
+      {
+        title: "Go deeper",
+        items: [
+          "Open Issues, Updates, or Alerts when an item needs investigation or action.",
+          "Run a new scan after changing the site or linked code so the Dashboard reflects the current state.",
+          "Connect services in Integrations or link a project folder in Site Setup when the Dashboard lacks context.",
+        ],
+      },
     ],
-    useWell: [
-      "Treat the Dashboard as triage, not the full investigation. Click into Issues, Updates, or Alerts when something needs work.",
-      "After making changes, re-scan or refresh the connected signal so the Dashboard reflects the current site, not yesterday's state.",
-      "If the page looks thin, connect more integrations or add the local project folder so SiteCMD has more context.",
-    ],
-    takeAction: [
-      "A critical issue or security update appears in the action items.",
-      "The SiteCMD Score drops after a deploy or content change.",
-      "A connected service is stale and the Dashboard is missing a signal you rely on.",
-    ],
-    proTip:
-      "For business owners, this is the morning check-in. For builders, this is where you decide which specialized page deserves attention.",
   },
   analytics: {
-    title: "Traffic & Uptime Guide",
-    subtitle: "Visitor demand, uptime, and delivery health in one place.",
-    purpose:
-      "Traffic combines visitor, uptime, CDN, and delivery signals so you can see whether people are reaching the site and whether the site is holding up while they do.",
-    lookFirst: [
-      "Start with the period selector and make sure you are comparing the right window.",
-      "Check visitors and pageviews for demand, then uptime and response time for reliability.",
-      "Use top pages and sources to spot which pages or channels actually matter to the business.",
+    title: "Traffic & Uptime",
+    summary:
+      "Review visitor, uptime, CDN, and delivery data available from the services connected to this project.",
+    sections: [
+      {
+        title: "Read the data",
+        items: [
+          "Choose the period first, then use Traffic Summary and Recent Traffic to compare demand over the same window.",
+          "Traffic Sources and Top Pages show where visits came from and which paths received them.",
+          "Use the uptime, response-time, and Cloudflare sections to separate availability or delivery problems from traffic changes.",
+        ],
+      },
+      {
+        title: "Check coverage",
+        items: [
+          "Open Sources to see which providers contribute data. A blank section means no available provider returned that kind of data for the selected period.",
+          "Connect Plausible, Google Analytics, Cloudflare, or UptimeRobot in Integrations when a signal is missing.",
+        ],
+      },
     ],
-    useWell: [
-      "Read traffic changes alongside deploys and alerts before assuming a marketing or product cause.",
-      "For operational context, stay here. For search visibility and indexing problems, go to Search & SEO.",
-      "If there is no data, connect Plausible, GA4, Cloudflare, or uptime monitoring in Integrations.",
-    ],
-    takeAction: [
-      "Traffic drops sharply without a known seasonal, campaign, or deployment reason.",
-      "Uptime, response time, or CDN behavior worsens while traffic is normal.",
-      "A key page stops receiving visits or starts behaving differently from the rest of the site.",
-    ],
-    proTip:
-      "Do not optimize for the average page first. Look for the pages that carry revenue, signups, leads, or trust, then protect those paths.",
   },
   issues: {
-    title: "Issues Guide",
-    subtitle: "The work list for fixes, regressions, verification, and proof.",
-    purpose:
-      "Issues is where SiteCMD turns scan output into work you can actually finish. It combines live-site issues, code issues, paused work, regressions, and history so you are not bouncing between reports.",
-    lookFirst: [
-      "Start on the Issues tab and handle critical, high, or regressed items before routine cleanup.",
-      "Use Pages when you care about a specific money page, landing page, checkout path, or support page.",
-      "Use History when you need to prove whether things improved after a fix or got worse after a deploy.",
+    title: "Issues",
+    summary:
+      "Review Web Scan and Code Scan findings, decide what to fix, and verify completed work.",
+    sections: [
+      {
+        title: "Work the list",
+        items: [
+          "Use the status, source, severity, and category filters to narrow the active findings.",
+          "Open a finding for evidence, impact, fix guidance, and relevant files when they are available.",
+          "Pages groups findings by URL. History shows past scan runs and how their totals changed.",
+        ],
+      },
+      {
+        title: "Take action",
+        items: [
+          "Use Fix with Agent or Batch prompt to hand selected work to your coding tool, then Verify fix after the change is made.",
+          "Ignore a finding only when you accept it for this project. Block it when work cannot continue yet.",
+          "Reopen an ignored or blocked finding when it needs attention again.",
+        ],
+      },
     ],
-    useWell: [
-      "Open the dossier for an issue when you need impact, fix steps, likely files, and verification guidance.",
-      "After fixing something meaningful, run a fresh scan when you need proof that it cleared.",
-      "Dismiss only when the issue is intentionally accepted for this site, not because it is annoying.",
-    ],
-    takeAction: [
-      "An item blocks launch, affects a key page, or keeps coming back after being fixed.",
-      "A new issue appears after a deploy, dependency update, or content change.",
-      "The same pattern appears across multiple pages and should be fixed at the template or component level.",
-    ],
-    proTip:
-      "Think of Issues as the working room. The score matters, but the next best action matters more.",
   },
   alerts: {
-    title: "Alerts Guide",
-    subtitle: "Important changes that deserve attention before normal task work.",
-    purpose:
-      "Alerts is for changes that are urgent enough to break normal flow: outages, regressions, threats, integration failures, and unusual drops from connected services.",
-    lookFirst: [
-      "Check unread alerts first, then severity and source.",
-      "Read the alert title and source before opening details. It usually tells you whether this is uptime, traffic, search, deploy, or security.",
-      "Use source coverage to see whether important monitoring systems are actually connected.",
+    title: "Alerts",
+    summary:
+      "Review outages, regressions, threats, service failures, and unusual changes that need timely attention.",
+    sections: [
+      {
+        title: "Review alerts",
+        items: [
+          "Use All, Unread, Viewed, and Dismissed to separate new alerts from ones already reviewed.",
+          "Open an alert to see its source and available next action. Mark all read clears the unread state in one step.",
+          "Dismiss removes an alert from active attention; it does not resolve the issue or service condition that created it.",
+        ],
+      },
+      {
+        title: "Check coverage",
+        items: [
+          "Connected Alerts shows alerts delivered by the connected service for this project.",
+          "Sources separates built-in checks from connected providers and shows which services are enabled.",
+          "Use Check sources when coverage looks stale, or Open Integrations to repair a provider.",
+        ],
+      },
     ],
-    useWell: [
-      "Mark alerts read when someone has viewed them; dismiss only when they are resolved or not relevant.",
-      "Use Issues for routine work. Keep Alerts reserved for things that changed enough to need attention now.",
-      "If alerts seem quiet, confirm the relevant integrations and built-in checks are connected.",
-    ],
-    takeAction: [
-      "The site is down, slow, blocked, or suddenly losing traffic.",
-      "A scan, deploy, or connected service reports a meaningful regression.",
-      "An alert repeats after you thought the cause was fixed.",
-    ],
-    proTip:
-      "A good alert page should stay boring most days. When it is not boring, work from source and severity before guessing.",
   },
   deploys: {
-    title: "Deployments Guide",
-    subtitle: "A release log for understanding what changed and what broke afterward.",
-    purpose:
-      "Deployments helps you answer: what changed recently, did it ship cleanly, and did the site get worse afterward? It links commits, CI, deploy events, and scans when those signals are available.",
-    lookFirst: [
-      "Start with the most recent deploy or commit and check whether CI passed.",
-      "Look for scan regressions that happened after a deploy.",
-      "Check pending commits since the last scan if the local project has moved ahead of the last verified site state.",
+    title: "Deployments",
+    summary:
+      "Compare local commits, GitHub CI and pull requests, and the latest Web Scan to find unverified changes or likely regressions.",
+    sections: [
+      {
+        title: "Review recent changes",
+        items: [
+          "Total Commits, Success Rate, and Last Web Scan summarize the current change and verification state.",
+          "Pending commits since the last scan means the linked repository has moved ahead of the last verified site state.",
+          "Latest Commits shows the local history. Connect GitHub to add workflow runs and open pull requests.",
+        ],
+      },
+      {
+        title: "Connect changes to outcomes",
+        items: [
+          "A regression callout appears when SiteCMD can correlate a deploy event with a later score drop or finding change. Open the affected Issues for evidence.",
+          "Use Scan after deploy on a relevant commit to verify the live site after a production change.",
+        ],
+      },
     ],
-    useWell: [
-      "Scan after meaningful deploys so the app can connect changes to outcomes.",
-      "When a problem appears, start here to find the likely time window or commit range.",
-      "Connect GitHub and keep the project folder linked for richer release context.",
-    ],
-    takeAction: [
-      "CI fails, a deploy regresses the site, or a recent commit aligns with a new issue.",
-      "A production change shipped without a follow-up scan.",
-      "You need to decide whether to fix forward, revert, or investigate a specific release.",
-    ],
-    proTip:
-      "When something breaks, do not start with every possible cause. Start with the most recent deploy window.",
   },
   updates: {
-    title: "Dependency Updates Guide",
-    subtitle: "Dependency maintenance separated from launch-risk upgrades.",
-    purpose:
-      "Package Updates separates normal maintenance from updates that carry launch, security, or compatibility risk. It is designed to help you upgrade intentionally instead of letting dependency work pile up.",
-    lookFirst: [
-      "Check security updates first, especially critical or high vulnerabilities.",
-      "Scan major version updates for likely breaking changes before applying them casually.",
-      "Use the update details to decide whether a package is routine maintenance or launch-risk work.",
+    title: "Updates",
+    summary:
+      "Find outdated or vulnerable packages, prepare update commands, and verify changes made in the linked repository.",
+    sections: [
+      {
+        title: "Choose the work",
+        items: [
+          "Review security updates first, then use All, Major, Minor, and Patch to narrow the remaining packages.",
+          "Open an update to see the installed and available versions, security details, and the package-manager command.",
+          "Handle major framework, build, database, authentication, and payment updates as separate compatibility checks.",
+        ],
+      },
+      {
+        title: "Make and verify changes",
+        items: [
+          "Copy a package command, use Copy All Commands, or choose Fix with Agent when that action is available.",
+          "SiteCMD prepares or hands off the work; it does not install packages directly in the Updates page.",
+          "Recent Dependency Changes lists package follow-ups SiteCMD can re-check. Use Verify after the repository has changed, or Ignore or Block work that should not proceed.",
+        ],
+      },
     ],
-    useWell: [
-      "Batch low-risk patch and minor updates when tests are healthy.",
-      "Handle major framework, build tool, database, auth, and payment updates as separate launch-risk decisions.",
-      "After applying updates, run the relevant build, tests, and SiteCMD verification path.",
-    ],
-    takeAction: [
-      "A package update fixes a known vulnerability.",
-      "A pinned or old core dependency blocks launch confidence.",
-      "An update was applied but has not been verified against the real app.",
-    ],
-    proTip:
-      "The goal is not newest-at-all-costs. The goal is knowing which packages are safe routine work and which ones need a deliberate release check.",
   },
   events: {
-    title: "Activity Guide",
-    subtitle: "The project timeline for answering what happened and when.",
-    purpose:
-      "Activity Timeline is the memory of the site: scans, deploys, alerts, integration events, verification work, and notable follow-ups in one chronological view.",
-    lookFirst: [
-      "Start with the time range around the change you care about.",
-      "Look for clusters: a deploy, then a scan regression, then an alert often tells a useful story.",
-      "Use filters when you only need deploys, scans, alerts, or verification events.",
+    title: "Activity",
+    summary:
+      "Review recorded scan, verification, change, and monitoring events in chronological or calendar views.",
+    sections: [
+      {
+        title: "Choose a view",
+        items: [
+          "Feed shows recent events in order. Day, Week, and Month place the same history on a calendar.",
+          "Use Scans & verification, Changes, and Monitoring to focus the timeline on the event types you need.",
+          "Calendar views include date navigation and a Today shortcut. Feed covers the recent 30-day window.",
+        ],
+      },
+      {
+        title: "Use the record",
+        items: [
+          "Open linked events to move from the timeline to the related page or finding.",
+          "Export JSON or CSV when you need the visible range outside SiteCMD.",
+          "Activity shows up to 500 events for a selected range and tells you when more history exists.",
+        ],
+      },
     ],
-    useWell: [
-      "Use Activity when someone asks, 'what changed?' or 'when did this start?'",
-      "Pair timeline evidence with Issues or Deployments to move from history to action.",
-      "Keep integrations connected so the timeline records business and technical events together.",
-    ],
-    takeAction: [
-      "A customer, teammate, or stakeholder asks for proof of what happened.",
-      "A regression needs a likely cause window.",
-      "Repeated events show a process problem, not just a one-off issue.",
-    ],
-    proTip:
-      "A timeline is strongest when it is used for decisions, not archaeology. Find the event that changes the next step.",
   },
   "search-console": {
-    title: "Search & SEO Guide",
-    subtitle: "Search visibility, indexing, and crawl health for important pages.",
-    purpose:
-      "Search & SEO focuses on whether search engines can discover, understand, and keep sending traffic to the site. It combines search visibility with technical crawl and indexing signals.",
-    lookFirst: [
-      "Start with search regressions or indexing issues before general optimization ideas.",
-      "Check the pages that matter most for leads, sales, brand trust, or support.",
-      "Look for technical blockers like robots, sitemap, redirects, canonical tags, or crawl errors.",
+    title: "Search & SEO",
+    summary:
+      "Review Google and Bing search visibility data for the selected site and verify recent search-related changes.",
+    sections: [
+      {
+        title: "Read search visibility",
+        items: [
+          "Google Search Visibility shows clicks, impressions, click-through rate, average position, queries, and pages for the selected period.",
+          "Bing Search Visibility shows clicks, impressions, average position, crawl errors, queries, and pages.",
+          "Use Refresh search data after changing a provider or when the displayed results are stale.",
+        ],
+      },
+      {
+        title: "Resolve missing or pending data",
+        items: [
+          "Connect or repair Google Search Console and Bing Webmaster Tools from the setup cards when a provider is missing.",
+          "Recent SEO Changes lists search-related follow-ups that still need a fresh check.",
+          "Web Scan findings for metadata, robots, sitemaps, redirects, and canonicals remain in Issues.",
+        ],
+      },
     ],
-    useWell: [
-      "For search visibility, stay here. For all visitor sources, go to Traffic & Uptime.",
-      "After fixing SEO or crawl issues, verify with a scan and the connected search source when available.",
-      "Treat content, technical SEO, and performance together when a key page is losing visibility.",
-    ],
-    takeAction: [
-      "A key page drops in impressions, clicks, indexing, or crawl health.",
-      "Search engines are blocked from important pages.",
-      "Metadata, structured data, redirects, or canonical signals create confusion.",
-    ],
-    proTip:
-      "SEO work should start with important pages and real visibility signals, not generic checklists.",
   },
   integrations: {
-    title: "Integrations Guide",
-    subtitle: "The outside services SiteCMD can listen to and reason about.",
-    purpose:
-      "Integrations are the inputs that turn SiteCMD from a scanner into an operating console. The more relevant sources you connect, the better the app can explain what changed and what matters.",
-    lookFirst: [
-      "Connect the services you already trust for traffic, uptime, search, deploys, and security.",
-      "Check connection health before assuming a page has no data.",
-      "Prioritize integrations that match how the site makes money or serves customers.",
+    title: "Integrations",
+    summary:
+      "Connect AI agents for fixes and services that add traffic, uptime, search, deployment, and issue-tracker context.",
+    sections: [
+      {
+        title: "Connect an agent",
+        items: [
+          "Connect Claude Code, Codex, Cursor, or Windsurf so the agent can read SiteCMD issues, make changes, and request verification.",
+          "SiteCMD shows the planned MCP configuration change before writing it and can repair an outdated registration.",
+          "Use Manual setup when automatic detection or configuration is not available for your tool.",
+        ],
+      },
+      {
+        title: "Connect services",
+        items: [
+          "Add analytics, monitoring, search, GitHub, or Jira connections that match the signals this project uses.",
+          "Open Active connections to manage configured providers. Service credentials stay on this machine and are used only to communicate directly with that provider.",
+        ],
+      },
     ],
-    useWell: [
-      "Connect one source at a time and confirm data appears where expected.",
-      "Use Settings for workspace or app behavior; use Integrations for external service signals.",
-      "Review stale or failing integrations when Dashboard, Alerts, or Traffic look incomplete.",
-    ],
-    takeAction: [
-      "A page says it has no data but you know the service exists.",
-      "An integration is stale, disabled, or failing authentication.",
-      "You are preparing for launch and need proof from uptime, search, traffic, or deploy systems.",
-    ],
-    proTip:
-      "Do not connect everything just because it exists. Connect the sources that change decisions.",
   },
   sites: {
-    title: "Overview Guide",
-    subtitle: "The portfolio view for deciding which site needs attention first.",
-    purpose:
-      "Overview is the portfolio view. It helps owners and operators see which sites are healthy, which ones need attention, and where to jump next.",
-    lookFirst: [
-      "Check total active issues and average scores to understand the overall workload.",
-      "Find the site with the strongest critical, launch, or regression signal.",
-      "Use the current-site highlight to confirm which site you are about to open.",
+    title: "Overview",
+    summary: "Compare tracked projects, choose the site that needs attention, and switch projects.",
+    sections: [
+      {
+        title: "Compare sites",
+        items: [
+          "Total Sites, Active Issues, Avg. SiteCMD Score, and Scanned Sites summarize the portfolio.",
+          "The average uses only sites with a current score; unscanned sites are not counted as zero.",
+          "Each row shows the site's current SiteCMD Score and active issue count. Critical findings change the issue count's emphasis.",
+        ],
+      },
+      {
+        title: "Open or add a site",
+        items: [
+          "Select a row to make that project active before running scans, changing settings, or building reports. The current-site treatment shows which project is already active.",
+          "Use Add Site when another property needs its own URL, history, linked folder, and integrations.",
+        ],
+      },
     ],
-    useWell: [
-      "Use Overview when you manage multiple client sites, products, or environments.",
-      "Open the specific site before making changes so scans, settings, and reports apply to the right project.",
-      "Add a site when a new property needs its own history, integrations, and launch workflow.",
-    ],
-    takeAction: [
-      "One site has critical issues while the rest are stable.",
-      "A site has not been scanned or checked recently.",
-      "You need to compare where your limited maintenance time will have the most impact.",
-    ],
-    proTip:
-      "This is a workload map. Pick the site that needs attention, then use the specialized pages to do the work.",
   },
   settings: {
-    title: "Project Settings Guide",
-    subtitle: "The project and app controls that make the rest of SiteCMD trustworthy.",
-    purpose:
-      "Settings holds the project, account, environment, license, and app preferences that affect how SiteCMD behaves. It is where you make the workspace match the real site and team.",
-    lookFirst: [
-      "Confirm the project name, environment URLs, and local folder are correct.",
-      "Check account, license, and feature access when a capability seems unavailable.",
-      "Review app preferences that affect notifications, monitoring, or desktop behavior.",
+    title: "Project Settings",
+    summary: "Manage the selected project and workspace-wide SiteCMD behavior.",
+    sections: [
+      {
+        title: "This Project",
+        items: [
+          "Site Setup manages the project name, linked folder, environment URLs, sitemap pages, and project removal.",
+          "Scanning controls scan preferences and schedules. Automation contains CI/CD and webhook delivery settings.",
+          "Connected shows the selected project's connected-service state and related controls.",
+        ],
+      },
+      {
+        title: "Workspace",
+        items: [
+          "Account & Billing manages the account and license. App Preferences controls theme, desktop behavior, notifications, and updates.",
+          "Privacy & Diagnostics controls telemetry, crash reporting, and diagnostic data. Data manages the local database, backups, and cleanup.",
+          "Use Integrations, not Settings, to connect agent tools and external data providers.",
+        ],
+      },
     ],
-    useWell: [
-      "Keep environment URLs accurate so scans and connected signals point at the right place.",
-      "Use Integrations for external service setup; use Settings for workspace and app-level choices.",
-      "Before deleting or changing project details, make sure you are on the intended project.",
-    ],
-    takeAction: [
-      "A scan or report is using the wrong site URL.",
-      "The local folder moved or the app cannot find project files.",
-      "Feature access, billing, or desktop behavior does not match expectations.",
-    ],
-    proTip:
-      "Settings should be boring because it is correct. If the rest of the app feels off, verify the project basics here.",
   },
   reports: {
-    title: "Reports Guide",
-    subtitle: "Shareable status, evidence, and next steps for people outside the app.",
-    purpose:
-      "Reports packages SiteCMD issues and connected signals into a format you can send to a client, stakeholder, teammate, or future you.",
-    lookFirst: [
-      "Choose the report scope based on the audience: launch readiness, current health, security, or recent progress.",
-      "Check that the latest scan and connected service data are fresh before generating.",
-      "Review whether the report should explain risk, progress, or next actions.",
+    title: "Reports",
+    summary:
+      "Build a current report from scan results and available connected data, then preview or export it.",
+    sections: [
+      {
+        title: "Configure the report",
+        items: [
+          "Set the report title and choose the 7-day, 30-day, or 90-day reporting period.",
+          "Report Coverage and Latest Included Snapshot show which Web Scan, Code Scan, and connected signals are available.",
+          "Choose the included sections and expand Branding when the report needs a company name, logo, client name, colors, or footer text.",
+        ],
+      },
+      {
+        title: "Preview and export",
+        items: [
+          "Refresh stale scan or connected data first. Generate Report opens a preview built from the current configuration and latest included snapshot.",
+          "Use Export PDF or Save HTML from the preview. Report History keeps earlier generated reports available for review or regeneration.",
+        ],
+      },
     ],
-    useWell: [
-      "Generate reports after verification, not before, when you need proof of improvement.",
-      "Use plain-language summaries for business readers and detailed issues for technical handoff.",
-      "Refresh scans or integrations first if the report would otherwise describe stale conditions.",
-    ],
-    takeAction: [
-      "A client or stakeholder needs a clear status update.",
-      "You need launch evidence, maintenance proof, or a before-and-after record.",
-      "The report data is stale and should be refreshed before sharing.",
-    ],
-    proTip:
-      "A good report should answer: what is the state, why does it matter, and what happens next?",
-  },
-  score: {
-    title: "SiteCMD Score Guide",
-    subtitle: "One number for the whole site, and exactly how it is computed.",
-    purpose:
-      "The SiteCMD Score is a 0 to 100 reading of the live site and its code together. It starts at 100 and loses points for every open issue, weighted by severity and by how sure SiteCMD is that the finding is real, so one critical problem costs more than a handful of low ones.",
-    lookFirst: [
-      "Open the breakdown under the ring to see the starting 100 and the points each severity band took away.",
-      "A capped score means a confirmed-exploitable critical issue was found; no amount of low-severity cleanup lifts it until that is fixed.",
-      "Watch the checked time. A score from last week describes last week's site.",
-    ],
-    useWell: [
-      "Fix the band that took the most points first; that is where the score moves fastest.",
-      "Rescan after a fix so the score reflects the site as it is now, not as it was.",
-      "Ignore only issues you have genuinely accepted. Ignoring to raise the number hides risk from you, not from visitors.",
-    ],
-    takeAction: [
-      "The score drops after a deploy, a content change, or a dependency update.",
-      "The breakdown shows critical or high points and you did not expect either.",
-      "The score is capped and the confirmed-exploitable issue is still open.",
-    ],
-    proTip:
-      "Treat the Excellent band as healthy and anything below Good as needing a plan this week. The bands are the same in every report, dashboard, and scan summary.",
   },
 };
 
@@ -332,6 +294,7 @@ export function PageGuideButton({ page, className }: { page: PageGuideKey; class
   const guide = PAGE_GUIDES[page];
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const guideLabel = `${guide.title} guide`;
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -345,8 +308,8 @@ export function PageGuideButton({ page, className }: { page: PageGuideKey; class
         type="button"
         onClick={() => setOpen(true)}
         className={cn("page-guide-trigger", className)}
-        aria-label={`Open ${guide.title}`}
-        title={guide.title}>
+        aria-label={`Open ${guideLabel}`}
+        title={`Open ${guideLabel}`}>
         <CircleHelp className="icon-md" aria-hidden="true" />
         <span className="page-guide-trigger__label">Guide</span>
       </Button>
@@ -369,7 +332,7 @@ function PageGuidePanel({
   const closeTimerRef = useRef<number | null>(null);
   const onCloseRef = useRef(onClose);
   const titleId = useId();
-  const subtitleId = useId();
+  const summaryId = useId();
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -398,7 +361,7 @@ function PageGuidePanel({
   return (
     <Dialog
       labelledBy={titleId}
-      describedBy={subtitleId}
+      describedBy={summaryId}
       onClose={requestClose}
       restoreFocusTo={triggerRef}
       className={cn(
@@ -407,12 +370,11 @@ function PageGuidePanel({
       )}>
       <div className="page-guide-header">
         <div className="flex-fill">
-          <p className="details-eyebrow">Page Guide</p>
-          <h2 id={titleId} className="details-title">
+          <h2 id={titleId} className="details-title page-guide-title">
             {guide.title}
           </h2>
-          <p id={subtitleId} className="details-subtitle">
-            {guide.subtitle}
+          <p id={summaryId} className="details-subtitle">
+            {guide.summary}
           </p>
         </div>
         <Button
@@ -427,51 +389,24 @@ function PageGuidePanel({
       </div>
 
       <div className="page-guide-body">
-        <GuideSection index={1} label="What this page is for" tone="attention">
-          <p className="page-guide-paragraph">{guide.purpose}</p>
-        </GuideSection>
-        <GuideSection index={2} label="Look at first" tone="action">
-          <GuideList items={guide.lookFirst} />
-        </GuideSection>
-        <GuideSection index={3} label="Use it well" tone="supporting">
-          <GuideList items={guide.useWell} />
-        </GuideSection>
-        <GuideSection index={4} label="When to take action" tone="verify">
-          <GuideList items={guide.takeAction} />
-        </GuideSection>
-        <section className="page-guide-tip">
-          <p className="details-section-label">Operator tip</p>
-          <p>{guide.proTip}</p>
-        </section>
+        {guide.sections.map((section) => (
+          <GuideSection key={section.title} section={section} />
+        ))}
       </div>
     </Dialog>
   );
 }
 
-function GuideSection({
-  index,
-  label,
-  tone,
-  children,
-}: {
-  index: number;
-  label: string;
-  tone: "attention" | "action" | "supporting" | "verify";
-  children: ReactNode;
-}) {
+function GuideSection({ section }: { section: PageGuideSection }) {
   return (
-    <section
-      className={cn("dossier-numbered-section page-guide-section", `dossier-section-tone-${tone}`)}>
-      <div className="dossier-numbered-header">
-        <span className="dossier-numbered-index">{String(index).padStart(2, "0")}</span>
-        <span className="dossier-numbered-label">{label}</span>
-      </div>
-      <div className="dossier-numbered-body">{children}</div>
+    <section className="page-guide-section stack-base">
+      <h3 className="text-body text-strong">{section.title}</h3>
+      <GuideList items={section.items} />
     </section>
   );
 }
 
-function GuideList({ items }: { items: string[] }) {
+function GuideList({ items }: { items: readonly string[] }) {
   return (
     <ul className="page-guide-list">
       {items.map((item) => (

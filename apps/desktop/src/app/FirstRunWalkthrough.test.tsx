@@ -88,6 +88,7 @@ describe("FirstRunWalkthrough", () => {
     fireEvent.click(screen.getByRole("button", { name: /Next: Integrations/i }));
     expect(onNavigate).toHaveBeenLastCalledWith("integrations");
     expect(screen.getByText("Connect your services")).toBeInTheDocument();
+    expect(screen.getByText(/AI agent.*fix Issues/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Next: Dashboard/i }));
     expect(onNavigate).toHaveBeenLastCalledWith("dashboard");

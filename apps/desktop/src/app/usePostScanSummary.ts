@@ -13,6 +13,7 @@ import type {
   CodeScanResult,
   CodeScanSummary,
   RunScanExecutionRequest,
+  ScanIssueChanges,
   ScanResult,
   ScoreSnapshot,
 } from "@/lib/types";
@@ -24,6 +25,7 @@ interface UsePostScanSummaryParams {
   result: ScanResult | null;
   codeResult: CodeScanResult | null;
   multiResult: MultiScanResult | null;
+  issueChanges: ScanIssueChanges | null;
   executionIncompleteDetail: string | null;
   activeProjectId: number | null;
   activeEnvUrl: string | null;
@@ -51,6 +53,7 @@ export function usePostScanSummary({
   result,
   codeResult,
   multiResult,
+  issueChanges,
   executionIncompleteDetail,
   activeProjectId,
   activeEnvUrl,
@@ -180,6 +183,7 @@ export function usePostScanSummary({
       scopeLabel: activeScanScope,
       inactiveCheckIds: new Set(inactiveCheckIds),
       persistedSummary,
+      issueChanges,
     });
   }, [
     activeScanScope,
@@ -189,6 +193,7 @@ export function usePostScanSummary({
     activeProjectId,
     fullScanStillRunning,
     history,
+    issueChanges,
     multiResult,
     executionIncompleteDetail,
     currentExecutionMode,

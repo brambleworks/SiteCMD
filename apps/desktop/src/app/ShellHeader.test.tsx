@@ -7,13 +7,13 @@ describe("ShellPageHeader", () => {
   it("shows the page guide action in standard shell headers", () => {
     render(<ShellPageHeader page="dashboard" showScanHeader={false} />);
 
-    expect(screen.getByRole("button", { name: "Open Site Dashboard Guide" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Site Dashboard guide" })).toBeInTheDocument();
   });
 
   it("shows the issues title with the guide action", () => {
     render(<ShellPageHeader page="issues" showScanHeader={false} />);
 
-    expect(screen.getByRole("button", { name: "Open Issues Guide" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Issues guide" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Issues" })).toBeInTheDocument();
     expect(screen.getByText(/ranked by what to fix first/)).toBeInTheDocument();
   });

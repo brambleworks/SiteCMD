@@ -703,12 +703,8 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: color-mix(in oklab, var(--zinc-100) 90%, transparent);
-    background: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px), #1f2023;
-    background-size: 100% 18px;
-    box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-      inset 0 24px 80px rgba(255, 255, 255, 0.025),
-      0 16px 45px rgba(0, 0, 0, 0.22);
+    background: var(--zinc-900);
+    box-shadow: inset 0 0 0 1px var(--border);
   }
   .scan-terminal-header {
     position: sticky;
@@ -760,7 +756,6 @@
     grid-template-columns: 3.3rem 3.7rem 4.5rem minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-snug);
-    border-bottom: 1px solid color-mix(in oklab, white 5%, transparent);
     padding-top: 0.375rem;
     padding-bottom: 0.375rem;
     animation: scan-terminal-row-in 180ms cubic-bezier(0.2, 0, 0, 1) both;

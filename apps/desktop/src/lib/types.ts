@@ -10,6 +10,7 @@ export type {
   ScanResult,
   RunScanExecutionRequest,
   RunScanExecutionResult,
+  ScanIssueChanges,
   ScanExecutionSummary,
   ScanTrigger,
   // events

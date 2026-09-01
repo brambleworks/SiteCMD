@@ -402,7 +402,7 @@ describe("ScanOverlay", () => {
 
     expect(screen.getAllByText("Polish").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Fetching styles").length).toBeGreaterThan(0);
-    expect(screen.getByText("90")).toBeInTheDocument();
+    expect(screen.getByText("70")).toBeInTheDocument();
   });
 
   it("paces visible web scan phase changes instead of skipping straight to the latest event", () => {
@@ -546,7 +546,7 @@ describe("ScanOverlay", () => {
     expect(screen.getByText("scan")).toBeInTheDocument();
   });
 
-  it("keeps the final web scan phase below fake-complete while running", () => {
+  it("reserves the final quarter of progress for browser analysis", () => {
     vi.useFakeTimers();
     const { rerender } = render(
       <ScanOverlay
@@ -563,7 +563,14 @@ describe("ScanOverlay", () => {
       />,
     );
 
-    expect(visiblePercent()).toBe(93);
+    expect(visiblePercent()).toBe(75);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(visiblePercent()).toBeGreaterThanOrEqual(95);
 
     rerender(
       <ScanOverlay
@@ -581,8 +588,8 @@ describe("ScanOverlay", () => {
     );
 
     act(() => {
-      vi.advanceTimersByTime(150);
+      vi.advanceTimersByTime(1_000);
     });
-    expect(visiblePercent()).toBeGreaterThan(93);
+    expect(visiblePercent()).toBe(99);
   });
 });

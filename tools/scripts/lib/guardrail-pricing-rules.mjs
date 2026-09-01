@@ -3,7 +3,7 @@ const ACCT = "apps/desktop/src/components/settings/AccountSettings.tsx";
 
 const EXPECTED_MODEL = {
   billableUnit: "connected_production_site",
-  connectedServiceAccess: "comped_founder_beta",
+  connectedServiceAccess: "comped_beta",
   localWorkbench: "free_complete",
   meteredOverages: false,
   paidBoundary: "connected_service",
@@ -15,13 +15,13 @@ export function pricingConsistencyFailures(read, exists) {
   const failures = [];
 
   if (!exists(MODEL)) {
-    failures.push(`${MODEL} is missing; the founder-beta commercial model must be explicit.`);
+    failures.push(`${MODEL} is missing; the connected-service commercial model must be explicit.`);
   } else {
     try {
       const model = JSON.parse(read(MODEL));
       if (JSON.stringify(model) !== JSON.stringify(EXPECTED_MODEL)) {
         failures.push(
-          `${MODEL} must match the founder-beta commercial model: complete free local workbench, comped connected service, no public price, flat bundles, and no metered overages.`,
+          `${MODEL} must match the connected-service commercial model: complete free local workbench, comped connected service, no public price, flat bundles, and no metered overages.`,
         );
       }
     } catch (error) {
@@ -37,9 +37,7 @@ export function pricingConsistencyFailures(read, exists) {
       account,
     )
   ) {
-    failures.push(
-      `${ACCT} must not expose a price or checkout before the founder-beta pricing pass.`,
-    );
+    failures.push(`${ACCT} must not expose a price or checkout before the public pricing pass.`);
   }
 
   if (
@@ -52,10 +50,11 @@ export function pricingConsistencyFailures(read, exists) {
 
   for (const [label, pattern] of [
     ["the complete free desktop workbench", /desktop workbench is free and complete/i],
-    ["comped founder-beta access", /comped during the founder beta/i],
-    ["the founder-beta request action", /Request founder beta access/],
+    ["free connected beta access", /free during the beta/i],
+    ["the beta request action", /Request beta access/],
+    ["the SiteCMD Connect name", /SiteCMD Connect/],
     ["existing-subscriber billing management", /Manage Billing/],
-    ["the founder-beta contact path", /https:\/\/sitecmd\.com\/contact/],
+    ["the beta contact path", /const BETA_CONTACT_URL = "https:\/\/sitecmd\.com\/contact"/],
   ]) {
     if (!pattern.test(account)) failures.push(`${ACCT} must retain ${label}.`);
   }

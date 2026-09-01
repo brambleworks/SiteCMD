@@ -365,6 +365,67 @@ describe("buildScanSummaryModel", () => {
     expect(summary?.severityCounts).toEqual({ critical: 1, high: 1, medium: 1, low: 0 });
   });
 
+  it("counts every open issue as new on the first completed scan", () => {
+    const summary = buildScanSummaryModel({
+      result: webResult(),
+      codeResult: codeResult(),
+      multiResult: null,
+      sitecmdScore: 50,
+      history: [],
+      codeHistory: [],
+      sessions: [],
+      scopeLabel: "Example",
+      issueChanges: {
+        previousOpenIssues: 0,
+        openIssues: 18,
+        newIssues: 18,
+        resolvedIssues: 0,
+      },
+      persistedSummary: {
+        webCount: 10,
+        codeCount: 8,
+        totalCount: 18,
+        criticalCount: 1,
+        severityCounts: { critical: 1, high: 4, medium: 8, low: 5 },
+      },
+    });
+
+    expect(summary?.totalIssues).toBe(18);
+    expect(summary?.estimatedNewIssues).toBe(18);
+    expect(summary?.resolvedIssues).toBe(0);
+  });
+
+  it("uses the execution's exact open total so its lifecycle transition reconciles", () => {
+    const summary = buildScanSummaryModel({
+      result: webResult(),
+      codeResult: codeResult(),
+      multiResult: null,
+      sitecmdScore: 50,
+      history: [],
+      codeHistory: [],
+      sessions: [],
+      scopeLabel: "Example",
+      issueChanges: {
+        previousOpenIssues: 18,
+        openIssues: 24,
+        newIssues: 10,
+        resolvedIssues: 4,
+      },
+      persistedSummary: {
+        webCount: 14,
+        codeCount: 10,
+        totalCount: 99,
+        criticalCount: 1,
+        severityCounts: { critical: 1, high: 5, medium: 11, low: 7 },
+      },
+    });
+
+    expect(summary?.totalIssues).toBe(24);
+    expect(summary?.estimatedNewIssues).toBe(10);
+    expect(summary?.resolvedIssues).toBe(4);
+    expect(18 + summary!.estimatedNewIssues! - summary!.resolvedIssues!).toBe(summary?.totalIssues);
+  });
+
   it("keeps the overview severity chips summing to the headline when the code fallback carries raw crit/high", () => {
     // Active grouped totals must cap stale raw severity counts.
     const persistedSummary = buildProjectIssueSummary({
@@ -522,7 +583,7 @@ describe("buildScanSummaryModel", () => {
 
     expect(summary?.estimatedNewIssues).toBeNull();
     expect(summary?.resolvedIssues).toBeNull();
-    expect(summary?.regressionCount).toBe(0);
+    expect(summary?.regressionCount).toBeNull();
   });
 
   it("retains the requested Full Scan identity when one collector has no result", () => {

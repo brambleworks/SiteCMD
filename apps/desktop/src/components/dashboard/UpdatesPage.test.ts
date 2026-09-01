@@ -13,7 +13,7 @@ vi.mock("@/lib/store", () => ({
   migrateFromLocalStorage: vi.fn(() => Promise.resolve(null)),
 }));
 
-import { buildAiTask, buildCommand, buildUpdateRefreshHistoryDraft } from "./UpdatesPage";
+import { buildAiTask, buildCommand } from "./UpdatesPage";
 import type { PackageUpdate } from "@/lib/types";
 
 function update(overrides: Partial<PackageUpdate> = {}): PackageUpdate {
@@ -136,83 +136,5 @@ describe("buildAiTask", () => {
     expect(out).toMatch(/safest upgrade path/);
     expect(out).toMatch(/breaking changes/);
     expect(out).toMatch(/verification steps/);
-  });
-});
-
-describe("buildUpdateRefreshHistoryDraft", () => {
-  it("summarizes when updates are cleared after a refresh", () => {
-    const previous = [
-      update({ name: "astro" }),
-      update({ name: "react-dom", updateType: "minor", latestVersion: "18.3.0" }),
-    ];
-    const next = [update({ name: "react-dom", updateType: "minor", latestVersion: "18.3.0" })];
-
-    const draft = buildUpdateRefreshHistoryDraft(previous, next);
-
-    expect(draft).not.toBeNull();
-    expect(draft?.title).toBe("1 Update Applied");
-    expect(draft?.summary).toContain("astro 18.2.0 -> 19.0.0 • major left the list.");
-    expect(draft?.detail.verified_count).toBe(1);
-    expect(draft?.detail.remaining_updates).toBe(1);
-    expect(draft?.detail.applied_updates).toEqual([
-      {
-        name: "astro",
-        from_version: "18.2.0",
-        to_version: "19.0.0",
-      },
-    ]);
-  });
-
-  it("names multiple cleared packages in the history summary", () => {
-    const previous = [
-      update({
-        name: "@tailwindcss/vite",
-        currentVersion: "4.1.13",
-        latestVersion: "4.2.2",
-        updateType: "minor",
-      }),
-      update({
-        name: "tailwindcss",
-        currentVersion: "4.1.13",
-        latestVersion: "4.2.2",
-        updateType: "minor",
-      }),
-    ];
-
-    const draft = buildUpdateRefreshHistoryDraft(previous, []);
-
-    expect(draft).not.toBeNull();
-    expect(draft?.summary).toContain("@tailwindcss/vite 4.1.13 -> 4.2.2 • minor");
-    expect(draft?.summary).toContain("tailwindcss 4.1.13 -> 4.2.2 • minor");
-    expect(draft?.detail.remaining_updates).toBe(0);
-  });
-
-  it("does not create history entries for newly discovered pending updates", () => {
-    const next = [update({ name: "astro" })];
-    expect(buildUpdateRefreshHistoryDraft([], next)).toBeNull();
-  });
-
-  it("records a cleared no-fix advisory as resolved without inventing a target version", () => {
-    const vulnerable = update({
-      name: "lodash",
-      currentVersion: "4.17.20",
-      latestVersion: "4.17.21",
-      isSecurity: true,
-      advisorySeverity: "high",
-    });
-
-    const draft = buildUpdateRefreshHistoryDraft([vulnerable], []);
-
-    expect(draft?.summary).toContain("lodash 4.17.20 (no fixed release) • security (high)");
-    expect(draft?.detail.applied_updates).toEqual([
-      { name: "lodash", from_version: "4.17.20", to_version: "resolved" },
-    ]);
-  });
-
-  it("returns null when the update queue has not changed", () => {
-    const previous = [update({ name: "astro" })];
-    const next = [update({ name: "astro" })];
-
-    expect(buildUpdateRefreshHistoryDraft(previous, next)).toBeNull();
   });
 });

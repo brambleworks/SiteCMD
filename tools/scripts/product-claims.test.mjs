@@ -116,10 +116,10 @@ describe("published product facts", () => {
     expect(committed).toEqual(productFacts(read, listFiles));
   });
 
-  it("publishes the founder-beta commercial boundary without invented prices", () => {
+  it("publishes the connected-service commercial boundary without invented prices", () => {
     expect(committed.commercialModel).toEqual({
       billableUnit: "connected_production_site",
-      connectedServiceAccess: "comped_founder_beta",
+      connectedServiceAccess: "comped_beta",
       localWorkbench: "free_complete",
       meteredOverages: false,
       paidBoundary: "connected_service",

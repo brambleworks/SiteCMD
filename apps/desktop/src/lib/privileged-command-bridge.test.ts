@@ -8,6 +8,7 @@ import {
   PRIVILEGED_TOKEN_EXPIRED_MARKER,
   isPrivilegedTokenExpiredError,
   resolveCommandTimeoutMs,
+  usesNativeResponseEvent,
 } from "./privileged-command-bridge";
 
 // Locate Rust fixtures from the working directory and fail if they are absent.
@@ -134,6 +135,12 @@ describe("native user-intent commands", () => {
     expect([...NATIVE_INTENT_FILESYSTEM_COMMANDS].sort()).toEqual(
       [...manifest.run_filesystem_access_command].sort(),
     );
+  });
+});
+
+describe("native bridge responses", () => {
+  it("returns dependency sweeps directly to the main window", () => {
+    expect(usesNativeResponseEvent("detect_updates")).toBe(true);
   });
 });
 

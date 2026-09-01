@@ -21,8 +21,7 @@ const PAGE_HEADERS: Partial<Record<NavPage, { title: string; subtitle: string }>
   },
   deploys: {
     title: "Deployments",
-    subtitle:
-      "Recent code and release activity, plus whether a deploy lines up with new site problems.",
+    subtitle: "Recent commits, CI activity, and whether a deploy lines up with new site problems.",
   },
   updates: {
     title: "Updates",
@@ -31,7 +30,7 @@ const PAGE_HEADERS: Partial<Record<NavPage, { title: string; subtitle: string }>
   },
   events: {
     title: "Activity",
-    subtitle: "A timeline of scans, deploys, alerts, integrations, and verification work.",
+    subtitle: "A timeline of scans, deploys, monitoring signals, and verification work.",
   },
   "search-console": {
     title: "Search & SEO",
@@ -40,7 +39,7 @@ const PAGE_HEADERS: Partial<Record<NavPage, { title: string; subtitle: string }>
   integrations: {
     title: "Integrations",
     subtitle:
-      "Connect traffic, uptime, search, deploy, and security sources so SiteCMD can explain more than scans alone.",
+      "Connect AI agents for fixes and services for traffic, uptime, search, deploys, and issue tracking.",
   },
   settings: {
     title: "Project Settings",
