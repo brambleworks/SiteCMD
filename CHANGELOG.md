@@ -11,6 +11,8 @@ public repository history.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-01
+
 ### Added
 
 - The web scan now flags meta refresh redirects and timed reloads, and asks
@@ -33,11 +35,9 @@ public repository history.
   only echoes or exits, no longer counts as a test, lint, or build command.
 - CI and hook commands for PHP (Pint, PHPStan, PHPUnit, Pest, `composer test`),
   Python (tox, nox, pyright), and task runners are recognized as quality gates.
-
 - A page with several H1 headings, or none, is now reported as an SEO issue,
   matching how search consoles classify it. The accessibility check keeps
   reviewing heading order.
-
 - The Issues list drops the web/code scan filter. One category filter now covers
   findings from both scanners, a search box narrows the list by title, and the
   list pages twenty issues at a time.
