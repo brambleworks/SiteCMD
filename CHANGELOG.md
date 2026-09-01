@@ -11,6 +11,8 @@ public repository history.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-31
+
 ### Changed
 
 - Fix guides and MCP scan comparisons now use plain words instead of
