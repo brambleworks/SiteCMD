@@ -707,8 +707,8 @@ describe.concurrent(
           const guidePath = "apps/desktop/src/components/layout/PageGuide.tsx";
           const source = readFixtureFile(fixtureRoot, guidePath);
           const mutated = source.replace(
-            "Click into Issues, Updates, or Alerts when something needs work.",
-            "Click into Issues, Launch, Security, or Updates when something needs work.",
+            "Open Issues, Updates, or Alerts when an item needs investigation or action.",
+            "Open Issues, Launch, Security, or Updates when an item needs investigation or action.",
           );
           if (mutated === source) {
             throw new Error(
