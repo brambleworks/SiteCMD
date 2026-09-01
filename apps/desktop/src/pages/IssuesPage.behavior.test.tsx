@@ -1073,7 +1073,7 @@ describe("IssuesPage real behavior", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: /issue source/i })).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: /issue category/i })).toBeInTheDocument();
     });
 
     await waitFor(() => {

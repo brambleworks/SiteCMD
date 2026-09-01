@@ -258,13 +258,13 @@ describe("SettingsPage behavior", () => {
     expect(screen.getByText("https://alpha.test")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("https://staging.example.com"), {
-      target: { value: "staging.alpha.test" },
+      target: { value: "staging.alpha.example.com" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add URL" }));
 
     expect(invokeMock).toHaveBeenCalledWith("add_environment_url", {
       projectId: 7,
-      url: "https://staging.alpha.test",
+      url: "https://staging.alpha.example.com",
       label: "Alpha (Staging)",
       environment: "staging",
     });

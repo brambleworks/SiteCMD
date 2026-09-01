@@ -72,7 +72,7 @@ const PAGE_GUIDES: Record<PageGuideKey, PageGuideContent> = {
       {
         title: "Work the list",
         items: [
-          "Use the status, source, severity, and category filters to narrow the active findings.",
+          "Use the status, severity, and category filters to narrow the active findings, or search by title.",
           "Open a finding for evidence, impact, fix guidance, and relevant files when they are available.",
           "Pages groups findings by URL. History shows past scan runs and how their totals changed.",
         ],
@@ -80,7 +80,7 @@ const PAGE_GUIDES: Record<PageGuideKey, PageGuideContent> = {
       {
         title: "Take action",
         items: [
-          "Use Fix with Agent or Batch prompt to hand selected work to your coding tool, then Verify fix after the change is made.",
+          "Use Fix with Agent to hand selected work to your coding tool, then Verify fix after the change is made.",
           "Ignore a finding only when you accept it for this project. Block it when work cannot continue yet.",
           "Reopen an ignored or blocked finding when it needs attention again.",
         ],

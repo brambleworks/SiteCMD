@@ -11,6 +11,50 @@ public repository history.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-01
+
+### Added
+
+- The web scan now flags meta refresh redirects and timed reloads, and asks
+  for review when a single page carries more than a thousand links.
+- Code Scan reports a test suite that exists but never runs automatically, when
+  CI or a commit hook runs other quality commands and skips the tests.
+- Code Scan reports a checked-in git hook that was never installed in the
+  scanned clone, so the hook config promises a guardrail it does not provide.
+
+### Changed
+
+- Project hygiene checks (tests, linter, CI workflow, commit hooks, and
+  .gitignore) now cover static sites, single-page apps, and Composer-based PHP
+  projects that have no server routes, instead of only apps with API routes.
+  A static site with no tests is reported as Low rather than Medium.
+- A missing or decorative commit hook is now Medium when no CI workflow runs
+  the project's build, lint, or tests, since the hook would be the only
+  automated gate. It stays Low when CI already enforces those checks.
+- npm's default `echo "Error: no test specified"` script, and any script that
+  only echoes or exits, no longer counts as a test, lint, or build command.
+- CI and hook commands for PHP (Pint, PHPStan, PHPUnit, Pest, `composer test`),
+  Python (tox, nox, pyright), and task runners are recognized as quality gates.
+- A page with several H1 headings, or none, is now reported as an SEO issue,
+  matching how search consoles classify it. The accessibility check keeps
+  reviewing heading order.
+- The Issues list drops the web/code scan filter. One category filter now covers
+  findings from both scanners, a search box narrows the list by title, and the
+  list pages twenty issues at a time.
+- The Issues list and Code Scan results share one pager with numbered page links.
+  Previous and Next sit beside the numbers and are hidden at the ends rather than
+  shown as dead controls.
+
+### Fixed
+
+- Adding a project folder that runs on DDEV, Lando, Docksal, or a `.test`
+  hostname now labels the detected URL as Local instead of listing it as
+  another production site.
+- Code findings in the Issues list now name their category, such as Database or
+  Architecture, instead of every row reading "Code".
+- Issue history no longer claims an issue regressed after a deploy when the
+  issue had never passed. A regression now requires an earlier verified pass.
+
 ## [1.1.1] - 2026-08-31
 
 ### Changed

@@ -90,6 +90,81 @@ describe("IssueMemoryRail", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("does not claim a regression for an issue that never passed", async () => {
+    mockInvoke({
+      get_projects: [project],
+      get_issue_check_memory: {
+        firstSeen: Date.UTC(2026, 4, 10, 12, 0, 0),
+        lastFailed: Date.UTC(2026, 4, 12, 12, 0, 0),
+        // Never verified, so no deploy can have broken it.
+        lastVerified: null,
+        affectedEnvUrls: ["https://example.com"],
+      },
+      get_events: [
+        {
+          id: 1,
+          occurredAtMs: Date.UTC(2026, 4, 11, 12, 0, 0),
+          title: "Deploy abc123",
+          eventType: "deploy",
+        },
+      ],
+    });
+
+    render(
+      <IssueMemoryRail
+        projectId={7}
+        url="https://example.com"
+        checkId="security.csp"
+        currentStatus="fail"
+      />,
+      { wrapper: withQueryClient() },
+    );
+
+    await waitFor(() => expect(screen.getByText("First seen")).toBeInTheDocument());
+
+    expect(screen.queryByText(/Regressed after/i)).not.toBeInTheDocument();
+    // Nothing can regress, so the deploy history is never fetched.
+    expect(invokeMock).not.toHaveBeenCalledWith("get_events", expect.anything());
+  });
+
+  it("names the deploy an issue regressed after once it had passed", async () => {
+    mockInvoke({
+      get_projects: [project],
+      get_issue_check_memory: {
+        firstSeen: Date.UTC(2026, 4, 10, 12, 0, 0),
+        lastFailed: Date.UTC(2026, 4, 14, 12, 0, 0),
+        lastVerified: Date.UTC(2026, 4, 11, 12, 0, 0),
+        affectedEnvUrls: ["https://example.com"],
+      },
+      get_events: [
+        {
+          id: 1,
+          occurredAtMs: Date.UTC(2026, 4, 10, 12, 0, 0),
+          title: "Deploy before the fix",
+          eventType: "deploy",
+        },
+        {
+          id: 2,
+          occurredAtMs: Date.UTC(2026, 4, 13, 12, 0, 0),
+          title: "Deploy def456",
+          eventType: "deploy",
+        },
+      ],
+    });
+
+    render(
+      <IssueMemoryRail
+        projectId={7}
+        url="https://example.com"
+        checkId="security.csp"
+        currentStatus="fail"
+      />,
+      { wrapper: withQueryClient() },
+    );
+
+    expect(await screen.findByText("Regressed after Deploy def456.")).toBeInTheDocument();
+  });
+
   it("labels storage failures as errors instead of no issue memory", async () => {
     invokeMock.mockImplementation((command: string) => {
       if (command === "get_projects") return Promise.resolve([project]);

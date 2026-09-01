@@ -15,6 +15,7 @@ import { codeScanInventoryFailures } from "./lib/guardrail-code-scan-inventory-r
 import { codeScanSecurityFailures } from "./lib/guardrail-code-scan-security-rules.mjs";
 import { codeOwnerSafetyFailures } from "./lib/guardrail-codeowners-rules.mjs";
 import { commandWrapperFailures } from "./lib/guardrail-command-wrapper-rules.mjs";
+import { crossSurfaceContractFailures } from "./lib/guardrail-cross-surface-contract-rules.mjs";
 import { desktopLicensingSafetyFailures } from "./lib/guardrail-desktop-licensing-rules.mjs";
 import { desktopOAuthSafetyFailures } from "./lib/guardrail-desktop-oauth-rules.mjs";
 import { desktopProjectCommandSafetyFailures } from "./lib/guardrail-desktop-rules.mjs";
@@ -218,6 +219,7 @@ const RULE_ARGUMENTS = new Map([
   [codeScanInventoryFailures, (io) => [io.read]],
   [codeScanSecurityFailures, (io) => [io.read]],
   [commandWrapperFailures, (io) => [io.read, desktopSourceFiles(io)]],
+  [crossSurfaceContractFailures, (io) => [io.read]],
   [desktopCategoryLabelFailures, (io) => [io.read, desktopSourceFiles(io)]],
   [desktopFrontendDisplayFailures, (io) => [io.read, desktopSourceFiles(io)]],
   [desktopFrontendJsonSafetyFailures, (io) => [io.read, desktopSourceFiles(io)]],
@@ -324,6 +326,7 @@ export const rules = Object.freeze({
   commandWrapperFailures,
   commentQualityFailures,
   confirmDeadlineFailures,
+  crossSurfaceContractFailures,
   deployWorkflowHardeningFailures,
   desktopCategoryLabelFailures,
   desktopFrontendDisplayFailures,

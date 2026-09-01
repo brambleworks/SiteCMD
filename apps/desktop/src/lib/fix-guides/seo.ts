@@ -121,6 +121,22 @@ export const SEO_FIX_GUIDES: Record<string, FixGuideEntry> = {
       "SiteCMD flags a 302, 303, or 307 only when that hop changes HTTP to HTTPS or swaps the www/apex host; not every temporary redirect should become permanent. Trace which layer owns the response, and if the normalization is intentionally permanent, switch it to 301 or 308 using current method/body semantics while preserving temporary statuses for authentication, consent, locale, or outage flows. Test the deployed chain for one direct hop to the intended final response with no loop.",
     ],
   },
+  "seo.meta_refresh": {
+    effort: "quick",
+    effortMinutes: 10,
+    lead: "This page redirects or reloads itself with a meta refresh tag, a weak redirect signal for search engines and a page that moves on its own for visitors.",
+    default: [
+      'For a redirect, replace the `<meta http-equiv="refresh">` tag with a server-side 301 (or a temporary status where the move genuinely is temporary) issued by the layer that owns the route, so crawlers consolidate signals onto the destination and visitors skip the intermediate page. For a timed reload, update the changing content with JavaScript on an interval or a visible refresh control instead of reloading the whole document, which discards scroll position and form state on every cycle. Remove the meta tag once the replacement is deployed and confirm the page no longer refreshes itself.',
+    ],
+  },
+  "seo.link_count": {
+    effort: "moderate",
+    effortMinutes: 30,
+    lead: "This page carries an unusually large number of links, enough that search engines may not follow them all and visitors cannot realistically scan them.",
+    default: [
+      "SiteCMD asks for review above a thousand links rather than enforcing a hard limit, so first confirm whether the count is intentional; a sitemap-style directory page can legitimately stay large. Where it is not, paginate long archives, collapse repeated per-item link clusters into one link per item, and trim boilerplate link blocks that repeat on every page, keeping the links a visitor actually needs. Recheck the rendered page rather than the template, since components can multiply links silently.",
+    ],
+  },
   "seo.charset": {
     effort: "quick",
     effortMinutes: 2,

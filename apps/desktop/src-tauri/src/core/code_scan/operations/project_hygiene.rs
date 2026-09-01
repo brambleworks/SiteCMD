@@ -1,12 +1,18 @@
 use super::*;
 
+mod hook_install;
+mod hooks;
+mod manifest_scripts;
+mod project_kind;
 mod quality_gates;
 mod quality_markers;
+mod test_gates;
 
-use quality_gates::{
-    ci_workflow_paths, commit_hook_paths, has_ci_quality_gate, has_commit_hook_quality_gate,
-    inspect_quality_signals,
-};
+use hooks::collect_hook_issues;
+use manifest_scripts::collect_script_inventory;
+use project_kind::{classify_project, ProjectKind};
+use quality_gates::{ci_workflow_paths, inspect_quality_signals, QualitySignals};
+use test_gates::collect_test_infrastructure_issues;
 
 /// Environment files that may carry machine-specific values. Templates and
 /// examples are documentation and should remain trackable.
@@ -29,16 +35,6 @@ struct ProjectHygieneContext<'a> {
     route_files: &'a [&'a SourceFile],
     env_usage_file: Option<&'a SourceFile>,
     app_like: bool,
-}
-
-struct QualitySignals {
-    has_linter_config: bool,
-    has_build_script: bool,
-    has_test_script: bool,
-    has_lint_or_typecheck_script: bool,
-    has_ci_config: bool,
-    has_commit_hooks: bool,
-    has_quality_scripts: bool,
 }
 
 pub(super) fn collect_project_hygiene_issues(
@@ -64,116 +60,25 @@ pub(super) fn collect_project_hygiene_issues(
         env_usage_file,
         app_like,
     };
-    let quality_signals = inspect_quality_signals(&context);
+    let scripts = collect_script_inventory(root, manifests, project_paths_lower);
+    let kind = classify_project(&context, &scripts);
+    let quality_signals = inspect_quality_signals(&context, &scripts);
 
-    collect_test_infrastructure_issues(issues, &context);
-    collect_ignore_policy_issues(issues, &context);
-    collect_lint_and_ci_issues(issues, &context, &quality_signals);
-    collect_hook_issues(issues, &context, &quality_signals);
+    collect_test_infrastructure_issues(issues, &context, &kind, &quality_signals);
+    collect_ignore_policy_issues(issues, &context, &kind);
+    collect_lint_and_ci_issues(issues, &context, &kind, &quality_signals);
+    collect_hook_issues(issues, &context, &kind, &quality_signals);
     collect_source_readiness_issues(issues, &context);
 }
 
-fn collect_test_infrastructure_issues(
+fn collect_ignore_policy_issues(
     issues: &mut Vec<CodeIssue>,
     context: &ProjectHygieneContext<'_>,
+    kind: &ProjectKind,
 ) {
-    let manifests = context.manifests;
-    let project_paths_lower = context.project_paths_lower;
-    let declared_dependencies = context.declared_dependencies;
-    let route_files = context.route_files;
-    let app_like = context.app_like;
-    let has_any_test_file = project_paths_lower.iter().any(|path| {
-        is_test_artifact_path(path)
-            || path.contains("/tests/")
-            || path.contains("/test/")
-            || path.ends_with("_test.py")
-            || path.ends_with("_test.go")
-            // pytest uses the test_*.py prefix convention.
-            || path
-                .rsplit('/')
-                .next()
-                .is_some_and(|name| name.starts_with("test_") && name.ends_with(".py"))
-    });
-    let has_test_config = project_paths_lower.iter().any(|path| {
-        TEST_CONFIG_FILES
-            .iter()
-            .any(|config| path.ends_with(config))
-    }) || manifests.iter().any(|manifest| {
-        let lower = manifest.content.to_ascii_lowercase();
-        lower.contains("\"test\"")
-            || lower.contains("\"test:")
-            || lower.contains("\"vitest\"")
-            || lower.contains("\"jest\"")
-    });
-    let has_test_infrastructure = has_any_test_file
-        || has_test_config
-        || has_named_dependency(
-            declared_dependencies,
-            &[
-                "vitest",
-                "jest",
-                "@jest/core",
-                "mocha",
-                "ava",
-                "tap",
-                "playwright",
-                "cypress",
-                "@playwright/test",
-                "@testing-library/react",
-                "@testing-library/jest-dom",
-                "pytest",
-                "unittest",
-            ],
-        );
-
-    if app_like && !has_test_infrastructure {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                )
-            })
-            .or_else(|| {
-                route_files.first().map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
-
-        if let Some((relative_path, absolute_path)) = anchor {
-            issues.push(CodeIssue {
-                check_id: String::new(),
-                id: format!("no-automated-tests:{}", relative_path),
-                category: "architecture".into(),
-                severity: Severity::Medium,
-                title: "No recognized automated test infrastructure was found".into(),
-                description: "The scanned project has routes, database access, or other app logic, but no recognized test files, runner configuration, test scripts, or test dependencies were found. Tests may exist outside the scanned project, use an unrecognized convention, or run through organization tooling, so this is not proof that all validation is manual.".into(),
-                relative_path,
-                absolute_path,
-                line: None,
-                source_excerpt: None,
-                evidence: Some(redact_evidence("Within the scanned tree, no recognized *.test.*, *.spec.*, __tests__/, tests/, or test_*.py artifact, common runner config/dependency, or package test script was found.")),
-                why_now: Some("Automated coverage for a high-risk route or data path reduces the chance that a refactor, dependency change, or urgent fix silently breaks behavior.".into()),
-                likely_fix: Some("First confirm whether tests run through a parent workspace, external repository, or unrecognized command. If meaningful coverage is absent, add the stack-appropriate runner and one observable test around the route, workflow, or data path with the highest failure cost, then expose a documented command for local and CI use.".into()),
-                confidence: crate::checks::IssueConfidence::NeedsReview,
-                confidence_reason: Some("Test discovery is convention-based and limited to the scanned tree; external, generated, dynamically composed, or unusually named test infrastructure may exist.".into()),
-                verify_hint: Some("From a clean environment, run the documented test command and confirm at least one real application behavior is exercised; if coverage lives elsewhere, record the owning project and command before marking this not applicable.".into()),
-            });
-        }
-    }
-}
-
-fn collect_ignore_policy_issues(issues: &mut Vec<CodeIssue>, context: &ProjectHygieneContext<'_>) {
     let root = context.root;
-    let manifests = context.manifests;
     let project_paths_lower = context.project_paths_lower;
-    let route_files = context.route_files;
     let env_usage_file = context.env_usage_file;
-    let app_like = context.app_like;
 
     // Only a repository root owns repository-level hygiene such as CI and .gitignore.
     let root_is_git_repo = root.join(".git").exists();
@@ -194,25 +99,8 @@ fn collect_ignore_policy_issues(issues: &mut Vec<CodeIssue>, context: &ProjectHy
             .unwrap_or(false)
     });
 
-    if !has_gitignore && app_like && root_is_git_repo {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                )
-            })
-            .or_else(|| {
-                route_files.first().map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
-
-        if let Some((relative_path, absolute_path)) = anchor {
+    if !has_gitignore && kind.hygiene_eligible() && root_is_git_repo {
+        if let Some((relative_path, absolute_path)) = kind.anchor.clone() {
             issues.push(CodeIssue {
                 check_id: String::new(),
                 id: format!("gitignore-missing:{}", relative_path),
@@ -274,35 +162,35 @@ fn collect_ignore_policy_issues(issues: &mut Vec<CodeIssue>, context: &ProjectHy
 fn collect_lint_and_ci_issues(
     issues: &mut Vec<CodeIssue>,
     context: &ProjectHygieneContext<'_>,
+    kind: &ProjectKind,
     signals: &QualitySignals,
 ) {
+    if !kind.hygiene_eligible() {
+        return;
+    }
     let root = context.root;
     let manifests = context.manifests;
     let project_paths_lower = context.project_paths_lower;
-    let route_files = context.route_files;
-    let app_like = context.app_like;
     let root_is_git_repo = root.join(".git").exists();
-    let has_linter_config = signals.has_linter_config;
     let has_build_script = signals.has_build_script;
     let has_test_script = signals.has_test_script;
     let has_lint_or_typecheck_script = signals.has_lint_or_typecheck_script;
     let has_ci_config = signals.has_ci_config;
-    let has_quality_scripts = signals.has_quality_scripts;
 
-    if app_like && !has_linter_config && !manifests.is_empty() {
-        if let Some(manifest) = manifests.first() {
+    if !signals.has_linter_config {
+        if let Some((relative_path, absolute_path)) = kind.manifest_anchor.clone() {
             issues.push(CodeIssue {
                 check_id: String::new(),
-                id: format!("linter-missing:{}", manifest.relative_path),
+                id: format!("linter-missing:{}", relative_path),
                 category: "architecture".into(),
                 severity: Severity::Medium,
                 title: "No recognized linter or formatter configuration was found".into(),
                 description: "The scanned project has app-like source and a package manifest, but no recognized lint or format configuration or package script was found. A parent workspace, editor, language-native default, external CI command, or unrecognized tool may still provide equivalent checks.".into(),
-                relative_path: manifest.relative_path.clone(),
-                absolute_path: manifest.absolute_path.to_string_lossy().to_string(),
+                relative_path,
+                absolute_path,
                 line: None,
                 source_excerpt: None,
-                evidence: Some(redact_evidence("No recognized ESLint, Biome, Prettier, Ruff, or comparable config, package lint script, or manifest marker was found within the scanned project.")),
+                evidence: Some(redact_evidence("No recognized ESLint, Biome, Prettier, Ruff, Pint, PHPStan, or comparable config, package lint script, or manifest marker was found within the scanned project.")),
                 why_now: Some("A repeatable static-quality command can catch stack-specific correctness issues and keep formatting consistent before review or CI.".into()),
                 likely_fix: Some("First check parent-workspace and CI configuration for an existing command. If none covers this project, add the stack-appropriate linter and/or formatter with a documented script. Start from maintained defaults, enable rules that fit the codebase, and avoid a bulk rewrite without reviewing the diff.".into()),
                 confidence: crate::checks::IssueConfidence::NeedsReview,
@@ -312,25 +200,15 @@ fn collect_lint_and_ci_issues(
         }
     }
 
-    if app_like && !has_ci_config && root_is_git_repo {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                )
-            })
-            .or_else(|| {
-                route_files.first().map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
-
-        if let Some((relative_path, absolute_path)) = anchor {
+    if !has_ci_config && root_is_git_repo {
+        if let Some((relative_path, absolute_path)) = kind.anchor.clone() {
+            let mut evidence = String::from("No workflow file for the CI providers recognized by SiteCMD was found within the scanned Git repository; external and organization-level configuration was not inspected.");
+            if !kind.hosting_configs.is_empty() {
+                evidence.push_str(&format!(
+                    " A hosting config ({}) was found; a host build on push compiles the site but does not run its lint or tests.",
+                    kind.hosting_configs.join(", ")
+                ));
+            }
             issues.push(CodeIssue {
                 check_id: String::new(),
                 id: format!("ci-workflow-missing:{}", relative_path),
@@ -339,12 +217,12 @@ fn collect_lint_and_ci_issues(
                 // (matches the registry pin).
                 severity: Severity::Medium,
                 title: "No recognized CI workflow was found in the scanned repository".into(),
-                description: "The scanned Git repository looks app-like, but no recognized GitHub Actions, GitLab CI, CircleCI, Buildkite, Azure Pipelines, Bitbucket Pipelines, or Jenkins workflow file was found. CI may be configured in a parent repository, organization, deploy platform, or unsupported system, so manual-only validation is not established.".into(),
+                description: "The scanned Git repository looks like a deployable project, but no recognized GitHub Actions, GitLab CI, CircleCI, Buildkite, Azure Pipelines, Bitbucket Pipelines, or Jenkins workflow file was found. CI may be configured in a parent repository, organization, deploy platform, or unsupported system, so manual-only validation is not established.".into(),
                 relative_path,
                 absolute_path,
                 line: None,
                 source_excerpt: None,
-                evidence: Some(redact_evidence("No workflow file for the CI providers recognized by SiteCMD was found within the scanned Git repository; external and organization-level configuration was not inspected.")),
+                evidence: Some(redact_evidence(evidence)),
                 why_now: Some("A clean, repeatable remote check can catch environment-dependent build and test failures before deployment, provided it runs the same supported commands and its result is enforced.".into()),
                 likely_fix: Some("Confirm whether an external, parent-workspace, deploy-platform, or organization-level pipeline already covers this project. If not, add a CI workflow that installs from the lockfile and runs the documented build, lint/typecheck, and risk-based test commands with least-privilege permissions.".into()),
                 confidence: crate::checks::IssueConfidence::NeedsReview,
@@ -354,11 +232,7 @@ fn collect_lint_and_ci_issues(
         }
     }
 
-    if app_like
-        && has_ci_config
-        && has_quality_scripts
-        && !has_ci_quality_gate(root, project_paths_lower, manifests)
-    {
+    if has_ci_config && signals.has_quality_scripts && !signals.ci_has_quality_gate {
         let anchor = ci_workflow_paths(project_paths_lower)
             .first()
             .map(|path| {
@@ -367,14 +241,7 @@ fn collect_lint_and_ci_issues(
                     root.join(*path).to_string_lossy().to_string(),
                 )
             })
-            .or_else(|| {
-                manifests.first().map(|manifest| {
-                    (
-                        manifest.relative_path.clone(),
-                        manifest.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
+            .or_else(|| kind.manifest_anchor.clone());
 
         if let Some((relative_path, absolute_path)) = anchor {
             issues.push(CodeIssue {
@@ -400,7 +267,10 @@ fn collect_lint_and_ci_issues(
         }
     }
 
-    if app_like && !manifests.is_empty() && !has_build_script {
+    // A tooling-only package.json beside a Composer or route-less project has
+    // nothing to build; only a JavaScript-driven web project or app owes one.
+    let owes_build_script = kind.js_site_like || (kind.app_like && !kind.composer_root);
+    if owes_build_script && !manifests.is_empty() && !has_build_script {
         if let Some(manifest) = manifests.first() {
             issues.push(CodeIssue {
                 check_id: String::new(),
@@ -425,12 +295,7 @@ fn collect_lint_and_ci_issues(
         }
     }
 
-    if app_like
-        && has_ci_config
-        && has_build_script
-        && !has_test_script
-        && !has_lint_or_typecheck_script
-    {
+    if has_ci_config && has_build_script && !has_test_script && !has_lint_or_typecheck_script {
         if let Some(manifest) = manifests.first() {
             issues.push(CodeIssue {
                 check_id: String::new(),
@@ -449,96 +314,6 @@ fn collect_lint_and_ci_issues(
                 confidence: crate::checks::IssueConfidence::NeedsReview,
                 confidence_reason: Some("Package-script inspection cannot resolve reusable workflows, parent task runners, inline CI commands, or external required checks.".into()),
                 verify_hint: Some("Inspect a real CI run, confirm which build, lint, typecheck, and test commands actually execute, and prove each required gate fails on a controlled representative error.".into()),
-            });
-        }
-    }
-}
-
-fn collect_hook_issues(
-    issues: &mut Vec<CodeIssue>,
-    context: &ProjectHygieneContext<'_>,
-    signals: &QualitySignals,
-) {
-    let root = context.root;
-    let manifests = context.manifests;
-    let project_paths_lower = context.project_paths_lower;
-    let app_like = context.app_like;
-    let has_linter_config = signals.has_linter_config;
-    let has_build_script = signals.has_build_script;
-    let has_test_script = signals.has_test_script;
-    let has_lint_or_typecheck_script = signals.has_lint_or_typecheck_script;
-    let has_commit_hooks = signals.has_commit_hooks;
-    let has_quality_scripts = signals.has_quality_scripts;
-
-    if app_like
-        && !has_commit_hooks
-        && (has_build_script
-            || has_lint_or_typecheck_script
-            || has_test_script
-            || has_linter_config)
-    {
-        if let Some(manifest) = manifests.first() {
-            issues.push(CodeIssue {
-                check_id: String::new(),
-                id: format!("pre-commit-hooks-missing:{}", manifest.relative_path),
-                category: "operations".into(),
-                severity: Severity::Low,
-                title: "No recognized project-managed pre-commit or pre-push hook was found".into(),
-                description: "The project has local quality commands, but the scanned tree contains no recognized Husky, Lefthook, pre-commit, lint-staged, or package-manager hook configuration. Hooks are optional and can be bypassed; CI or organization tooling may enforce the same checks outside the project.".into(),
-                relative_path: manifest.relative_path.clone(),
-                absolute_path: manifest.absolute_path.to_string_lossy().to_string(),
-                line: None,
-                source_excerpt: None,
-                evidence: Some(redact_evidence("No .husky hook, lefthook config, pre-commit config, lint-staged config, or package.json prepare/simple-git-hooks hook was found.")),
-                why_now: Some("An optional fast local hook can shorten feedback time, but it is bypassable and is not a substitute for required CI checks.".into()),
-                likely_fix: Some("First confirm that required CI already protects the branch. If the team wants faster local feedback, add a lightweight project-managed hook for touched-file linting or focused checks, document the bypass behavior, and keep authoritative gates in CI. Mark this not applicable when hooks are intentionally avoided.".into()),
-                confidence: crate::checks::IssueConfidence::NeedsReview,
-                confidence_reason: Some("Hook discovery is limited to recognized project files; global, organization-managed, custom, or intentionally absent hooks cannot be evaluated.".into()),
-                verify_hint: Some("If a hook is adopted, make a harmless staged change and a controlled failing change to confirm it runs locally, then confirm CI still enforces the authoritative check when hooks are bypassed.".into()),
-            });
-        }
-    }
-
-    if app_like
-        && has_commit_hooks
-        && has_quality_scripts
-        && !has_commit_hook_quality_gate(root, project_paths_lower, manifests)
-    {
-        let anchor = commit_hook_paths(project_paths_lower)
-            .first()
-            .map(|path| {
-                (
-                    (*path).to_string(),
-                    root.join(*path).to_string_lossy().to_string(),
-                )
-            })
-            .or_else(|| {
-                manifests.first().map(|manifest| {
-                    (
-                        manifest.relative_path.clone(),
-                        manifest.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
-
-        if let Some((relative_path, absolute_path)) = anchor {
-            issues.push(CodeIssue {
-                check_id: String::new(),
-                id: format!("pre-commit-hooks-weak:{}", relative_path),
-                category: "operations".into(),
-                severity: Severity::Low,
-                title: "Recognized project hook does not reference a recognized quality command".into(),
-                description: "The scanned project has a recognized hook configuration, but its text does not reference a recognized build, lint, typecheck, test, or staged-file quality command. The hook may intentionally serve another purpose or call a wrapper the static matcher cannot resolve; it is not proof of a broken safeguard.".into(),
-                relative_path,
-                absolute_path,
-                line: None,
-                source_excerpt: None,
-                evidence: Some(redact_evidence("A project hook config was found, but its commands do not mention build, lint, typecheck, test, lint-staged, or another recognizable quality gate.")),
-                why_now: Some("If the team expects this hook to provide quality feedback, an unresolved or bookkeeping-only command may not deliver that feedback. Required CI remains the reliable enforcement point.".into()),
-                likely_fix: Some("Confirm the hook's intended purpose and resolve any wrapper it calls. If it is meant to run quality checks, connect it to the fastest relevant command and leave slower authoritative checks in CI; otherwise document the purpose and mark this finding not applicable.".into()),
-                confidence: crate::checks::IssueConfidence::NeedsReview,
-                confidence_reason: Some("Static marker matching cannot resolve arbitrary shell wrappers, package indirection, global hooks, or a hook whose purpose is unrelated to code quality.".into()),
-                verify_hint: Some("Execute the hook with a controlled passing and failing change, observe the effective command, and confirm required CI still catches the same failure if the local hook is skipped.".into()),
             });
         }
     }

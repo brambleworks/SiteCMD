@@ -4,7 +4,7 @@ import { IssueList } from "./IssueList";
 import type { CheckResult, CodeIssue } from "@/lib/types";
 import { buildProjectIssueSummary } from "@/lib/project-issue-summary";
 import { rankUnified } from "@/lib/issue-ranking";
-import { getIssuesSourceFocus, getIssuesWebCategoryFocus } from "@/lib/app-targets";
+import { getIssuesWebCategoryFocus } from "@/lib/app-targets";
 
 // Stub the Tauri clipboard used by copyToClipboard.
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
@@ -112,8 +112,7 @@ describe("IssueList", () => {
 
     expect(screen.getByText("Missing HSTS header")).toBeInTheDocument();
     expect(screen.getByText("Exposed .env file")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /issue source/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /issue subcategory/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /issue category/i })).toBeInTheDocument();
   });
 
   it("keeps confidence details out of compact issue rows", () => {
@@ -327,35 +326,39 @@ describe("IssueList", () => {
 
     expect(screen.getByText("Missing HSTS header")).toBeInTheDocument();
     expect(screen.queryByText("Missing canonical tag")).not.toBeInTheDocument();
-    expect(screen.queryByText("Exposed .env file")).not.toBeInTheDocument();
     expect(
-      (screen.getByRole("combobox", { name: /issue source/i }) as HTMLSelectElement).value,
-    ).toBe("web");
-    expect(
-      (screen.getByRole("combobox", { name: /issue subcategory/i }) as HTMLSelectElement).value,
-    ).toBe("web:security");
+      (screen.getByRole("combobox", { name: /issue category/i }) as HTMLSelectElement).value,
+    ).toBe("security");
+    // Security is one category: the code finding of the same category stays.
+    expect(screen.getByText("Exposed .env file")).toBeInTheDocument();
   });
 
-  it("applies a deep-linked issue source filter", () => {
+  it("offers web categories and code domains in one category filter", () => {
     render(
       <IssueList
-        rankedIssues={rankIssues([webIssue], [codeIssue])}
+        rankedIssues={rankIssues([webIssue], [codeIssue, databaseCodeIssue])}
         issueLinks={[]}
         issueSummary={buildIssueSummary({
           webIssues: [webIssue],
-          codeIssues: [codeIssue],
+          codeIssues: [codeIssue, databaseCodeIssue],
         })}
         selectedId={null}
-        focus={getIssuesSourceFocus("code")}
         onSelect={vi.fn()}
       />,
     );
 
-    expect(screen.queryByText("Missing HSTS header")).not.toBeInTheDocument();
-    expect(screen.getByText("Exposed .env file")).toBeInTheDocument();
-    expect(
-      (screen.getByRole("combobox", { name: /issue source/i }) as HTMLSelectElement).value,
-    ).toBe("code");
+    // No scanner-source filter: category is the only subdivision.
+    expect(screen.queryByRole("combobox", { name: /issue source/i })).not.toBeInTheDocument();
+
+    const options = Array.from(
+      (screen.getByRole("combobox", { name: /issue category/i }) as HTMLSelectElement).options,
+    ).map((option) => option.textContent);
+    expect(options).toEqual([
+      "All categories (3)",
+      // One Security entry covers the web check and the code finding.
+      "Security (2)",
+      "Database (1)",
+    ]);
   });
 
   it("shows code-domain dropdown filters and narrows the queue to the selected domain", () => {
@@ -372,11 +375,8 @@ describe("IssueList", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("combobox", { name: /issue source/i }), {
-      target: { value: "code" },
-    });
-    fireEvent.change(screen.getByRole("combobox", { name: /issue subcategory/i }), {
-      target: { value: "code:database" },
+    fireEvent.change(screen.getByRole("combobox", { name: /issue category/i }), {
+      target: { value: "database" },
     });
 
     expect(screen.getByText("List endpoint returns unbounded query results")).toBeInTheDocument();
@@ -416,7 +416,7 @@ describe("IssueList", () => {
       />,
     );
 
-    expect(screen.getByRole("combobox", { name: /issue source/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /issue category/i })).toBeInTheDocument();
     expect(screen.getAllByText("Public-facing route has no clear rate limiting")).toHaveLength(1);
     // Category stays next to severity; location counts belong in the dossier.
     expect(screen.queryByText(/2 locations/i)).not.toBeInTheDocument();
@@ -455,8 +455,8 @@ describe("IssueList", () => {
     expect(screen.getByText("No web or code issues open")).toBeInTheDocument();
   });
 
-  it("paginates unusually large issue sets instead of mounting every row", () => {
-    const issues: CheckResult[] = Array.from({ length: 110 }, (_, i) => ({
+  it("paginates the queue twenty rows at a time", () => {
+    const issues: CheckResult[] = Array.from({ length: 25 }, (_, i) => ({
       ...webIssue,
       checkId: `check-${i}`,
       title: `Large issue ${String(i).padStart(3, "0")}`,
@@ -473,14 +473,51 @@ describe("IssueList", () => {
     );
 
     expect(screen.getByText("Large issue 000")).toBeInTheDocument();
-    expect(screen.queryByText("Large issue 109")).not.toBeInTheDocument();
-    expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(screen.getByText("Large issue 019")).toBeInTheDocument();
+    expect(screen.queryByText("Large issue 020")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
+    // Nowhere to step back to from the first page.
+    expect(screen.queryByRole("button", { name: "Previous issues page" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Next issues page" }));
 
-    expect(screen.queryByText("Large issue 000")).not.toBeInTheDocument();
-    expect(screen.getByText("Large issue 109")).toBeInTheDocument();
-    expect(screen.getByText("2/2")).toBeInTheDocument();
+    expect(screen.queryByText("Large issue 019")).not.toBeInTheDocument();
+    expect(screen.getByText("Large issue 024")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Page 2" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("button", { name: "Next issues page" })).not.toBeInTheDocument();
+
+    // Page numbers are links back to any page, not just neighbours.
+    fireEvent.click(screen.getByRole("button", { name: "Page 1" }));
+    expect(screen.getByText("Large issue 000")).toBeInTheDocument();
+  });
+
+  it("filters the queue by the titles it already shows", () => {
+    render(
+      <IssueList
+        rankedIssues={rankIssues([webIssue], [codeIssue, databaseCodeIssue])}
+        issueLinks={[]}
+        issueSummary={buildIssueSummary({
+          webIssues: [webIssue],
+          codeIssues: [codeIssue, databaseCodeIssue],
+        })}
+        selectedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /search issue titles/i }), {
+      target: { value: "unbounded" },
+    });
+
+    expect(screen.getByText("List endpoint returns unbounded query results")).toBeInTheDocument();
+    expect(screen.queryByText("Missing HSTS header")).not.toBeInTheDocument();
+    expect(screen.queryByText("Exposed .env file")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: /search issue titles/i }), {
+      target: { value: "no such issue" },
+    });
+
+    expect(screen.getByText("No issues match this filter yet.")).toBeInTheDocument();
   });
 
   it("does not show a quick wins control in the toolbar", () => {
@@ -498,7 +535,7 @@ describe("IssueList", () => {
     expect(screen.queryByText(/load quick wins/i)).not.toBeInTheDocument();
   });
 
-  it("shows the batch prompt button whenever visible issues exist", () => {
+  it("keeps the retired batch prompt control out of the toolbar", () => {
     render(
       <IssueList
         rankedIssues={rankIssues([webIssue], [])}
@@ -509,7 +546,7 @@ describe("IssueList", () => {
       />,
     );
 
-    expect(screen.getByText(/batch prompt/i)).toBeInTheDocument();
+    expect(screen.queryByText(/batch prompt/i)).not.toBeInTheDocument();
   });
 
   it("does not show active projection rows in work-item status views", () => {
@@ -541,7 +578,6 @@ describe("IssueList", () => {
         selectedId="web:missing-hsts"
         onSelect={vi.fn()}
         onClearSelection={onClearSelection}
-        url="https://example.com"
       />,
     );
 

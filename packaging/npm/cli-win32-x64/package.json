@@ -1,0 +1,26 @@
+{
+  "name": "@sitecmd/cli-win32-x64",
+  "version": "0.0.0-dev",
+  "description": "The Windows x86_64 sitecmd binary for @sitecmd/cli.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brambleworks/SiteCMD.git"
+  },
+  "homepage": "https://sitecmd.com/docs/cli",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES",
+    "THIRD_PARTY_DEPENDENCIES.json",
+    "THIRD_PARTY_LICENSES.txt",
+    "THIRD_PARTY_LICENSES.tsv"
+  ],
+  "preferUnplugged": true
+}

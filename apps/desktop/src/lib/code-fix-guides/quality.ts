@@ -169,6 +169,22 @@ export const QUALITY_FIX_GUIDES: Record<string, CodeFixGuideEntry> = {
       "Open the checked-in hook config; if it only prints text, installs tooling, or does bookkeeping, it is not protecting the repo. Wire it to the fastest useful quality command, such as lint-staged for touched files or a formatter check, and confirm a deliberately failing staged change blocks the commit or push.",
     ],
   },
+  "pre-commit-hooks-not-installed": {
+    effort: "quick",
+    effortMinutes: 5,
+    lead: "A git hook is configured in this project, but it was never installed in this copy, so it silently does nothing.",
+    default: [
+      "Run the hook tool's install step in this clone: `npm install` (which runs the `prepare` script) or `npx husky` for Husky, `npx lefthook install` for Lefthook, `pre-commit install` for pre-commit, or `npx simple-git-hooks`. Confirm with `git config core.hooksPath` or by listing `.git/hooks`, then make a harmless staged change and watch the hook run.",
+    ],
+  },
+  "tests-not-enforced": {
+    effort: "quick",
+    effortMinutes: 10,
+    lead: "This project has tests, but neither CI nor a git hook runs them, so a failing test never blocks a change.",
+    default: [
+      "Add the project's test command (`npm test`, `composer test`, `pytest`) to the CI job that already runs on pushes or pull requests, after the install and build steps, so a failing test fails the run. Optionally run a fast subset from the pre-push hook. Verify by pushing a branch with a deliberately failing test and confirming CI goes red, then remove it.",
+    ],
+  },
   "runtime-version-eol": {
     effort: "moderate",
     effortMinutes: 25,

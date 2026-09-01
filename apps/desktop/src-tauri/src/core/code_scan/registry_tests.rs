@@ -237,6 +237,10 @@ const INTENTIONAL_DOMAIN_FIXES: &[&str] = &[
 ];
 
 const INTENTIONAL_SEVERITY_PASSTHROUGH_FIXES: &[&str] = &[
+    // Hygiene findings graduate on whether any other automated gate exists.
+    "no-automated-tests",
+    "pre-commit-hooks-missing",
+    "pre-commit-hooks-weak",
     "public-endpoint-rate-limit",
     "upload-validation",
     "upload-key-scope",
@@ -268,8 +272,7 @@ const INTENTIONAL_PIN_CHANGES: &[(&str, Severity, bool)] = &[
     ("gitignore-missing", Severity::Medium, false),
     ("gitignore-missing-env", Severity::Medium, false),
     ("local-db-target-remote", Severity::Medium, false),
-    ("pre-commit-hooks-missing", Severity::Low, false),
-    ("pre-commit-hooks-weak", Severity::Low, false),
+    ("tests-not-enforced", Severity::Medium, false),
     ("undeclared-package", Severity::Medium, false),
     ("lockfile-mismatch", Severity::Medium, false),
     ("cors-credentials-wildcard", Severity::Medium, false),
@@ -430,8 +433,8 @@ fn every_rule_is_classified_risk_or_advisory() {
         }
     }
     assert_eq!(advisory + risk, CODE_CHECKS.len());
-    assert_eq!(CODE_CHECKS.len(), 168);
-    assert_eq!((advisory, risk), (107, 61), "advisory/risk split drifted");
+    assert_eq!(CODE_CHECKS.len(), 170);
+    assert_eq!((advisory, risk), (109, 61), "advisory/risk split drifted");
 }
 
 #[test]
@@ -579,7 +582,7 @@ fn honest_check_count_totals_by_domain() {
     let per_domain = [
         (CodeScanDomain::Security, 47),
         (CodeScanDomain::Database, 40),
-        (CodeScanDomain::Operations, 26),
+        (CodeScanDomain::Operations, 28),
         (CodeScanDomain::Architecture, 16),
         (CodeScanDomain::AiSafety, 15),
         (CodeScanDomain::SupplyChain, 20),
@@ -595,7 +598,7 @@ fn honest_check_count_totals_by_domain() {
         total += expected;
     }
     assert_eq!(total, super::code_check_count());
-    assert_eq!(super::code_check_count(), 168);
+    assert_eq!(super::code_check_count(), 170);
 }
 
 // Every `.rs` file under `core/code_scan` except test code.

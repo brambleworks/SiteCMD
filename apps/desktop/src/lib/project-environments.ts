@@ -59,6 +59,14 @@ export function getProjectUrlIdentityKey(raw: string): string {
   }
 }
 
+// Hostnames local dev environments publish for a site served from this
+// machine: DDEV, Lando, Docksal, and the RFC 6761 `.test` TLD used by
+// Valet/Herd and hand-rolled Docker setups. They resolve to loopback but do
+// not read as local, so a detected DDEV URL would otherwise land on
+// Production. Mirrored by LOCAL_DEV_HOST_SUFFIXES in
+// src-tauri/src/core/localhost.rs.
+const LOCAL_DEV_HOST_SUFFIXES = [".ddev.site", ".lndo.site", ".docksal.site", ".test"];
+
 export function inferProjectEnvironmentFromUrl(raw: string): ProjectEnvironment {
   const normalized = normalizeProjectUrlInput(raw);
   if (!normalized) return "production";
@@ -73,7 +81,8 @@ export function inferProjectEnvironmentFromUrl(raw: string): ProjectEnvironment 
       lower === "0.0.0.0" ||
       lower === "::1" ||
       lower.endsWith(".local") ||
-      lower.includes("localhost")
+      lower.includes("localhost") ||
+      LOCAL_DEV_HOST_SUFFIXES.some((suffix) => lower.endsWith(suffix))
     ) {
       return "local";
     }

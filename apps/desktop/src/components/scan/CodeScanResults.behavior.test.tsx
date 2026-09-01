@@ -391,8 +391,9 @@ describe("CodeScanResults behavior", () => {
     expect(screen.getByText("Issue 001")).toBeInTheDocument();
     expect(screen.queryByText("Issue 101")).not.toBeInTheDocument();
     expect(screen.getByText("Security - 150 Issues")).toBeInTheDocument();
-    expect(screen.getByText("1/2")).toBeInTheDocument();
-    expect(screen.getByLabelText("Previous issues page")).toBeDisabled();
+    expect(screen.getByLabelText("Page 1")).toHaveAttribute("aria-current", "page");
+    // The first page has nowhere to go back to, so the step is absent.
+    expect(screen.queryByLabelText("Previous issues page")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Next issues page"));
 
@@ -400,8 +401,8 @@ describe("CodeScanResults behavior", () => {
     expect(screen.getByText("Issue 101")).toBeInTheDocument();
     expect(screen.queryByText("Issue 001")).not.toBeInTheDocument();
     expect(screen.getByText("Security - 150 Issues")).toBeInTheDocument();
-    expect(screen.getByText("2/2")).toBeInTheDocument();
-    expect(screen.getByLabelText("Next issues page")).toBeDisabled();
+    expect(screen.getByLabelText("Page 2")).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByLabelText("Next issues page")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Issue 150").closest("button")!);
     expect(await screen.findByTestId("code-issue-dossier")).toBeInTheDocument();

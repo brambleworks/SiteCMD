@@ -4,8 +4,6 @@ import {
   CODE_SCAN_FOCUS,
   getCodeScanDomainFocus,
   getCodeScanDomainFromFocus,
-  getIssuesSourceFocus,
-  getIssuesSourceFromFocus,
   getIssuesStatusFocus,
   getIssuesStatusFromFocus,
   getIssuesWebCategoryFocus,
@@ -62,19 +60,6 @@ describe("getCodeScanDomainFocus / getCodeScanDomainFromFocus", () => {
 
   it("returns null when the domain segment is not in the known set", () => {
     expect(getCodeScanDomainFromFocus(`${CODE_SCAN_DOMAIN_FOCUS_PREFIX}mystery-domain`)).toBeNull();
-  });
-});
-
-describe("getIssuesSourceFocus / getIssuesSourceFromFocus", () => {
-  it("round-trips issue sources", () => {
-    expect(getIssuesSourceFromFocus(getIssuesSourceFocus("web"))).toBe("web");
-    expect(getIssuesSourceFromFocus(getIssuesSourceFocus("code"))).toBe("code");
-  });
-
-  it("returns null for unrelated source focuses", () => {
-    expect(getIssuesSourceFromFocus("issues-source:updates")).toBeNull();
-    expect(getIssuesSourceFromFocus("code-scan")).toBeNull();
-    expect(getIssuesSourceFromFocus(null)).toBeNull();
   });
 });
 

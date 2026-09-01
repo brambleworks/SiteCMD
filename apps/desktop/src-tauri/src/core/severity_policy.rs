@@ -247,6 +247,8 @@ fn web_policy_severity(result: &CheckResult) -> Option<Severity> {
         // The directive is direct evidence; intent is contextual. Root-entry
         // pages grade High, while interior pages grade Medium.
         "seo.noindex" => result.severity,
+        // The check grades a redirect Medium and a timed reload Low.
+        "seo.meta_refresh" => result.severity,
         "seo.broken_links" => broken_link_severity(result),
         "seo.canonical_mismatch" => canonical_mismatch_severity(result),
         "seo.meta_conflicts" | "seo.meta_robots_conflicts" => meta_conflict_severity(result),
@@ -279,6 +281,7 @@ fn web_policy_severity(result: &CheckResult) -> Option<Severity> {
         | "seo.faq_schema"
         | "seo.headings.hierarchy"
         | "seo.hreflang"
+        | "seo.link_count"
         | "seo.llms_txt"
         | "seo.organization_identity"
         | "seo.page_speed_hints"

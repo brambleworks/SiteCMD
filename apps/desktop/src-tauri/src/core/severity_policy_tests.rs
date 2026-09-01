@@ -493,10 +493,19 @@ fn broken_links_and_canonical_mismatches_scale_by_launch_impact() {
 
 #[test]
 fn code_hygiene_and_reproducibility_findings_are_not_security_severity() {
+    // Hook findings pass their graded severity through; the advisory cap
+    // still keeps them below High.
     assert_eq!(
         normalized_code_issue_severity(&code_issue(
             "pre-commit-hooks-missing:package.json",
             Severity::High
+        )),
+        Severity::Medium
+    );
+    assert_eq!(
+        normalized_code_issue_severity(&code_issue(
+            "pre-commit-hooks-missing:package.json",
+            Severity::Low
         )),
         Severity::Low
     );
@@ -936,6 +945,7 @@ fn known_code_issue_families_have_explicit_policy() {
         "placeholder-density:src/lib/service.ts",
         "plaintext-password:src/api/register.ts",
         "pre-commit-hooks-missing:package.json",
+        "pre-commit-hooks-not-installed:.husky/pre-commit",
         "pre-commit-hooks-weak:package.json",
         "public-endpoint-rate-limit:src/api/orders.ts",
         "python-code-execution:app/api/run.py",
@@ -961,6 +971,7 @@ fn known_code_issue_families_have_explicit_policy() {
         "suspicious-manifest-package:package.json:reaact",
         "suspicious-package:src/App.tsx:reaact",
         "tenant-scope-missing:src/api/orders.ts",
+        "tests-not-enforced:.github/workflows/ci.yml",
         "typescript-any-abuse:src/lib/types.ts",
         "undeclared-package:src/App.tsx:lodash",
         "unused-dependency:package.json:lodash",

@@ -219,6 +219,54 @@ describe("AddProjectForm primary environment", () => {
     expect(JSON.stringify(addProjectCalls)).not.toContain("localhost");
   });
 
+  it("keeps a detected DDEV URL on Local instead of adding it as another production site", async () => {
+    openMock.mockResolvedValue("/tmp/smarthomeu");
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "detect_project_urls") {
+        return {
+          path: "/tmp/smarthomeu",
+          name: "smarthomeu",
+          framework: "Drupal",
+          // DDEV publishes this hostname for a site served from this machine,
+          // so the label the config file declared has to survive.
+          urls: [
+            {
+              url: "https://smarthomeu.ddev.site",
+              environment: "local",
+              source: ".ddev/config.yaml",
+            },
+          ],
+        };
+      }
+      if (command === "add_project") return 21;
+      return null;
+    });
+
+    render(<AddProjectForm onCreated={vi.fn()} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /select folder/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("/tmp/smarthomeu")).toBeInTheDocument();
+    });
+
+    expect((screen.getByLabelText("Site URL") as HTMLInputElement).value).toBe(
+      "https://smarthomeu.ddev.site",
+    );
+    expect((screen.getByDisplayValue("Local") as HTMLSelectElement).value).toBe("local");
+
+    fireEvent.click(screen.getByRole("button", { name: /create project/i }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "add_project",
+        expect.objectContaining({
+          urls: [{ url: "https://smarthomeu.ddev.site", environment: "local", source: "manual" }],
+        }),
+      );
+    });
+  });
+
   it("creates a code-only project when detection finds only a dev-server URL", async () => {
     openMock.mockResolvedValue("/tmp/sitecmd-devonly");
     invokeMock.mockImplementation(async (command: string) => {

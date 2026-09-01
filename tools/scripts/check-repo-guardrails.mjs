@@ -78,6 +78,7 @@ import { ambientClockFailures, engineVocabFailures } from "./lib/guardrail-engin
 import { browserPayloadFailures } from "./lib/guardrail-browser-payload-rules.mjs";
 import { scannerIdentityFailures } from "./lib/guardrail-scanner-identity-rules.mjs";
 import { capabilityManifestFailures } from "./lib/guardrail-capability-manifest-rules.mjs";
+import { npmCliPackageFailures } from "./lib/guardrail-npm-cli-rules.mjs";
 import { engineArtifactFailures } from "./lib/guardrail-engine-artifact-rules.mjs";
 import { scanScopeFailures } from "./lib/guardrail-scan-scope-rules.mjs";
 import { verifiedGoodFailures } from "./lib/guardrail-verified-good-rules.mjs";
@@ -401,6 +402,7 @@ export function repoGuardrailFailures({ root, read, readJson, exists, listFiles 
   failures.push(...browserPayloadFailures(read, listFiles, exists));
   failures.push(...scannerIdentityFailures(read, listFiles));
   failures.push(...capabilityManifestFailures(read, listFiles));
+  failures.push(...npmCliPackageFailures(read));
   failures.push(...engineArtifactFailures(read));
   failures.push(...scanScopeFailures(read));
   failures.push(...verifiedGoodFailures(read));

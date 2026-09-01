@@ -53,10 +53,8 @@ export interface AppTarget {
 
 export const CODE_SCAN_FOCUS = "code-scan";
 export const CODE_SCAN_DOMAIN_FOCUS_PREFIX = "code-scan-domain:";
-const ISSUES_SOURCE_FOCUS_PREFIX = "issues-source:";
 const ISSUES_STATUS_FOCUS_PREFIX = "issues-status:";
 const ISSUES_WEB_CATEGORY_FOCUS_PREFIX = "issues-web-category:";
-type IssuesSourceFocus = "web" | "code";
 type IssuesStatusFocus = "active" | "ignored" | "blocked" | "resolved" | "all";
 
 export function normalizeAppTargetPage(value?: string | null): AppTargetPage | null {
@@ -77,16 +75,6 @@ export function getCodeScanDomainFromFocus(value?: string | null): CodeScanDomai
   if (!value?.startsWith(CODE_SCAN_DOMAIN_FOCUS_PREFIX)) return null;
   const domain = value.slice(CODE_SCAN_DOMAIN_FOCUS_PREFIX.length) as CodeScanDomain;
   return CODE_SCAN_DOMAIN_ORDER.includes(domain) ? domain : null;
-}
-
-export function getIssuesSourceFocus(source: IssuesSourceFocus): string {
-  return `${ISSUES_SOURCE_FOCUS_PREFIX}${source}`;
-}
-
-export function getIssuesSourceFromFocus(value?: string | null): IssuesSourceFocus | null {
-  if (!value?.startsWith(ISSUES_SOURCE_FOCUS_PREFIX)) return null;
-  const source = value.slice(ISSUES_SOURCE_FOCUS_PREFIX.length);
-  return source === "web" || source === "code" ? source : null;
 }
 
 export function getIssuesStatusFocus(status: IssuesStatusFocus): string {

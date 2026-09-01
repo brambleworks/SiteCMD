@@ -15,29 +15,19 @@ pub static NON_CONTENT_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid non-content regex")
 });
 
-pub struct HeadingCheck;
+/// Heading levels in document order from comment/script/style-stripped markup.
+fn heading_levels(ctx: &PageContext) -> Vec<u8> {
+    let scannable = NON_CONTENT_BLOCK_RE.replace_all(ctx.body_lower(), " ");
+    HEADING_TAG_RE
+        .captures_iter(&scannable)
+        .filter_map(|caps| caps[1].parse().ok())
+        .collect()
+}
 
-impl Check for HeadingCheck {
-    fn id(&self) -> &str {
-        "seo.headings"
-    }
-    fn category(&self) -> ScanCategory {
-        ScanCategory::Seo
-    }
-
-    fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
-        let scannable = NON_CONTENT_BLOCK_RE.replace_all(ctx.body_lower(), " ");
-        let mut results = Vec::new();
-
-        // Heading levels in document order.
-        let levels: Vec<u8> = HEADING_TAG_RE
-            .captures_iter(&scannable)
-            .filter_map(|caps| caps[1].parse().ok())
-            .collect();
-
-        let h1_count = levels.iter().filter(|&&level| level == 1).count();
-
-        results.push(CheckResult {
+/// The `seo.headings.h1` verdict from the ordered heading levels.
+fn h1_result(levels: &[u8]) -> CheckResult {
+    let h1_count = levels.iter().filter(|&&level| level == 1).count();
+    CheckResult {
             check_id: "seo.headings.h1".into(),
             category: ScanCategory::Seo,
             title: match h1_count {
@@ -88,7 +78,39 @@ impl Check for HeadingCheck {
                     "An unclear heading outline can make content harder to scan and navigate. The count alone does not establish that the outline is unclear or that search visibility is harmed.".into(),
                 ),
             },
-        });
+    }
+}
+
+/// H1-count authority for the SEO category. Heading-order signals stay with
+/// `accessibility.headings`.
+pub struct H1Check;
+
+impl Check for H1Check {
+    fn id(&self) -> &str {
+        "seo.headings.h1"
+    }
+    fn category(&self) -> ScanCategory {
+        ScanCategory::Seo
+    }
+
+    fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
+        vec![h1_result(&heading_levels(ctx))]
+    }
+}
+
+pub struct HeadingCheck;
+
+impl Check for HeadingCheck {
+    fn id(&self) -> &str {
+        "seo.headings"
+    }
+    fn category(&self) -> ScanCategory {
+        ScanCategory::Seo
+    }
+
+    fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
+        let levels = heading_levels(ctx);
+        let mut results = vec![h1_result(&levels)];
 
         // Evaluate hierarchy in document order, not by the set of levels present.
         let mut last_level = 0u8;
@@ -286,6 +308,41 @@ mod tests {
             .find(|r| r.check_id == "seo.headings.h1")
             .unwrap();
         assert_eq!(h1.status, CheckStatus::Pass, "{}", h1.description);
+    }
+
+    #[test]
+    fn h1_check_owns_the_h1_count_signal_under_seo() {
+        let html = "<html><body><h1>One</h1><h1>Two</h1><h2>Sub</h2></body></html>";
+        let results = H1Check.run(&ctx(html));
+        assert_eq!(results.len(), 1, "H1Check reports only the H1-count signal");
+        let h1 = &results[0];
+        assert_eq!(h1.check_id, "seo.headings.h1");
+        assert_eq!(h1.category, crate::checks::ScanCategory::Seo);
+        assert_eq!(h1.status, CheckStatus::Warn);
+        assert_eq!(h1.severity, Severity::Low);
+        assert_eq!(h1.confidence, crate::checks::IssueConfidence::NeedsReview);
+        assert_eq!(h1.raw_data.as_ref().unwrap()["h1_count"], 2);
+    }
+
+    #[test]
+    fn h1_check_passes_a_single_h1() {
+        let html = "<html><body><h1>Main</h1><h2>Sub</h2></body></html>";
+        let results = H1Check.run(&ctx(html));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert_eq!(results[0].confidence, crate::checks::IssueConfidence::High);
+    }
+
+    #[test]
+    fn h1_check_matches_the_heading_check_h1_result() {
+        let html = "<html><body><h2>Only subheads</h2></body></html>";
+        let from_h1_check = &H1Check.run(&ctx(html))[0];
+        let shell = HeadingCheck.run(&ctx(html));
+        let from_shell = shell
+            .iter()
+            .find(|r| r.check_id == "seo.headings.h1")
+            .unwrap();
+        assert_eq!(from_h1_check.status, from_shell.status);
+        assert_eq!(from_h1_check.description, from_shell.description);
     }
 
     #[test]

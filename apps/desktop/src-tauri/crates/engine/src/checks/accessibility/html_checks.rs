@@ -266,89 +266,60 @@ impl Check for HeadingOrderCheck {
             }
         }
 
-        // Multiple H1s is its own structural issue (separate from skips).
-        let h1_count = levels.iter().filter(|l| **l == 1).count();
-        let multiple_h1s = h1_count > 1;
-        let missing_h1 = h1_count == 0 && !levels.is_empty();
-
-        let mut issues: Vec<String> = Vec::new();
-        if !skips.is_empty() {
-            issues.push(format!(
-                "{} heading level skip{} in document order: {}",
-                skips.len(),
-                if skips.len() == 1 { "" } else { "s" },
-                skips.join(", ")
-            ));
-        }
-        if multiple_h1s {
-            issues.push(format!(
-                "{} <h1> elements found; review whether one is the clear page heading",
-                h1_count
-            ));
-        }
-        if missing_h1 {
-            issues.push(
-                "Static markup has headings but no <h1>; review whether the page has a clear top-level heading"
-                    .into(),
-            );
-        }
-
+        // H1 count is an SEO signal with its own authority (seo.headings.h1);
+        // this check reviews heading order only.
         vec![CheckResult {
             check_id: "accessibility.headings".into(),
             category: ScanCategory::Accessibility,
-            title: if issues.is_empty() {
+            title: if skips.is_empty() {
                 "Heading structure".into()
-            } else if !skips.is_empty() {
+            } else {
                 "Heading level jumps need review".into()
-            } else if multiple_h1s {
-                "Multiple H1 elements need review".into()
-            } else {
-                "No H1 found in static headings".into()
             },
-            description: if issues.is_empty() {
-                "No numeric heading-level jumps were detected in document order, and the static markup contains one <h1>.".into()
+            description: if skips.is_empty() {
+                "No numeric heading-level jumps were detected in document order.".into()
             } else {
-                // Not a WCAG failure: sequential levels and a single H1
-                // are best practice (axe ships them as best-practice
-                // rules, not violations). Citing SC 1.3.1 here overstated
-                // the finding.
+                // Not a WCAG failure: sequential levels are best practice
+                // (axe ships heading order as a best-practice rule, not a
+                // violation). Citing SC 1.3.1 here overstated the finding.
                 format!(
-                    "{}. These are document-structure review signals rather than conformance determinations: the correct levels depend on the page's actual section hierarchy.",
-                    issues.join(". ")
+                    "{} heading level skip{} in document order: {}. These are document-structure review signals rather than conformance determinations: the correct levels depend on the page's actual section hierarchy.",
+                    skips.len(),
+                    if skips.len() == 1 { "" } else { "s" },
+                    skips.join(", ")
                 )
             },
-            status: if issues.is_empty() {
+            status: if skips.is_empty() {
                 CheckStatus::Pass
             } else {
                 CheckStatus::Warn
             },
             severity: Severity::Low,
-            fix_prompt: if issues.is_empty() {
+            fix_prompt: if skips.is_empty() {
                 None
             } else {
-                Some("Review the rendered headings against the page's real content outline. Give the primary topic a clear top-level heading, nest subsection headings under their actual parent, and use CSS rather than heading levels for visual size. Do not rewrite a legitimate structure solely to make every numeric level consecutive or force exactly one H1.".into())
+                Some("Review the rendered headings against the page's real content outline. Nest subsection headings under their actual parent and use CSS rather than heading levels for visual size. Do not rewrite a legitimate structure solely to make every numeric level consecutive.".into())
             },
-            manual_fix: if issues.is_empty() {
+            manual_fix: if skips.is_empty() {
                 None
             } else {
-                Some("Review the rendered headings against the content structure. Use a clear top-level heading for the page topic, choose subsection levels from their real parent sections, and use CSS for visual sizing. Multiple H1 elements or a numeric jump can be legitimate, so verify the outline with a screen reader before changing it.".into())
+                Some("Review the rendered headings against the content structure. Choose subsection levels from their real parent sections and use CSS for visual sizing. A numeric jump can be legitimate, so verify the outline with a screen reader before changing it.".into())
             },
             raw_data: Some(serde_json::json!({
                 "levels_in_order": levels,
                 "skips": skips,
-                "h1_count": h1_count,
             })),
-            confidence: if issues.is_empty() {
+            confidence: if skips.is_empty() {
                 crate::checks::IssueConfidence::High
             } else {
                 crate::checks::IssueConfidence::NeedsReview
             },
-            confidence_reason: if issues.is_empty() {
+            confidence_reason: if skips.is_empty() {
                 None
             } else {
-                Some("The static heading tags and document order are directly observed, but markup alone cannot determine the intended content hierarchy or whether multiple H1 elements are confusing in context.".into())
+                Some("The static heading tags and document order are directly observed, but markup alone cannot determine the intended content hierarchy.".into())
             },
-            why_it_matters: if issues.is_empty() {
+            why_it_matters: if skips.is_empty() {
                 None
             } else {
                 Some("Many screen reader users navigate by headings. A hierarchy that does not match the visible content can make sections harder to understand and reach, while legitimate document structures should not be flattened mechanically.".into())

@@ -85,9 +85,6 @@
     background-color: color-mix(in oklab, var(--muted) 50%, transparent);
   }
   .code-scan-pager {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     padding: var(--space-base) 1.25rem;
   }
   .scan-schedule-summary {

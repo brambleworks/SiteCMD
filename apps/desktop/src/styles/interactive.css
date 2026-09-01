@@ -117,14 +117,13 @@
     border-color: var(--primary);
     color: var(--foreground);
     background-color: color-mix(in oklab, var(--muted) 60%, transparent);
-    font-weight: 700;
   }
+  /* Unselected tabs read as links to the other views. */
   .tab-inactive {
     border-color: transparent;
-    color: var(--muted-foreground);
+    color: var(--brand);
   }
   .tab-inactive:hover {
-    color: var(--foreground);
     background-color: color-mix(in oklab, var(--muted) 30%, transparent);
   }
 
@@ -448,22 +447,6 @@
     color: var(--brand-button-foreground);
   }
 
-  .queue-tool-button {
-    display: inline-flex;
-    height: 2.25rem;
-    align-items: center;
-    gap: var(--space-tight);
-    padding: var(--space-tight) var(--space-snug);
-    font-size: var(--text-2xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--muted-foreground);
-    transition: var(--transition-colors);
-  }
-  .queue-tool-button:hover {
-    color: var(--foreground);
-  }
   .show-more-row {
     width: 100%;
     cursor: pointer;
@@ -1133,6 +1116,62 @@
     pointer-events: none;
     position: absolute;
     right: 0.75rem;
+    top: 50%;
+    height: 0.875rem;
+    width: 0.875rem;
+    transform: translateY(-50%);
+    color: var(--muted-foreground);
+  }
+  /* Shared page-number pager (Issues list, Code Scan results). */
+  .pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-snug);
+  }
+  .pager-pages {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+  }
+  .pager-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--brand);
+    font-size: var(--text-md);
+    transition: var(--transition-colors);
+  }
+  .pager-step:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .pager-page {
+    min-width: 1.5rem;
+    padding: 0.125rem 0.25rem;
+    color: var(--brand);
+    font-size: var(--text-md);
+    font-variant-numeric: tabular-nums;
+    transition: var(--transition-colors);
+  }
+  .pager-page:not(.pager-page--current):hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .pager-page--current {
+    color: var(--foreground);
+    font-weight: 700;
+  }
+  .pager-gap {
+    padding: 0 0.125rem;
+    color: var(--muted-foreground);
+    font-size: var(--text-md);
+  }
+  .filter-search-icon {
+    pointer-events: none;
+    position: absolute;
+    left: 0.75rem;
     top: 50%;
     height: 0.875rem;
     width: 0.875rem;
