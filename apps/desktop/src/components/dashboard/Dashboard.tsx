@@ -4,7 +4,6 @@ import { useCurrentTime } from "@/lib/useCurrentTime";
 import { getHostname } from "@/lib/utils";
 import { useCurrentScore } from "@/hooks/useCurrentScore";
 import { useAlerts } from "@/hooks/useAlerts";
-import { useSiteBaseline } from "@/hooks/useSiteBaseline";
 import { formatScoreBreakdown } from "@/lib/score-breakdown";
 import { isNavPageConnected } from "@/lib/nav-integrations";
 import type { ScanResult, CodeScanResult } from "@/lib/types";
@@ -28,7 +27,6 @@ import { IdentityHealthStrip } from "./zones/IdentityHealthStrip";
 import { AtAGlance } from "./zones/AtAGlance";
 import { ActionItemsCard } from "./zones/ActionItemsCard";
 import { ReferenceSignals } from "./zones/ReferenceSignals";
-import { SiteBaselineCard } from "./zones/SiteBaselineCard";
 import { WebVitalsDetailModal } from "./WebVitalsDetailModal";
 import { RecentActivityCard, SetupCard } from "./zones/ActivityAndSetup";
 import { useRenderSanityCheck } from "@/lib/render-sanity";
@@ -80,9 +78,6 @@ export function Dashboard({
   // Count only: the strip shows an unread badge; the rows live on the
   // Alerts page itself.
   const { unreadCount } = useAlerts(projectId, "unread", { includeRows: false });
-  // Hide baseline comparison until a scan has established one.
-  const siteBaseline = useSiteBaseline(url || null, projectId);
-
   const {
     trend,
     codeTrend,
@@ -462,13 +457,6 @@ export function Dashboard({
         onOpenDelivery={() => onNavigate("integrations")}
         onOpenDeploys={() => onNavigate("deploys")}
         onOpenIntegrations={() => onNavigate("integrations")}
-      />
-
-      <SiteBaselineCard
-        baseline={siteBaseline.baseline}
-        deciding={siteBaseline.deciding}
-        refusal={siteBaseline.refusal}
-        onDecide={siteBaseline.decide}
       />
 
       <div

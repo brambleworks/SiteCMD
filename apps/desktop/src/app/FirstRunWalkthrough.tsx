@@ -212,7 +212,7 @@ function buildWalkthroughSteps(): WalkthroughStep[] {
       page: "integrations",
       label: "Integrations",
       title: "Connect your services",
-      body: "Analytics, search, uptime, and GitHub connections give scans real-world context, feed Alerts, and add the Traffic and Search pages in the sidebar.",
+      body: "Connect your AI agent so it can pull and fix Issues in your code, then send them back for verification. Analytics, search, uptime, and GitHub connections add real-world context and feed Alerts.",
       cue: "You do not need everything. Start with the one service you already check most, like analytics or Search Console.",
       Icon: Plug,
     },

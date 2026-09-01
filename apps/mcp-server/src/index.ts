@@ -3,12 +3,38 @@
 /** Process entry: the health probe the desktop runs, or the stdio transport. */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { getDb } from "./db_connection.js";
-import { assertSupportedSchemaVersion } from "./schema_version.js";
+import { getDb, isSiteCmdDatabaseNotFoundError } from "./db_connection.js";
+import { assertSupportedSchemaVersion, SchemaCompatibilityError } from "./schema_version.js";
 import { createSiteCmdServer } from "./server.js";
 
-async function main() {
-  if (process.argv.includes("--sitecmd-health-check")) {
+const HEALTH_MARKER = "SITECMD_MCP_HEALTH_V1";
+
+class InvalidSiteCmdDatabaseError extends Error {}
+
+function writeHealthResult(result: Record<string, unknown>) {
+  process.stdout.write(`${JSON.stringify({ marker: HEALTH_MARKER, ...result })}\n`);
+}
+
+function writeHealthFailure(error: unknown) {
+  if (error instanceof SchemaCompatibilityError) {
+    writeHealthResult({
+      ok: false,
+      errorCode: error.code,
+      databaseVersion: error.databaseVersion,
+      supportedMin: error.supportedMin,
+      supportedMax: error.supportedMax,
+    });
+  } else if (isSiteCmdDatabaseNotFoundError(error)) {
+    writeHealthResult({ ok: false, errorCode: "database_not_found" });
+  } else if (error instanceof InvalidSiteCmdDatabaseError) {
+    writeHealthResult({ ok: false, errorCode: "invalid_database" });
+  } else {
+    writeHealthResult({ ok: false, errorCode: "database_unavailable" });
+  }
+}
+
+function runHealthCheck() {
+  try {
     const row = getDb()
       .prepare(
         `SELECT COUNT(*) AS table_count
@@ -17,9 +43,20 @@ async function main() {
            AND name IN ('_schema_version', 'projects', 'work_items', 'fix_attempts')`,
       )
       .get() as { table_count?: number } | undefined;
-    if (row?.table_count !== 4) throw new Error("SiteCMD database schema health query failed");
+    if (row?.table_count !== 4) {
+      throw new InvalidSiteCmdDatabaseError("SiteCMD database schema health query failed");
+    }
     assertSupportedSchemaVersion();
-    process.stdout.write(`${JSON.stringify({ marker: "SITECMD_MCP_HEALTH_V1", ok: true })}\n`);
+    writeHealthResult({ ok: true });
+  } catch (error) {
+    writeHealthFailure(error);
+    throw error;
+  }
+}
+
+async function main() {
+  if (process.argv.includes("--sitecmd-health-check")) {
+    runHealthCheck();
     return;
   }
   const transport = new StdioServerTransport();

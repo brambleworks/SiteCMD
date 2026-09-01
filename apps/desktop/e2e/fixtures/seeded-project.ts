@@ -165,6 +165,7 @@ export function runScanExecutionResult(webResult: ScanResult): RunScanExecutionR
     webResult,
     multiResult: null,
     codeResult: null,
+    issueChanges: null,
   };
 }
 

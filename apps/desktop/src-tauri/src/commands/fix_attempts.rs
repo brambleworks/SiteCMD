@@ -15,6 +15,71 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+fn date_at_ms(timestamp_ms: i64) -> chrono::NaiveDate {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_ms)
+        .map(|timestamp| timestamp.date_naive())
+        .unwrap_or_else(|| chrono::Utc::now().date_naive())
+}
+
+fn reject_suppressed_code_occurrence(
+    db: &Database,
+    project_id: i64,
+    env_url: &str,
+    check_id: &str,
+    target: &FixAttemptTarget,
+    now: i64,
+) -> Result<(), String> {
+    let Some(relative_path) = target.relative_path.as_deref() else {
+        return Ok(());
+    };
+    let Some(project_path) = db
+        .get_project_path_result(project_id)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
+    };
+    let project_root = std::path::Path::new(&project_path);
+    if !project_root.join(".sitecmd/config.json").is_file() {
+        return Ok(());
+    }
+    let items = db
+        .get_active_work_items(project_id, Some(env_url))
+        .map_err(|error| error.to_string())?;
+    let Some(item) = items.iter().find(|item| {
+        item.source == "code_scan"
+            && item.check_id == check_id
+            && item.metadata.relative_path.as_deref() == Some(relative_path)
+            && item.metadata.line == target.line
+    }) else {
+        return Ok(());
+    };
+    let fingerprint = item
+        .detail_json
+        .as_deref()
+        .map(serde_json::from_str::<crate::core::code_scan::CodeIssue>)
+        .transpose()
+        .map_err(|error| format!("Could not read the stored Code Scan finding: {error}"))?
+        .map(|issue| crate::cli::audit_suppressions::issue_fingerprint(&issue));
+    let suppression = crate::cli::audit_suppressions::active_project_suppression(
+        project_root,
+        check_id,
+        relative_path,
+        fingerprint.as_deref(),
+        date_at_ms(now),
+    )?;
+    if let Some(suppression) = suppression {
+        let expiry = suppression
+            .expires
+            .map(|date| format!(" through {date}"))
+            .unwrap_or_default();
+        return Err(format!(
+            "This Code Scan finding is suppressed by .sitecmd/config.json{expiry}: {}. Run Code Scan again to refresh the issue list.",
+            suppression.reason
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "ipc-bindings.ts")]
@@ -105,6 +170,7 @@ pub(crate) fn create_fix_attempt_inner(
         Some([location]) => FixAttemptTarget::occurrence(location.path.clone(), location.line),
         _ => FixAttemptTarget::group(),
     };
+    reject_suppressed_code_occurrence(db, project_id, &env_url, &check_id, &attempt_target, now)?;
 
     // Code-scan issues carry their own locations; web-scan issues fall back
     // to the static fix-location hints resolved against the linked project.
@@ -391,6 +457,106 @@ mod tests {
         assert_eq!(row.target_kind, "occurrence");
         assert_eq!(row.target_relative_path.as_deref(), Some("src/http.ts"));
         assert_eq!(row.target_line, Some(12));
+    }
+
+    #[test]
+    fn suppressed_code_occurrence_cannot_create_a_fix_attempt() {
+        let db = temp_db();
+        let project = tempfile::tempdir().expect("project");
+        let sitecmd_dir = project.path().join(".sitecmd");
+        std::fs::create_dir_all(&sitecmd_dir).expect("sitecmd directory");
+        std::fs::write(
+            sitecmd_dir.join("config.json"),
+            r#"{
+  "version": 1,
+  "url": "https://example.com",
+  "name": "Suppressed project",
+  "code_scan": {
+    "suppressions": [{
+      "match": {
+        "rule": "code_scan.cors-origin-reflection",
+        "path": "content/security.ts"
+      },
+      "reason": "This file contains inert security guidance."
+    }]
+  }
+}"#,
+        )
+        .expect("suppression config");
+        let project_path = project.path().to_str().expect("utf8 path").to_string();
+        let project_id = db
+            .upsert_project("Suppressed project", &project_path, Some("typescript"))
+            .expect("upsert");
+        let issue = crate::core::code_scan::CodeIssue {
+            id: "cors-origin-reflection:content/security.ts:371".to_string(),
+            check_id: "code_scan.cors-origin-reflection".to_string(),
+            category: "security".to_string(),
+            severity: crate::checks::Severity::High,
+            title: "CORS reflects the request origin while allowing credentials".to_string(),
+            description: "The source appears to reflect credentialed origins.".to_string(),
+            relative_path: "content/security.ts".to_string(),
+            absolute_path: project
+                .path()
+                .join("content/security.ts")
+                .to_string_lossy()
+                .to_string(),
+            line: Some(371),
+            source_excerpt: Some("replace origin: true with an exact allowlist".to_string()),
+            evidence: None,
+            why_now: None,
+            likely_fix: Some("Use an exact allowlist.".to_string()),
+            confidence: crate::checks::IssueConfidence::High,
+            confidence_reason: None,
+            verify_hint: None,
+        };
+        let detail_json = serde_json::to_string(&issue).expect("issue json");
+        db.execute(move |conn| {
+            conn.execute(
+                "INSERT INTO work_items (
+                     project_id, env_url, source, signal_id, check_id, category,
+                     severity, title, description, detail_json, first_seen_at,
+                     last_seen_at, relative_path, line, producer_check_id
+                 ) VALUES (
+                     ?1, 'https://example.com', 'code_scan',
+                     'code_scan:cors-origin-reflection:content/security.ts:371',
+                     'code_scan.cors-origin-reflection', 'security', 'high',
+                     'CORS reflects the request origin while allowing credentials',
+                     'The source appears to reflect credentialed origins.', ?2,
+                     1000, 1000, 'content/security.ts', 371,
+                     'cors-origin-reflection'
+                 )",
+                rusqlite::params![project_id, detail_json],
+            )
+            .map_err(|error| error.to_string())
+        })
+        .expect("dispatch insert")
+        .expect("insert code work item");
+
+        let mut args = base_args(project_id);
+        args.check_id = "code_scan.cors-origin-reflection".to_string();
+        args.title = issue.title;
+        args.description = issue.description;
+        args.evidence = Some(serde_json::json!({ "excerpt": issue.source_excerpt }));
+        args.manual_fix = issue.likely_fix;
+        args.code_locations = Some(vec![BriefLocation {
+            label: "content/security.ts:371".to_string(),
+            path: "content/security.ts".to_string(),
+            line: Some(371),
+            reason: "Code Scan occurrence".to_string(),
+        }]);
+
+        let error = create_fix_attempt_inner(&db, args, 2_000)
+            .expect_err("a source-controlled suppression must block the attempt");
+        assert!(error.contains("suppressed"), "{error}");
+        assert!(error.contains("inert security guidance"), "{error}");
+        assert!(db
+            .get_latest_fix_attempt(
+                project_id,
+                "https://example.com",
+                "code_scan.cors-origin-reflection"
+            )
+            .expect("query attempts")
+            .is_none());
     }
 
     #[test]

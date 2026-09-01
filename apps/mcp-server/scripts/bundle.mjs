@@ -3,9 +3,12 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertRepositorySchemaContract } from "./lib/schema-contract.mjs";
+
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = join(pkgRoot, "src");
 const outDir = join(pkgRoot, "dist-bundle");
+assertRepositorySchemaContract();
 mkdirSync(outDir, { recursive: true });
 
 await build({

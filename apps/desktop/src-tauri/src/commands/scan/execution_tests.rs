@@ -54,3 +54,27 @@ fn incomplete_page_scope_produces_a_partial_execution_detail() {
     );
     assert_eq!(incomplete_page_scope_detail(3, 3), None);
 }
+
+#[test]
+fn issue_changes_reconcile_the_open_total_across_an_execution() {
+    let before = std::collections::HashSet::from([
+        "unchanged".to_string(),
+        "resolved-a".to_string(),
+        "resolved-b".to_string(),
+        "resolved-c".to_string(),
+        "resolved-d".to_string(),
+    ]);
+    let mut after = std::collections::HashSet::from(["unchanged".to_string()]);
+    after.extend((0..10).map(|index| format!("new-{index}")));
+
+    let changes = build_scan_issue_changes(&before, &after);
+
+    assert_eq!(changes.previous_open_issues, 5);
+    assert_eq!(changes.open_issues, 11);
+    assert_eq!(changes.new_issues, 10);
+    assert_eq!(changes.resolved_issues, 4);
+    assert_eq!(
+        changes.previous_open_issues + changes.new_issues - changes.resolved_issues,
+        changes.open_issues
+    );
+}

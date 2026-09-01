@@ -443,6 +443,14 @@ fn sensitive_privileged_token_issuance_requires_user_intent() {
 }
 
 #[test]
+fn updating_a_project_path_does_not_require_native_confirmation() {
+    assert!(!privileged_token_issue_requires_user_intent(
+        "run_filesystem_access_command",
+        "update_project_path",
+    ));
+}
+
+#[test]
 fn native_intent_lists_match_the_security_manifest() {
     let manifest: Value =
         serde_json::from_str(include_str!("../../../permissions/command-security.json"))

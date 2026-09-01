@@ -153,6 +153,8 @@ describe("UpdatesPage behavior", () => {
     );
 
     expect(screen.getByLabelText("Updates loading state")).toBeInTheDocument();
+    expect(screen.getByText("Checking project dependencies...")).toBeVisible();
+    expect(document.querySelectorAll(".updates-skeleton-row")).toHaveLength(9);
   });
 
   it("shows the loading skeleton instead of a persisted signal snapshot", async () => {
@@ -924,6 +926,73 @@ describe("UpdatesPage behavior", () => {
       expect(invokeMock).toHaveBeenCalledWith("detect_updates", {
         projectId: 2,
         projectPath: "/tmp/example-updates-snapshot-sanitize",
+      });
+    });
+
+    expect(invokeMock.mock.calls.some(([command]) => command === "record_update_event")).toBe(
+      false,
+    );
+  });
+
+  it("does not call a disappeared update applied during an automatic refresh", async () => {
+    const projectPath = "/tmp/example-updates-auto-refresh";
+    const { writeUpdateSnapshot } = await import("@/lib/update-memory");
+    writeUpdateSnapshot(projectPath, [
+      {
+        ecosystem: "npm",
+        name: "astro",
+        currentVersion: "5.0.0",
+        latestVersion: "6.0.0",
+        updateType: "major",
+        isSecurity: false,
+        advisorySeverity: null,
+        advisoryUrl: null,
+        source: "package.json",
+        isDev: false,
+        isDeprecated: false,
+        deprecationMessage: null,
+        currentVersionDeprecated: false,
+        isStale: false,
+        lastPublished: null,
+        workspaceMembers: [],
+      },
+    ]);
+
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "detect_updates") {
+        return Promise.resolve({
+          packages: [
+            {
+              name: "astro",
+              version: "6.0.0",
+              ecosystem: "npm",
+              source: "package.json",
+              isDev: false,
+            },
+          ],
+          updates: [],
+          ecosystemsDetected: ["npm"],
+          scanDurationMs: 120,
+        });
+      }
+      if (command === "get_events") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+
+    renderUpdatesPage(
+      <UpdatesPage
+        projectId={2}
+        url="https://example.com"
+        projectPath={projectPath}
+        projectName="Example"
+        onAddFolder={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("detect_updates", {
+        projectId: 2,
+        projectPath,
       });
     });
 

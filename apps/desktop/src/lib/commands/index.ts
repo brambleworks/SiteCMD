@@ -16,7 +16,6 @@ export * from "./pagespeed";
 export * from "./projects";
 export * from "./reports";
 export * from "./scan";
-export * from "./site-baseline";
 export * from "./sitemap";
 export * from "./telemetry";
 export * from "./updates";

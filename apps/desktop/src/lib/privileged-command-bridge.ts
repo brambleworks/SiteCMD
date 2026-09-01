@@ -119,8 +119,13 @@ const PRIVILEGED_BRIDGE_COMMAND_TIMEOUTS_MS: Record<string, number> = {
 const NATIVE_RESPONSE_COMMANDS = new Set([
   "complete_github_oauth",
   "complete_google_oauth",
+  "detect_updates",
   "run_scan_execution",
 ]);
+
+export function usesNativeResponseEvent(command: string): boolean {
+  return NATIVE_RESPONSE_COMMANDS.has(command);
+}
 
 export function resolveCommandTimeoutMs(command: string): number {
   return PRIVILEGED_BRIDGE_COMMAND_TIMEOUTS_MS[command] ?? PRIVILEGED_BRIDGE_DEFAULT_TIMEOUT_MS;
@@ -191,7 +196,6 @@ export const NATIVE_INTENT_CONNECTOR_COMMANDS: ReadonlySet<string> = new Set([
 
 // Keep aligned with Rust's SENSITIVE_FILESYSTEM_ACCESS_COMMANDS.
 export const NATIVE_INTENT_FILESYSTEM_COMMANDS: ReadonlySet<string> = new Set([
-  "update_project_path",
   "open_path_in_editor",
   "reveal_path",
   "register_agent_tool",
@@ -489,7 +493,7 @@ async function invokeThroughPrivilegedBridgeOnce<T>(
   latestInvocationSeq.set(command, invocationSeq);
   const id = `${Date.now()}-${requestSeq}`;
   const responseEvent = responseEventName(id);
-  const nativeResponseEvent = NATIVE_RESPONSE_COMMANDS.has(command) ? responseEvent : undefined;
+  const nativeResponseEvent = usesNativeResponseEvent(command) ? responseEvent : undefined;
 
   let unlisten: UnlistenFn | null = null;
   let timer: number | null = null;

@@ -15,6 +15,10 @@ function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function displayChangeCount(value: number | null) {
+  return value == null ? "-" : String(value);
+}
+
 export function ScanSummaryOverlay({ summary, onClose, onReviewIssues }: ScanSummaryOverlayProps) {
   const hasIssues = summary.totalIssues > 0;
 
@@ -53,21 +57,16 @@ export function ScanSummaryOverlay({ summary, onClose, onReviewIssues }: ScanSum
           <div className="flex-fill">
             <p className="scan-summary-lede">
               {hasIssues
-                ? `${pluralize(summary.totalIssues, "open issue")} after this scan.`
-                : "No open issues after this scan."}
+                ? `${pluralize(summary.totalIssues, "open issue")} after this scan`
+                : "No open issues after this scan"}
             </p>
             <div className="scan-summary-stat-grid">
+              <SummaryStat label="New" value={displayChangeCount(summary.estimatedNewIssues)} />
+              <SummaryStat label="Resolved" value={displayChangeCount(summary.resolvedIssues)} />
               <SummaryStat
-                label="New"
-                value={
-                  summary.estimatedNewIssues == null ? "-" : String(summary.estimatedNewIssues)
-                }
+                label="Regressions"
+                value={displayChangeCount(summary.regressionCount)}
               />
-              <SummaryStat
-                label="Resolved"
-                value={summary.resolvedIssues == null ? "-" : String(summary.resolvedIssues)}
-              />
-              <SummaryStat label="Regressions" value={String(summary.regressionCount)} />
             </div>
           </div>
         </div>

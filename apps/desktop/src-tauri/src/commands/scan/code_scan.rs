@@ -4,6 +4,7 @@ use crate::core::code_scan::{CodeIssueView, CodeScanAuditProgress, CodeScanError
 use crate::core::normalized_scan::normalize_code_scan_with_provenance;
 use crate::core::scanner::ScanProgress;
 use crate::db::{normalize_env_url, CodeScanResult, CodeScanSummary, Database};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
@@ -11,6 +12,53 @@ use tauri::{AppHandle, Emitter};
 use super::control::ScanControlState;
 use super::domain_summary::{build_domain_summaries, select_relevant_previous_code_scan_summary};
 use crate::commands::sanitize_error;
+
+struct SourceControlledCodeScanReport {
+    report: crate::core::code_scan::CodeScanReport,
+    evidence_report: crate::core::code_scan::CodeScanReport,
+    ignored_count: usize,
+    suppressed_occurrence_ids: std::collections::BTreeSet<String>,
+}
+
+fn apply_source_control_suppressions(
+    project_path: &Path,
+    report: crate::core::code_scan::CodeScanReport,
+    today: chrono::NaiveDate,
+) -> Result<SourceControlledCodeScanReport, String> {
+    let evidence_report = report.clone();
+    let audit =
+        crate::cli::audit_suppressions::apply_project_suppressions(project_path, report, today)?;
+    let suppressed_occurrence_ids = audit
+        .ignored_findings
+        .iter()
+        .map(|finding| crate::core::normalized_scan::code_scan_occurrence_id(&finding.issue))
+        .collect();
+    Ok(SourceControlledCodeScanReport {
+        ignored_count: audit.ignored_findings.len(),
+        report: audit.report,
+        evidence_report,
+        suppressed_occurrence_ids,
+    })
+}
+
+fn mark_suppressed_findings(
+    batch: &mut crate::core::normalized_scan::NormalizedRunBatch,
+    suppressed_occurrence_ids: &std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    let mut marked = 0;
+    for finding in &mut batch.findings {
+        if suppressed_occurrence_ids.contains(&finding.occurrence_id) {
+            finding.verdict = crate::checks::CheckStatus::Skipped;
+            marked += 1;
+        }
+    }
+    if marked != suppressed_occurrence_ids.len() {
+        return Err(
+            "Could not preserve every suppressed Code Scan finding as skipped evidence".to_string(),
+        );
+    }
+    Ok(())
+}
 
 fn emit_code_scan_progress(app: &AppHandle, progress: CodeScanAuditProgress) {
     let _ = app.emit(
@@ -110,12 +158,32 @@ pub(crate) async fn run_code_scan_internal(
                 },
                 move |progress| emit_code_scan_progress(&progress_app, progress),
             );
+            let report = report.and_then(|report| {
+                apply_source_control_suppressions(
+                    Path::new(&path_clone),
+                    report,
+                    chrono::Utc::now().date_naive(),
+                )
+            });
             let provenance = before.confirm_unchanged(CodeCheckoutProvenance::capture(&path_clone));
             (provenance, report)
         })
         .await
         .map_err(|e| CodeScanError::Failed(format!("Code scan task failed: {}", e)))?;
-        let report = report.map_err(|error| CodeScanError::Failed(sanitize_error(error)))?;
+        let source_controlled =
+            report.map_err(|error| CodeScanError::Failed(sanitize_error(error)))?;
+        if source_controlled.ignored_count > 0 {
+            tracing::info!(
+                ignored_findings = source_controlled.ignored_count,
+                "code_scan: applied source-controlled suppressions"
+            );
+        }
+        let SourceControlledCodeScanReport {
+            report,
+            evidence_report,
+            suppressed_occurrence_ids,
+            ..
+        } = source_controlled;
         if cfg!(debug_assertions) {
             tracing::warn!(issues = report.issue_count, "code_scan: audit_project done");
         }
@@ -156,8 +224,8 @@ pub(crate) async fn run_code_scan_internal(
         let completed_at = crate::db::timestamp_text_to_ms(&report.checked_at)
             .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
         let run_started_at = completed_at.saturating_sub(duration_ms as i64);
-        let batch = normalize_code_scan_with_provenance(
-            &report,
+        let mut batch = normalize_code_scan_with_provenance(
+            &evidence_report,
             execution_id,
             project_id,
             environment_url.clone(),
@@ -171,6 +239,8 @@ pub(crate) async fn run_code_scan_internal(
         .map_err(|error| {
             CodeScanError::Failed(format!("Could not normalize Code Scan result: {error}"))
         })?;
+        mark_suppressed_findings(&mut batch, &suppressed_occurrence_ids)
+            .map_err(CodeScanError::Failed)?;
         let scan_id = db
             .persist_normalized_scan_run(batch)
             .map_err(|error| CodeScanError::Failed(sanitize_error(error)))?;
@@ -431,5 +501,96 @@ mod tests {
     fn failure_alert_skips_success() {
         let result: Result<CodeScanResult, CodeScanError> = Ok(code_scan_result_fixture());
         assert!(code_scan_failure_alert_error(&result).is_none());
+    }
+
+    #[test]
+    fn source_control_suppressions_filter_the_persisted_scan_report() {
+        let project = tempfile::tempdir().expect("project");
+        let sitecmd_dir = project.path().join(".sitecmd");
+        std::fs::create_dir_all(&sitecmd_dir).expect("sitecmd directory");
+        std::fs::write(
+            sitecmd_dir.join("config.json"),
+            r#"{
+  "version": 1,
+  "url": "https://example.com",
+  "name": "Suppressed project",
+  "code_scan": {
+    "suppressions": [{
+      "match": {
+        "rule": "code_scan.cors-origin-reflection",
+        "path": "content/security.ts"
+      },
+      "reason": "This file contains inert security guidance."
+    }]
+  }
+}"#,
+        )
+        .expect("suppression config");
+        let issue = crate::core::code_scan::CodeIssue {
+            id: "cors-origin-reflection:content/security.ts:371".to_string(),
+            check_id: "code_scan.cors-origin-reflection".to_string(),
+            category: "security".to_string(),
+            severity: crate::checks::Severity::High,
+            title: "CORS reflects the request origin while allowing credentials".to_string(),
+            description: "The source appears to reflect credentialed origins.".to_string(),
+            relative_path: "content/security.ts".to_string(),
+            absolute_path: project
+                .path()
+                .join("content/security.ts")
+                .to_string_lossy()
+                .to_string(),
+            line: Some(371),
+            source_excerpt: Some("replace origin: true with an exact allowlist".to_string()),
+            evidence: None,
+            why_now: None,
+            likely_fix: Some("Use an exact allowlist.".to_string()),
+            confidence: crate::checks::IssueConfidence::High,
+            confidence_reason: None,
+            verify_hint: None,
+        };
+        let report = crate::core::code_scan::CodeScanReport {
+            checked_at: "2026-08-31T12:00:00Z".to_string(),
+            framework: Some("typescript".to_string()),
+            issue_count: 1,
+            critical_count: 0,
+            high_count: 1,
+            medium_count: 0,
+            low_count: 0,
+            issues: vec![issue],
+            skipped_scopes: Default::default(),
+        };
+
+        let filtered = apply_source_control_suppressions(
+            project.path(),
+            report,
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 31).expect("date"),
+        )
+        .expect("valid suppression");
+
+        assert_eq!(filtered.report.issue_count, 0);
+        assert!(filtered.report.issues.is_empty());
+        assert_eq!(filtered.ignored_count, 1);
+        assert_eq!(filtered.evidence_report.issue_count, 1);
+
+        let mut batch = crate::core::normalized_scan::normalize_code_scan(
+            &filtered.evidence_report,
+            1,
+            1,
+            Some("https://example.com".to_string()),
+            "https://example.com".to_string(),
+            project.path().to_string_lossy().to_string(),
+            100,
+            10,
+            1_000,
+        )
+        .expect("normalize evidence");
+        mark_suppressed_findings(&mut batch, &filtered.suppressed_occurrence_ids)
+            .expect("mark suppressed evidence");
+
+        assert_eq!(batch.findings.len(), 1);
+        assert_eq!(
+            batch.findings[0].verdict,
+            crate::checks::CheckStatus::Skipped
+        );
     }
 }

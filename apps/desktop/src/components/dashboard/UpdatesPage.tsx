@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { detectUpdates } from "@/lib/commands";
 import { logger } from "@/lib/logger";
-import { recordUpdateEvent } from "@/lib/event-writes";
 import { emitAppEvent } from "@/lib/app-events";
 import { HeaderActions } from "@/app/ShellHeader";
 import { SurfaceState } from "@/components/ui/surface-state";
@@ -13,13 +12,7 @@ import { useToast } from "@/hooks/useToast";
 import { WatchedFileArrivalBanner } from "@/components/issues/WatchedFileArrivalBanner";
 import { openPathInEditor } from "@/lib/desktop-actions";
 import type { DesktopPromptEntry } from "@/lib/desktop-prompts";
-import {
-  getRecentPendingProjectUpdates,
-  markUpdateVerified,
-  readUpdateSnapshot,
-  recordSeenUpdates,
-  writeUpdateSnapshot,
-} from "@/lib/update-memory";
+import { recordSeenUpdates, writeUpdateSnapshot } from "@/lib/update-memory";
 import { normalizeUpdateReport } from "@/lib/package-update-normalize";
 import { buildUpdateQueueSummary } from "@/lib/update-summary";
 import { usePendingVerificationCenter } from "@/lib/pending-verification";
@@ -30,12 +23,6 @@ import { PROJECT_SIGNALS_CHANGED_EVENT } from "@/lib/project-signal-events";
 import { formatUrlDisplay } from "@/lib/utils";
 import { CompactTrendStrip } from "./CompactTrend";
 import { buildUpdatesTrendModel } from "./compact-trend-model";
-import {
-  buildAppliedUpdateEventSourceId,
-  buildUpdateRefreshHistoryDraft,
-  getClearedUpdates,
-  getTrustedPreviousUpdates,
-} from "./update-history";
 import {
   CopyAllButton,
   PendingUpdatesVerificationSection,
@@ -64,7 +51,6 @@ import { useCurrentTime } from "@/lib/useCurrentTime";
 import { userFacingError } from "@/lib/user-facing-error";
 
 export { buildAiTask, buildCommand } from "./update-commands";
-export { buildUpdateRefreshHistoryDraft } from "./update-history";
 export { UpdateDossier } from "./UpdateDossier";
 
 interface UpdatesPageProps {
@@ -147,11 +133,10 @@ export function UpdatesPage({
   }, []);
 
   const loadReport = useCallback(
-    async (options?: { showToast?: boolean; recordHistory?: boolean }) => {
+    async (options?: { showToast?: boolean }) => {
       const scopeKey = projectScopeKey;
       if (!projectPath || activeProjectScopeRef.current !== scopeKey) return null;
       const showToast = options?.showToast ?? false;
-      const recordHistory = options?.recordHistory ?? true;
       const hadExistingReport = reportRef.current != null;
       setLoading(true);
       setError(null);
@@ -163,15 +148,6 @@ export function UpdatesPage({
         // An empty package census cannot prove that prior updates were resolved.
         const scanObservedDependencies = result.packages.length > 0;
         const resultSummary = buildUpdateQueueSummary(result.updates);
-        const previousReport = reportRef.current;
-        const previousSnapshot = readUpdateSnapshot(projectPath);
-        const recentPendingUpdates = getRecentPendingProjectUpdates(projectPath);
-        const previousUpdates = getTrustedPreviousUpdates(
-          previousReport?.updates ??
-            (previousSnapshot && previousSnapshot.length > 0 ? previousSnapshot : null) ??
-            (recentPendingUpdates.length > 0 ? recentPendingUpdates : null),
-          result,
-        );
         setReport(result);
         reportRef.current = result;
         // Keep the last observed list rather than letting an unobserved scan
@@ -191,37 +167,6 @@ export function UpdatesPage({
           timestamp: now,
         });
         setLastChecked(now);
-        if (recordHistory && previousUpdates && scanObservedDependencies) {
-          const clearedUpdates = getClearedUpdates(previousUpdates, result.updates);
-          for (const clearedUpdate of clearedUpdates) {
-            markUpdateVerified(projectPath, clearedUpdate);
-          }
-          const refreshHistoryDraft = buildUpdateRefreshHistoryDraft(
-            previousUpdates,
-            result.updates,
-          );
-          if (refreshHistoryDraft && clearedUpdates.length > 0) {
-            void recordUpdateEvent({
-              projectId,
-              title: refreshHistoryDraft.title,
-              summary: refreshHistoryDraft.summary,
-              detail: JSON.stringify({
-                ...refreshHistoryDraft.detail,
-                project_path: projectPath,
-              }),
-              sourceId: buildAppliedUpdateEventSourceId(
-                "updates-refresh",
-                projectId,
-                clearedUpdates,
-                resultSummary.total,
-                resultSummary.security,
-              ),
-              severity: refreshHistoryDraft.severity,
-            })
-              .then(() => loadUpdateHistory())
-              .catch(() => {});
-          }
-        }
         void loadUpdateHistory();
         if (showToast) {
           const secCount = resultSummary.security;
@@ -267,7 +212,7 @@ export function UpdatesPage({
 
   const runScan = useCallback(
     async (showToast: boolean) => {
-      await loadReport({ showToast, recordHistory: true });
+      await loadReport({ showToast });
     },
     [loadReport],
   );

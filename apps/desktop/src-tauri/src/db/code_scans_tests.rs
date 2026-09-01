@@ -222,6 +222,49 @@ fn save_code_scan_snapshots_canonical_id_inside_payload() {
     assert_eq!(payload_id, column_id);
 }
 
+#[test]
+fn skipped_code_evidence_is_not_returned_as_an_active_history_issue() {
+    let db = temp_db();
+    let project_id = db
+        .upsert_project("test", "/tmp/code-scan-skipped", None)
+        .unwrap();
+    let scan_id = db
+        .save_code_scan(
+            project_id,
+            Some("https://example.com".to_string()),
+            "/tmp/code-scan-skipped".into(),
+            &one_issue_report(),
+            100,
+        )
+        .unwrap();
+    db.execute(move |conn| {
+        conn.execute(
+            "UPDATE scan_findings SET verdict = 'skipped' WHERE run_id = ?1",
+            [scan_id],
+        )
+        .map_err(|error| error.to_string())?;
+        conn.execute(
+            "UPDATE scan_runs
+             SET issues_total = 0, issues_high = 0
+             WHERE id = ?1",
+            [scan_id],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok::<(), String>(())
+    })
+    .unwrap()
+    .unwrap();
+
+    let detail = db
+        .get_code_scan_detail(scan_id)
+        .unwrap()
+        .expect("scan detail");
+    assert_eq!(detail.issue_count, 0);
+    assert!(detail.issues.is_empty());
+    assert!(detail.domain_summaries.is_empty());
+    assert!(db.get_top_code_scan_issue_view(scan_id).unwrap().is_none());
+}
+
 fn seed_code_scan(db: &TestDb, project_id: i64) -> i64 {
     db.save_code_scan(
         project_id,

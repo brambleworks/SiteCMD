@@ -75,6 +75,39 @@ fn run_all_is_idempotent() {
 }
 
 #[test]
+fn migration_028_removes_only_inferred_update_activity() {
+    let conn = Connection::open_in_memory().expect("open in-memory db");
+    super::ensure_version_table(&conn).expect("version table");
+    super::apply_pending(&conn, &super::MIGRATIONS[..27], 0).expect("upgrade through v27");
+    conn.execute(
+        "INSERT INTO projects (name, secret_namespace) VALUES ('p', 'migration-028')",
+        [],
+    )
+    .expect("seed project");
+    conn.execute_batch(
+        "INSERT INTO events
+             (project_id, event_type, severity, occurred_at_ms, title, source, source_id)
+         VALUES
+             (1, 'update', 'info', 1, '8 Updates Applied', 'internal',
+              'updates-refresh:1:0:0:npm:astro:5->6'),
+             (1, 'update', 'info', 2, '1 Update Applied', 'internal',
+              'updates-verify:1:npm:astro:verified:2');",
+    )
+    .expect("seed update events");
+
+    super::apply_pending(&conn, &super::MIGRATIONS[27..], 27).expect("apply v28");
+
+    let remaining: Vec<String> = conn
+        .prepare("SELECT source_id FROM events ORDER BY id")
+        .expect("prepare event query")
+        .query_map([], |row| row.get(0))
+        .expect("query events")
+        .collect::<Result<_, _>>()
+        .expect("collect events");
+    assert_eq!(remaining, vec!["updates-verify:1:npm:astro:verified:2"]);
+}
+
+#[test]
 fn failed_migration_rolls_back_ddl_and_version_together() {
     let conn = migrated_conn();
     let current = super::latest_version();

@@ -24,7 +24,6 @@ interface UpdatesToast {
 
 interface LoadReportOptions {
   showToast?: boolean;
-  recordHistory?: boolean;
 }
 
 interface UseUpdatesVerificationActionsOptions {
@@ -98,7 +97,7 @@ export function useUpdatesVerificationActions({
       setVerifyingUpdateKey(key);
       try {
         const beforeSummary = buildUpdateQueueSummary(report?.updates ?? []);
-        const nextReport = await loadReport({ showToast: false, recordHistory: false });
+        const nextReport = await loadReport({ showToast: false });
         if (!nextReport) return;
         const afterSummary = buildUpdateQueueSummary(nextReport.updates);
 
@@ -226,7 +225,7 @@ export function useUpdatesVerificationActions({
       });
       setVerifyingPendingId(entry.id);
       try {
-        const nextReport = await loadReport({ showToast: false, recordHistory: false });
+        const nextReport = await loadReport({ showToast: false });
         if (!nextReport) return;
         const afterSummary = buildUpdateQueueSummary(nextReport.updates);
         const previousUpdate = findPackageUpdateByItemId(previousUpdates, entry.itemId);
@@ -345,7 +344,7 @@ export function useUpdatesVerificationActions({
     });
     setVerifyingAllPending(true);
     try {
-      const nextReport = await loadReport({ showToast: false, recordHistory: false });
+      const nextReport = await loadReport({ showToast: false });
       if (!nextReport) return;
       const afterSummary = buildUpdateQueueSummary(nextReport.updates);
       for (const entry of pendingUpdateEntries) {
@@ -381,24 +380,26 @@ export function useUpdatesVerificationActions({
         secondaryAction: followUp.secondaryAction,
       });
       const appliedUpdates = getClearedUpdates(previousUpdates, nextReport.updates);
-      recordUpdateTimelineEvent({
-        sourceId: `${jobId}:${Date.now()}`,
-        title: `${appliedUpdates.length || pendingUpdateEntries.length} Update${(appliedUpdates.length || pendingUpdateEntries.length) === 1 ? "" : "s"} Applied`,
-        summary: [
-          `Verified ${pendingUpdateEntries.length} pending dependency reminder${pendingUpdateEntries.length === 1 ? "" : "s"}.`,
-          followUp.detail,
-        ].join(" "),
-        target: followUp.target,
-        itemLabel: leadPendingEntry?.label ?? null,
-        nextItemLabel: nextTargetUpdate ? formatPackageUpdateSummary(nextTargetUpdate) : null,
-        appliedUpdates,
-        verifiedCount: pendingUpdateEntries.length,
-        remainingUpdates: afterSummary.total,
-        securityUpdates: afterSummary.security,
-        remainingBreakdown: afterSummary.breakdown,
-        workflowLabel:
-          afterSummary.total > 0 ? "Dependency cleanup continues" : "Dependencies cleared",
-      });
+      if (appliedUpdates.length > 0) {
+        recordUpdateTimelineEvent({
+          sourceId: `${jobId}:${Date.now()}`,
+          title: `${appliedUpdates.length} Update${appliedUpdates.length === 1 ? "" : "s"} Applied`,
+          summary: [
+            `Verified ${pendingUpdateEntries.length} pending dependency reminder${pendingUpdateEntries.length === 1 ? "" : "s"}.`,
+            followUp.detail,
+          ].join(" "),
+          target: followUp.target,
+          itemLabel: leadPendingEntry?.label ?? null,
+          nextItemLabel: nextTargetUpdate ? formatPackageUpdateSummary(nextTargetUpdate) : null,
+          appliedUpdates,
+          verifiedCount: appliedUpdates.length,
+          remainingUpdates: afterSummary.total,
+          securityUpdates: afterSummary.security,
+          remainingBreakdown: afterSummary.breakdown,
+          workflowLabel:
+            afterSummary.total > 0 ? "Dependency cleanup continues" : "Dependencies cleared",
+        });
+      }
     } catch (error) {
       failJob(jobId, {
         label: "Dependency verification failed",

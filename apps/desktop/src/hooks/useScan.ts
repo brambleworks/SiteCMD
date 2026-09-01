@@ -12,6 +12,7 @@ import type {
   RunScanExecutionRequest,
   RunScanExecutionResult,
   ScanCategory,
+  ScanIssueChanges,
   ScanResult,
   ScanTrigger,
   ScanType,
@@ -141,6 +142,7 @@ interface UseScanReturn {
   /** Whether the displayed code report came from a background execution. */
   codeResultFromBackground: boolean;
   multiResult: MultiScanResult | null;
+  issueChanges: ScanIssueChanges | null;
   executionIncompleteDetail: string | null;
   error: string | null;
   scan: (url: string, options?: ScanOptions) => Promise<ScanRunOutcome<ScanResult>>;
@@ -274,6 +276,7 @@ export function useScan(): UseScanReturn {
   // Distinguish foreground reports from background refreshes without parallel state.
   const [foregroundCodeRunId, setForegroundCodeRunId] = useState<number | null>(null);
   const [multiResult, setMultiResult] = useState<MultiScanResult | null>(null);
+  const [issueChanges, setIssueChanges] = useState<ScanIssueChanges | null>(null);
   const [executionIncompleteDetail, setExecutionIncompleteDetail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // External progress state avoids repainting the app shell on every tick.
@@ -401,6 +404,7 @@ export function useScan(): UseScanReturn {
       setResult(null);
       setCodeResult(null);
       setMultiResult(null);
+      setIssueChanges(null);
       setExecutionIncompleteDetail(null);
       setError(null);
       resetScanProgress();
@@ -455,6 +459,7 @@ export function useScan(): UseScanReturn {
 
         if (scanEpochRef.current === epoch) {
           setResult(scanResult);
+          setIssueChanges(execution.issueChanges);
           setExecutionIncompleteDetail(getExecutionIncompleteDetail(execution));
           setState("complete");
         }
@@ -512,6 +517,7 @@ export function useScan(): UseScanReturn {
       setResult(null);
       setCodeResult(null);
       setMultiResult(null);
+      setIssueChanges(null);
       setExecutionIncompleteDetail(null);
       setError(null);
       resetScanProgress();
@@ -574,6 +580,7 @@ export function useScan(): UseScanReturn {
           setResult(executionResult.webResult);
           setMultiResult(executionResult.multiResult);
           setCodeResult(nextCodeResult);
+          setIssueChanges(executionResult.issueChanges);
           setForegroundCodeRunId(nextCodeResult?.id ?? null);
           setExecutionIncompleteDetail(getExecutionIncompleteDetail(executionResult));
           setError(failed ? executionFailureMessage(executionResult) : null);
@@ -632,6 +639,7 @@ export function useScan(): UseScanReturn {
         setMultiResult(null);
       }
       setCodeResult(null);
+      setIssueChanges(null);
       setExecutionIncompleteDetail(null);
       setError(null);
       resetScanProgress();
@@ -705,6 +713,7 @@ export function useScan(): UseScanReturn {
 
         if (scanEpochRef.current === epoch) {
           setCodeResult(nextCodeResult);
+          setIssueChanges(execution.issueChanges);
           setForegroundCodeRunId(nextCodeResult.id);
           setExecutionIncompleteDetail(getExecutionIncompleteDetail(execution));
           setState("complete");
@@ -757,6 +766,7 @@ export function useScan(): UseScanReturn {
     setResult(null);
     setCodeResult(null);
     setMultiResult(null);
+    setIssueChanges(null);
     setExecutionIncompleteDetail(null);
     setError(null);
     resetScanProgress();
@@ -780,6 +790,7 @@ export function useScan(): UseScanReturn {
     setResult(null);
     setCodeResult(null);
     setMultiResult(null);
+    setIssueChanges(null);
     setExecutionIncompleteDetail(null);
     setError(null);
     resetScanProgress();
@@ -796,6 +807,7 @@ export function useScan(): UseScanReturn {
     codeResult,
     codeResultFromBackground: codeResult !== null && codeResult.id !== foregroundCodeRunId,
     multiResult,
+    issueChanges,
     executionIncompleteDetail,
     error,
     scan,

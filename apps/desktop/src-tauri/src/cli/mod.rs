@@ -1,7 +1,7 @@
 //! Project-aware commands shared by the standalone CLI and desktop export.
 
 pub mod audit;
-mod audit_suppressions;
+pub(crate) mod audit_suppressions;
 pub mod check;
 pub mod connected;
 pub mod connected_submit;

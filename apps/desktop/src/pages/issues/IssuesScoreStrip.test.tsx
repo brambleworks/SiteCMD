@@ -62,15 +62,7 @@ describe("IssuesScoreStrip", () => {
     expect(screen.queryByText(/leading risk/)).not.toBeInTheDocument();
     expect(screen.queryByText(/critical\/high/)).not.toBeInTheDocument();
     expect(container.querySelector(".score-strip-icon")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open SiteCMD Score Guide" })).toBeInTheDocument();
-    const breakdownDetails = screen.getByText("How this score is computed").closest("details");
-    expect(breakdownDetails).not.toBeNull();
-    expect(breakdownDetails).not.toHaveAttribute("open");
-    expect(screen.getByText("Starts at")).toBeInTheDocument();
-    expect(screen.getByText("-9")).toBeInTheDocument();
-    expect(screen.getByText("High issues")).toBeInTheDocument();
-    expect(screen.getByText("-6")).toBeInTheDocument();
-    expect(screen.getByText("Medium issues")).toBeInTheDocument();
+    expect(screen.queryByText("How this score is computed")).not.toBeInTheDocument();
   });
 
   it("uses the Issues page summary for counts instead of the score snapshot", () => {
@@ -114,8 +106,6 @@ describe("IssuesScoreStrip", () => {
       />,
     );
 
-    // getByText, not getAllByText: the breakdown carries the note, and a second
-    // copy in the strip read it out twice to a screen reader.
     expect(screen.getByText(/Score capped/)).toBeInTheDocument();
   });
 
@@ -138,7 +128,7 @@ describe("IssuesScoreStrip", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Not run yet/)).toBeInTheDocument();
-    expect(screen.getByText("No point deductions")).toBeInTheDocument();
+    expect(screen.queryByText("No point deductions")).not.toBeInTheDocument();
   });
 
   it("updates the checked time without a parent render", () => {

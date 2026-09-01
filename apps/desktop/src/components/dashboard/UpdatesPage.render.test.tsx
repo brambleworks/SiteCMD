@@ -870,6 +870,68 @@ describe("UpdatesPage watched-file arrival", () => {
     });
   });
 
+  it("does not record applied updates when verify-all clears no packages", async () => {
+    usePendingVerificationCenterMock.mockReturnValue([
+      {
+        id: "7:https://example.com:updates:npm:react",
+        projectId: 7,
+        url: "https://example.com",
+        itemId: "npm:react",
+        label: "react 18.2.0 -> 19.0.0",
+        reason: "Dependency files changed. Re-check the package before moving on.",
+        page: "updates",
+        focus: null,
+        filePath: null,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]);
+
+    const pendingUpdate = {
+      ecosystem: "npm",
+      name: "react",
+      currentVersion: "18.2.0",
+      latestVersion: "19.0.0",
+      updateType: "major",
+      isSecurity: false,
+      isDev: false,
+      advisorySeverity: null,
+      advisoryUrl: null,
+      source: "package.json",
+    };
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "detect_updates") {
+        return {
+          packages: ["package.json", "package-lock.json"],
+          updates: [pendingUpdate],
+        };
+      }
+      return null;
+    });
+
+    renderUpdatesPage(
+      <UpdatesPage
+        projectId={7}
+        url="https://example.com"
+        projectPath="/tmp/example-verify-all-pending"
+        projectName="Example"
+        onAddFolder={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Verify all" }));
+
+    await waitFor(() => {
+      expect(completeJobMock).toHaveBeenCalledWith(
+        "updates-pending-all:7",
+        expect.objectContaining({ label: "Continue dependency cleanup" }),
+      );
+    });
+    expect(invokeMock.mock.calls.some(([command]) => command === "record_update_event")).toBe(
+      false,
+    );
+  });
+
   it("records exact update events for single pending-entry verification", async () => {
     usePendingVerificationCenterMock.mockReturnValue([
       {

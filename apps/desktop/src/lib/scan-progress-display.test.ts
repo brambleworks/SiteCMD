@@ -8,7 +8,7 @@ import {
 } from "./scan-progress-display";
 
 describe("scan progress display", () => {
-  it("maps counted checks into the main progress range", () => {
+  it("maps counted checks into the weighted pre-browser range", () => {
     expect(
       getWebScanProgressPercent({
         check_id: "security.headers",
@@ -16,7 +16,15 @@ describe("scan progress display", () => {
         checks_done: 5,
         checks_total: 10,
       }),
-    ).toBe(48);
+    ).toBe(39);
+    expect(
+      getWebScanProgressPercent({
+        check_id: "security.headers",
+        status: "complete",
+        checks_done: 10,
+        checks_total: 10,
+      }),
+    ).toBe(70);
   });
 
   it("does not reset progress for phase events with no check total", () => {
@@ -35,7 +43,7 @@ describe("scan progress display", () => {
         checks_done: 0,
         checks_total: 0,
       }),
-    ).toBe(90);
+    ).toBe(70);
     expect(
       getWebScanProgressPercent({
         check_id: "browser-analysis",
@@ -43,7 +51,7 @@ describe("scan progress display", () => {
         checks_done: 0,
         checks_total: 0,
       }),
-    ).toBe(97);
+    ).toBe(75);
   });
 
   it("uses human labels for non-counted scan phases", () => {
@@ -56,7 +64,7 @@ describe("scan progress display", () => {
 
     expect(getWebScanProgressLabel(progress)).toBe("Running browser metrics");
     expect(getWebScanProgressDetail(progress)).toBe("Running browser metrics");
-    expect(getWebScanProgressInline(progress)).toBe("Running browser metrics • 97%");
+    expect(getWebScanProgressInline(progress)).toBe("Running browser metrics • 75%");
   });
 
   it("maps per-page progress onto one monotonic multi-page percentage", () => {

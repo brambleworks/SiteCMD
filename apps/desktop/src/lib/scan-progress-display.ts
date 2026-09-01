@@ -32,20 +32,20 @@ export function getWebScanProgressPercent(progress: WebScanProgressLike | null):
 
   if (progress.checks_total > 0) {
     const ratio = progress.checks_done / Math.max(progress.checks_total, 1);
-    return Math.min(88, Math.max(8, Math.round(8 + ratio * 80)));
+    return Math.min(70, Math.max(8, Math.round(8 + ratio * 62)));
   }
 
   switch (progress.check_id) {
     case "fetch":
       return progress.status === "complete" ? 8 : 4;
     case "polish-css":
-      return progress.status === "complete" ? 92 : 90;
+      return progress.status === "complete" ? 72 : 70;
     case "polish-signals":
-      return progress.status === "complete" ? 96 : 94;
+      return progress.status === "complete" ? 75 : 72;
     case "browser-analysis":
-      return progress.status === "complete" ? 99 : 97;
+      return progress.status === "complete" ? 99 : 75;
     default:
-      return progress.status === "complete" ? 96 : 90;
+      return progress.status === "complete" ? 75 : 70;
   }
 }
 

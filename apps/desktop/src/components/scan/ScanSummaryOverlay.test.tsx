@@ -28,7 +28,7 @@ describe("ScanSummaryOverlay", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "Full scan complete" })).toBeInTheDocument();
-    expect(screen.getByText("7 open issues after this scan.")).toBeInTheDocument();
+    expect(screen.getByText("7 open issues after this scan")).toBeInTheDocument();
     expect(screen.getByLabelText("Issue severity totals")).toBeInTheDocument();
     expect(screen.getByText(/Skipped 2 nested repositories/)).toBeInTheDocument();
   });
@@ -49,10 +49,15 @@ describe("ScanSummaryOverlay", () => {
     expect(screen.getByText("Web Scan: Browser analysis failed: unavailable")).toBeInTheDocument();
   });
 
-  it("shows an unavailable marker instead of calling an unknown delta a first scan", () => {
+  it("uses the same unavailable marker for every unknown change count", () => {
     render(
       <ScanSummaryOverlay
-        summary={{ ...buildSummary(), estimatedNewIssues: null, resolvedIssues: null }}
+        summary={{
+          ...buildSummary(),
+          estimatedNewIssues: null,
+          resolvedIssues: null,
+          regressionCount: null,
+        }}
         onClose={vi.fn()}
         onReviewIssues={vi.fn()}
       />,
@@ -62,7 +67,29 @@ describe("ScanSummaryOverlay", () => {
     const newStat = newLabel.closest(".scan-summary-stat");
     expect(newStat).not.toBeNull();
     expect(within(newStat as HTMLElement).getByText("-")).toBeInTheDocument();
+    expect(screen.getAllByText("-")).toHaveLength(3);
     expect(screen.queryByText("First")).toBeNull();
+  });
+
+  it("renders zero consistently when a completed scan has no changes", () => {
+    render(
+      <ScanSummaryOverlay
+        summary={{
+          ...buildSummary(),
+          estimatedNewIssues: 0,
+          resolvedIssues: 0,
+          regressionCount: 0,
+        }}
+        onClose={vi.fn()}
+        onReviewIssues={vi.fn()}
+      />,
+    );
+
+    for (const label of ["New", "Resolved", "Regressions"]) {
+      const stat = screen.getByText(label).closest(".scan-summary-stat");
+      expect(stat).not.toBeNull();
+      expect(within(stat as HTMLElement).getByText("0")).toBeInTheDocument();
+    }
   });
 
   it("renders severity counts as color-coded text, not boxed pills", () => {

@@ -509,12 +509,7 @@ pub fn normalize_code_scan(
             let mut persisted_issue = issue.clone();
             persisted_issue.check_id = canonical_check_id.clone();
             Ok(NormalizedFinding {
-                occurrence_id: format!(
-                    "code_scan:{}:{}:{}",
-                    producer_rule,
-                    issue.relative_path,
-                    issue.line.map(|line| line.to_string()).unwrap_or_default()
-                ),
+                occurrence_id: code_scan_occurrence_id(issue),
                 source: ScanEvidenceSource::CodeScan,
                 canonical_check_id,
                 producer_check_id: producer_rule.to_string(),
@@ -575,6 +570,15 @@ pub fn normalize_code_scan(
         status_detail: None,
         findings,
     })
+}
+
+pub(crate) fn code_scan_occurrence_id(issue: &crate::core::code_scan::CodeIssue) -> String {
+    format!(
+        "code_scan:{}:{}:{}",
+        code_producer_rule_id(&issue.id),
+        issue.relative_path,
+        issue.line.map(|line| line.to_string()).unwrap_or_default()
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

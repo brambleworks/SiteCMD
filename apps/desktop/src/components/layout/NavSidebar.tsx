@@ -16,7 +16,7 @@ import {
   Plug,
 } from "lucide-react";
 import { useNavBadges, useNavIntegrations } from "@/lib/nav-badges";
-import { isNavPageConnected, type ProgressiveNavPage } from "@/lib/nav-integrations";
+import { isNavPageConnected } from "@/lib/nav-integrations";
 import { useIssuesBadge } from "@/lib/issues-badge";
 import { useRenderSanityCheck } from "@/lib/render-sanity";
 import { useTheme } from "@/hooks/useTheme";
@@ -59,7 +59,6 @@ const MANAGE_ITEMS: NavItem[] = [
   { page: "integrations", label: "Integrations", icon: Plug },
 ];
 
-// Integration-fed pages enter navigation only after their source is configured.
 const MONITOR_ITEMS: NavItem[] = [
   { page: "analytics", label: "Traffic", icon: BarChart3 },
   { page: "search-console", label: "Search & SEO", icon: Globe },
@@ -67,18 +66,6 @@ const MONITOR_ITEMS: NavItem[] = [
 
 // Deploys appears for projects with local Git history or a GitHub connection.
 const DEPLOYS_ITEM: NavItem = { page: "deploys", label: "Deploys", icon: GitBranch };
-
-/** Keeps the active Monitor page visible even after its integration disconnects. */
-function buildMonitorItems(
-  enabledIntegrations: ReadonlySet<string>,
-  activePage: NavPage,
-): NavItem[] {
-  return MONITOR_ITEMS.filter(
-    (item) =>
-      isNavPageConnected(item.page as ProgressiveNavPage, enabledIntegrations) ||
-      item.page === activePage,
-  );
-}
 
 // Keep an active Deploys page visible even after its Git source disconnects.
 function buildHistoryItems(
@@ -115,11 +102,10 @@ export function NavSidebar({
   const enabledIntegrations = useNavIntegrations(activeProjectId);
   const { resolved } = useTheme();
 
-  const monitorItems = buildMonitorItems(enabledIntegrations, activePage);
   const historyItems = buildHistoryItems(enabledIntegrations, activePage, hasLinkedFolder);
   const groups: NavGroup[] = [
     { label: "Manage", items: MANAGE_ITEMS },
-    ...(monitorItems.length > 0 ? [{ label: "Monitor", items: monitorItems }] : []),
+    { label: "Monitor", items: MONITOR_ITEMS },
     { label: "History", items: historyItems },
   ];
 

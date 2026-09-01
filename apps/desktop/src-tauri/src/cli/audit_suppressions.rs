@@ -75,6 +75,13 @@ pub(crate) struct SuppressedAudit {
     pub suppressions: Vec<SuppressionStatus>,
 }
 
+#[derive(Debug, Clone)]
+#[cfg(feature = "desktop")]
+pub(crate) struct ActiveSuppression {
+    pub reason: String,
+    pub expires: Option<String>,
+}
+
 impl SuppressedAudit {
     pub fn stale_suppression_count(&self) -> usize {
         self.suppressions
@@ -96,23 +103,7 @@ pub(crate) fn apply_project_suppressions(
     mut report: CodeScanReport,
     today: NaiveDate,
 ) -> Result<SuppressedAudit, String> {
-    let config_path = project_root.join(".sitecmd/config.json");
-    if !config_path.is_file() {
-        return Ok(SuppressedAudit {
-            report,
-            ignored_findings: Vec::new(),
-            suppressions: Vec::new(),
-        });
-    }
-
-    let config = crate::cli::read_config(&project_root.join(".sitecmd"))?;
-    let mut prepared = config
-        .code_scan
-        .suppressions
-        .into_iter()
-        .enumerate()
-        .map(|(index, suppression)| prepare_suppression(project_root, index, suppression, today))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut prepared = prepare_project_suppressions(project_root, today)?;
 
     let mut active_issues = Vec::with_capacity(report.issues.len());
     let mut ignored_findings = Vec::new();
@@ -166,6 +157,49 @@ pub(crate) fn apply_project_suppressions(
         ignored_findings,
         suppressions,
     })
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn active_project_suppression(
+    project_root: &Path,
+    check_id: &str,
+    relative_path: &str,
+    fingerprint: Option<&str>,
+    today: NaiveDate,
+) -> Result<Option<ActiveSuppression>, String> {
+    let prepared = prepare_project_suppressions(project_root, today)?;
+    Ok(prepared
+        .into_iter()
+        .find(|suppression| {
+            !suppression.expired
+                && suppression_matches_target(
+                    suppression,
+                    project_root,
+                    check_id,
+                    relative_path,
+                    fingerprint,
+                )
+        })
+        .map(|suppression| ActiveSuppression {
+            reason: suppression.config.reason,
+            expires: suppression.config.expires,
+        }))
+}
+
+fn prepare_project_suppressions(
+    project_root: &Path,
+    today: NaiveDate,
+) -> Result<Vec<PreparedSuppression>, String> {
+    if !project_root.join(".sitecmd/config.json").is_file() {
+        return Ok(Vec::new());
+    }
+    crate::cli::read_config(&project_root.join(".sitecmd"))?
+        .code_scan
+        .suppressions
+        .into_iter()
+        .enumerate()
+        .map(|(index, suppression)| prepare_suppression(project_root, index, suppression, today))
+        .collect()
 }
 
 pub(crate) fn issue_fingerprint(issue: &CodeIssue) -> String {
@@ -311,18 +345,31 @@ fn suppression_matches(
     issue: &CodeIssue,
     fingerprint: &str,
 ) -> bool {
+    suppression_matches_target(
+        suppression,
+        project_root,
+        &issue.check_id,
+        &issue.relative_path,
+        Some(fingerprint),
+    )
+}
+
+fn suppression_matches_target(
+    suppression: &PreparedSuppression,
+    project_root: &Path,
+    check_id: &str,
+    relative_path: &str,
+    fingerprint: Option<&str>,
+) -> bool {
     let matcher = &suppression.config.matcher;
-    matcher
-        .rule
-        .as_deref()
-        .is_none_or(|rule| rule == issue.check_id)
+    matcher.rule.as_deref().is_none_or(|rule| rule == check_id)
         && matcher
             .fingerprint
             .as_deref()
-            .is_none_or(|expected| expected == fingerprint)
+            .is_none_or(|expected| fingerprint == Some(expected))
         && suppression.path_matcher.as_ref().is_none_or(|paths| {
             paths
-                .matched_path_or_any_parents(project_root.join(&issue.relative_path), false)
+                .matched_path_or_any_parents(project_root.join(relative_path), false)
                 .is_ignore()
         })
 }

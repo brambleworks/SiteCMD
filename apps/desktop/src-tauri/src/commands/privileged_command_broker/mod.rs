@@ -70,7 +70,6 @@ pub(super) const SENSITIVE_CONNECTOR_COMMANDS: &[&str] = &[
 ];
 
 pub(super) const SENSITIVE_FILESYSTEM_ACCESS_COMMANDS: &[&str] = &[
-    "update_project_path",
     "open_path_in_editor",
     "reveal_path",
     "register_agent_tool",
@@ -273,10 +272,6 @@ pub(super) fn privileged_action_sentence(command: &str, args: &Value) -> Option<
         "revoke_connected_report" => {
             "Revoke this shareable report link so it stops opening immediately?".to_string()
         }
-        "update_project_path" => match sanitized_arg(args, "path", "path") {
-            Some(path) => format!("Link this project to the local folder {path}?"),
-            None => "Link this project to a different local folder?".to_string(),
-        },
         "open_path_in_editor" => match sanitized_arg(args, "path", "path") {
             Some(path) => format!("Open {path} in your code editor?"),
             None => "Open a project file in your code editor?".to_string(),

@@ -68,23 +68,15 @@ describe("NavSidebar", () => {
     expect(screen.getByRole("img", { name: "SiteCMD" })).toHaveAttribute("src", "/favicon.svg");
   });
 
-  it("always shows the core section labels, and Monitor only once something is connected", () => {
+  it("always shows the Manage, Monitor, and History sections", () => {
     useNavBadgesMock.mockReturnValue({ updates: null });
     useTierMock.mockReturnValue({ hasFeature: vi.fn(() => true) });
 
-    const { rerender } = render(
-      <NavSidebar activePage="dashboard" projectCount={1} onNavigate={vi.fn()} />,
-    );
+    render(<NavSidebar activePage="dashboard" projectCount={1} onNavigate={vi.fn()} />);
 
-    // Core groups are always present; Monitor is absent with no integrations.
     expect(screen.getByText("Manage")).toHaveClass("nav-group-label");
-    expect(screen.getByText("History")).toHaveClass("nav-group-label");
-    expect(screen.queryByText("Monitor")).not.toBeInTheDocument();
-
-    // Connecting a source that feeds a progressive page reveals the group.
-    useNavIntegrationsMock.mockReturnValue(new Set(["plausible"]));
-    rerender(<NavSidebar activePage="dashboard" projectCount={1} onNavigate={vi.fn()} />);
     expect(screen.getByText("Monitor")).toHaveClass("nav-group-label");
+    expect(screen.getByText("History")).toHaveClass("nav-group-label");
   });
 
   it("keeps the cross-site Overview link aligned with the other sidebar links", () => {
@@ -124,7 +116,7 @@ describe("NavSidebar", () => {
       .filter(Boolean);
   }
 
-  it("shows only the core loop when the project has no integrations connected", () => {
+  it("keeps Traffic and Search visible when the project has no integrations connected", () => {
     useNavBadgesMock.mockReturnValue({ updates: null, launch: null });
     useTierMock.mockReturnValue({ hasFeature: vi.fn(() => true) });
 
@@ -136,16 +128,17 @@ describe("NavSidebar", () => {
       "Alerts",
       "Updates",
       "Integrations",
+      "Traffic",
+      "Search & SEO",
       "Activity",
       "Reports",
     ]);
   });
 
-  it("reveals each integration-fed page when its source is connected", () => {
+  it("adds Deploys when GitHub is connected without duplicating Monitor pages", () => {
     useNavBadgesMock.mockReturnValue({ updates: null, launch: null });
     useTierMock.mockReturnValue({ hasFeature: vi.fn(() => true) });
 
-    // Plausible feeds Traffic, Search Console feeds Search & SEO, GitHub feeds Deploys.
     useNavIntegrationsMock.mockReturnValue(new Set(["plausible", "googlesearchconsole", "github"]));
     render(<NavSidebar activePage="dashboard" projectCount={1} onNavigate={vi.fn()} />);
 
@@ -163,18 +156,17 @@ describe("NavSidebar", () => {
     ]);
   });
 
-  it("reveals only the pages whose specific source is connected", () => {
+  it("keeps Monitor visible when GitHub is the only connected source", () => {
     useNavBadgesMock.mockReturnValue({ updates: null, launch: null });
     useTierMock.mockReturnValue({ hasFeature: vi.fn(() => true) });
 
-    // GitHub alone should surface Deploys but not Traffic or Search & SEO.
     useNavIntegrationsMock.mockReturnValue(new Set(["github"]));
     render(<NavSidebar activePage="dashboard" projectCount={1} onNavigate={vi.fn()} />);
 
     const labels = navLabels();
     expect(labels).toContain("Deploys");
-    expect(labels).not.toContain("Traffic");
-    expect(labels).not.toContain("Search & SEO");
+    expect(labels).toContain("Traffic");
+    expect(labels).toContain("Search & SEO");
   });
 
   it("shows Deploys once a local folder is linked, even with no GitHub connected", () => {
@@ -188,8 +180,8 @@ describe("NavSidebar", () => {
 
     const labels = navLabels();
     expect(labels).toContain("Deploys");
-    expect(labels).not.toContain("Traffic");
-    expect(labels).not.toContain("Search & SEO");
+    expect(labels).toContain("Traffic");
+    expect(labels).toContain("Search & SEO");
   });
 
   it("keeps Deploys hidden when there is neither a linked folder nor GitHub", () => {

@@ -5,7 +5,6 @@ const PROFILE = "apps/desktop/src-tauri/crates/engine/src/profile/mod.rs";
 const PROJECTION = "apps/desktop/src-tauri/crates/engine/src/profile/projection.rs";
 const SITE_FACTS = "apps/desktop/src-tauri/src/core/scanner/site_facts.rs";
 const MIGRATION = "apps/desktop/src-tauri/src/db/migrations/018_verified_good_profile.sql";
-const CARD = "apps/desktop/src/components/dashboard/zones/SiteBaselineCard.tsx";
 
 const HEALTHY = {
   [PROFILE]: `
@@ -61,10 +60,6 @@ CREATE TABLE site_verified_good (
         CHECK(good_origin IN ('seeded', 'promoted', 'accepted', 'reseeded')),
     drift_value_json TEXT
 );
-`,
-  [CARD]: `
-const [confirming, setConfirming] = useState(null);
-{confirming ? <Button onClick={() => onDecide(true)}>Accept as baseline</Button> : null}
 `,
 };
 
@@ -162,14 +157,5 @@ describe("the schema and the code agree", () => {
   it("fails when good and the differing value share a column", () => {
     const collapsed = HEALTHY[MIGRATION].replace("    drift_value_json TEXT\n", "");
     expect(failuresWith({ [MIGRATION]: collapsed }).join(" ")).toContain("separate columns");
-  });
-});
-
-describe("accepting asks first", () => {
-  it("fails when the card drops its confirmation step", () => {
-    const unconfirmed = `<Button onClick={() => onDecide(true)}>Accept as baseline</Button>`;
-    const messages = failuresWith({ [CARD]: unconfirmed }).join(" ");
-    expect(messages).toContain("must confirm before accepting");
-    expect(messages).toContain("outside the confirmation branch");
   });
 });

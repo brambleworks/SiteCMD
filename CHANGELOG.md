@@ -17,6 +17,8 @@ public repository history.
   emoji, so status and severity read the same everywhere they are quoted.
 - The hosted service is now named SiteCMD Connect, replacing the retired
   "Founder Beta" branding in the app and documentation.
+- New and resolved counts in scan summaries now come from exact issue
+  lifecycle tracking across the whole run, instead of per-check estimates.
 
 ### Fixed
 
@@ -29,6 +31,11 @@ public repository history.
   layer did not execute is compared only against runs with the same coverage.
 - The scan history limit set in Settings now applies to scans started from the
   app, which previously kept the built-in default instead.
+- Automatic dependency refreshes no longer record an update as applied when
+  verification did not observe it, and previously recorded inferred entries
+  are removed.
+- The MCP server now reports a clear health error when the desktop database
+  schema is newer than it supports, instead of failing unpredictably.
 
 ## [1.1.0] - 2026-08-25
 

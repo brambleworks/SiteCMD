@@ -12,9 +12,10 @@
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "test": "pnpm run build && node --test test/*.test.mjs",
+    "test": "pnpm run build && pnpm run bundle && node --test test/*.test.mjs",
     "start": "node dist/index.js",
-    "bundle": "node scripts/bundle.mjs"
+    "bundle": "node scripts/bundle.mjs",
+    "schema:check": "node scripts/check-schema-contract.mjs"
   },
   "license": "Apache-2.0",
   "repository": {

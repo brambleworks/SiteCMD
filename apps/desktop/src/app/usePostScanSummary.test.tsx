@@ -77,6 +77,7 @@ function buildParams(overrides: Partial<PostScanSummaryParams> = {}): PostScanSu
     result: webResult,
     codeResult: null,
     multiResult: null,
+    issueChanges: null,
     executionIncompleteDetail: null,
     activeProjectId: 1,
     activeEnvUrl: "https://example.com",
@@ -150,6 +151,20 @@ describe("usePostScanSummary", () => {
     expect(lastSummaryModelInput().incompleteDetail).toBe(
       "Web Scan: Browser analysis failed: unavailable",
     );
+  });
+
+  it("passes exact execution issue changes into the summary model", async () => {
+    const issueChanges = {
+      previousOpenIssues: 18,
+      openIssues: 24,
+      newIssues: 10,
+      resolvedIssues: 4,
+    };
+
+    renderSummaryHook({ issueChanges });
+
+    await waitFor(() => expect(buildScanSummaryModelMock).toHaveBeenCalled());
+    expect(lastSummaryModelInput().issueChanges).toEqual(issueChanges);
   });
 
   it("still builds the summary without a score when the persisted-score load fails", async () => {
