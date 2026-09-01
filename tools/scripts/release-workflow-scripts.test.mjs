@@ -14,6 +14,7 @@ const SCRIPT_STEPS = new Map([
   ["build-macos-dmg.sh", "Restyle macOS DMG (deterministic, Finder-free)"],
   ["build-tauri-app.sh", "Build Tauri app with ephemeral updater key"],
   ["locate-updater-bundle.sh", "Locate updater bundle and signature"],
+  ["publish-npm-packages.sh", "Publish the verified binaries as @sitecmd/cli"],
   ["record-signed-payload.sh", "Record signed payload provenance without secrets"],
   ["stage-signer-inputs.sh", "Validate and stage signer inputs without secrets"],
   ["verify-signed-payload.sh", "Verify payload hashes, provenance, and updater signature"],

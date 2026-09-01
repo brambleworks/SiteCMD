@@ -1,0 +1,27 @@
+{
+  "name": "@sitecmd/cli-darwin-universal",
+  "version": "0.0.0-dev",
+  "description": "The macOS universal (Apple Silicon + Intel) sitecmd binary for @sitecmd/cli.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brambleworks/SiteCMD.git"
+  },
+  "homepage": "https://sitecmd.com/docs/cli",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "files": [
+    "bin/",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES",
+    "THIRD_PARTY_DEPENDENCIES.json",
+    "THIRD_PARTY_LICENSES.txt",
+    "THIRD_PARTY_LICENSES.tsv"
+  ],
+  "preferUnplugged": true
+}

@@ -34,6 +34,10 @@ and must run Web Scan and the full Code Scan audit without Tauri or a GUI.
 - `apps/mcp-server/`: private Node MCP package bundled with the desktop app.
   Read its local guide before changing tools or database access.
 - `docs/`: maintained engineering, product, QA, and operations truth.
+- `packaging/npm/`: the @sitecmd/cli npm distribution skeleton. Binaries and
+  real versions are stamped in only by the release workflow's publish-npm job;
+  the checked-in packages stay on the 0.0.0-dev placeholder
+  (guardrail-npm-cli-rules.mjs pins the shape).
 - `tools/`: repository guardrails, release tooling, and benchmark support.
 
 The marketing site and connected-service workers live in the private

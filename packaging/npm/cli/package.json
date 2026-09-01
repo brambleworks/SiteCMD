@@ -1,0 +1,26 @@
+{
+  "name": "@sitecmd/cli",
+  "version": "0.0.0-dev",
+  "description": "SiteCMD's scanner CLI: Web Scan, Code Scan, and CI quality gates from one self-contained binary.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brambleworks/SiteCMD.git"
+  },
+  "homepage": "https://sitecmd.com/docs/cli",
+  "bin": {
+    "sitecmd": "bin/sitecmd.js"
+  },
+  "files": [
+    "bin/",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@sitecmd/cli-darwin-universal": "0.0.0-dev",
+    "@sitecmd/cli-linux-x64": "0.0.0-dev",
+    "@sitecmd/cli-win32-x64": "0.0.0-dev"
+  }
+}
