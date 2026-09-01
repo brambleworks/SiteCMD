@@ -54,7 +54,7 @@ export function pricingConsistencyFailures(read, exists) {
     ["the beta request action", /Request beta access/],
     ["the SiteCMD Connect name", /SiteCMD Connect/],
     ["existing-subscriber billing management", /Manage Billing/],
-    ["the beta contact path", /https:\/\/sitecmd\.com\/contact/],
+    ["the beta contact path", /const BETA_CONTACT_URL = "https:\/\/sitecmd\.com\/contact"/],
   ]) {
     if (!pattern.test(account)) failures.push(`${ACCT} must retain ${label}.`);
   }
