@@ -31,12 +31,12 @@ pub fn code_issue_confidence(slug: &str) -> (IssueConfidence, Option<&'static st
             Some("File size and multiple responsibility markers provide strong structural evidence, although generated regions, cohesion, and framework conventions can still make the current boundary reasonable."),
         ),
         "undeclared-package" => (
-            High,
-            Some("An external-looking import remained unmatched after manifest, workspace, alias, and local-module filtering; unusual resolver or generated-module conventions can still explain it."),
+            NeedsReview,
+            Some("An external-looking import remained unmatched after manifest, workspace, alias, type-package, and local-module filtering, but the scan resolves imports statically and cannot follow generated modules, custom resolvers, or a parent workspace above the scan root."),
         ),
         "unused-dependency" => (
-            High,
-            Some("The dependency is declared but no recognized source, script, configuration, or transitive usage was found in the scanned project; dynamic or external tooling can still consume it."),
+            NeedsReview,
+            Some("No import, package script, quoted configuration value, or lockfile peer requirement matched the dependency in the files the usage search read, which is a bounded sample of source, component, stylesheet, and tool-configuration files; packages loaded by name at runtime or by external tooling leave no static trace at all."),
         ),
         // Same-call request-accessor/sink matches are strong review leads, but
         // the regex scan cannot resolve validation wrappers, aliases, control
@@ -254,18 +254,24 @@ mod tests {
 
     #[test]
     fn bounded_code_inferences_are_high_confidence() {
-        for slug in [
-            "god-route",
-            "god-module",
-            "oversized-module",
-            "undeclared-package",
-            "unused-dependency",
-        ] {
+        for slug in ["god-route", "god-module", "oversized-module"] {
             assert_eq!(
                 code_issue_confidence(slug).0,
                 IssueConfidence::High,
                 "{slug}"
             );
+        }
+    }
+
+    /// Dependency resolution reaches a verdict the scan cannot fully
+    /// establish: an import may resolve through machinery the static walk
+    /// does not model, and a package may be loaded by name at runtime.
+    #[test]
+    fn dependency_resolution_verdicts_need_review() {
+        for slug in ["undeclared-package", "unused-dependency"] {
+            let (confidence, reason) = code_issue_confidence(slug);
+            assert_eq!(confidence, IssueConfidence::NeedsReview, "{slug}");
+            assert!(reason.is_some(), "{slug} should explain the caveat");
         }
     }
 
