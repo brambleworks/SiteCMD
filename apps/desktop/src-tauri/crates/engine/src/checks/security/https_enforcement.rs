@@ -5,16 +5,31 @@ use crate::checks::{CheckResult, CheckStatus, IssueConfidence, ScanCategory, Sev
 use crate::probe::{BodyPolicy, ProbeOutcome, ProbeRequest, RedirectPolicy};
 
 /// What the runtime should do after reading the scanned URL: either the
-/// verdict is already complete (nothing probeable), or the bounded HTTP
-/// origin root needs one no-follow request.
+/// verdict is already complete (nothing probeable), or one bounded origin
+/// root needs a no-follow request.
+///
+/// The two probes ask opposite questions and are graded by different
+/// functions, so they are different variants rather than one variant whose
+/// meaning a caller has to infer from the URL it is holding. Pair each with
+/// the grader its doc names; nothing else will produce a correct verdict.
 pub enum HttpsEnforcementStep {
     Done(Vec<CheckResult>),
-    Probe { url: url::Url },
+    /// The scan ran over HTTPS. Fetch this HTTP origin root to see whether
+    /// cleartext is redirected, and grade it with [`evaluate_http_downgrade`].
+    ProbeHttpOrigin {
+        url: url::Url,
+    },
+    /// The scan ran over cleartext HTTP. Fetch this HTTPS origin root to find
+    /// out whether HTTPS exists to redirect to, and grade it with
+    /// [`evaluate_https_availability`].
+    ProbeHttpsOrigin {
+        url: url::Url,
+    },
 }
 
-/// The probe for the HTTP origin root: one no-follow request whose status
-/// and Location are the whole evidence, so no body is read.
-pub fn http_origin_request(url: &url::Url) -> ProbeRequest {
+/// The probe for an origin root: one no-follow request whose status and
+/// Location are the whole evidence, so no body is read. Both steps use it.
+pub fn origin_root_request(url: &url::Url) -> ProbeRequest {
     ProbeRequest::get(url.as_str())
         .body(BodyPolicy::None)
         .redirects(RedirectPolicy::None)
@@ -43,24 +58,49 @@ fn skipped(
     }]
 }
 
-/// Decide whether the scanned URL supports an HTTP-downgrade probe.
-pub fn plan_https_enforcement(page_url: &url::Url) -> HttpsEnforcementStep {
+/// Decide which origin root this scan can probe.
+///
+/// `page_is_local` is the caller's own local-environment verdict, the same
+/// `PageContext::is_localhost` that gates the localhost skips in
+/// `config.custom_404` and `security.cors_reflection`. It is a parameter
+/// rather than something inferred from the URL here so this check cannot
+/// disagree with those: a `.test`, `.ddev.site`, or `.local` dev host is local
+/// to all three or to none of them. What that flag does NOT yet cover is a
+/// bare private-LAN literal, which every one of the three treats as public.
+pub fn plan_https_enforcement(page_url: &url::Url, page_is_local: bool) -> HttpsEnforcementStep {
     if page_url.scheme() != "https" {
-        // An HTTP scan does not prove whether the same host supports HTTPS.
-        return HttpsEnforcementStep::Done(skipped(
-            "Site was scanned over HTTP. HTTPS was not tested. Re-scan with an https:// URL to verify HTTPS is available and that HTTP redirects to it.",
-            Some("Re-run the scan with the canonical `https://` URL. Then verify the public HTTP origin redirects to HTTPS with an intentional permanent status (commonly 301 for GET/HEAD navigation or 308 when method preservation matters), and review HSTS separately."),
-            "We can't tell whether HTTPS works for this host without a separate scan over HTTPS.",
-            None,
-            Some("If HTTPS isn't available or HTTP isn't redirected, login sessions, form submissions, and page content can all be intercepted or modified in transit."),
-        ));
+        // A local preview server serving cleartext is not a defect in the
+        // deployed site, and there is no deployed host here to ask.
+        if page_is_local {
+            return HttpsEnforcementStep::Done(skipped(
+                "Skipped on localhost preview. A local preview server serving plain HTTP says nothing about whether the deployed site offers HTTPS or redirects to it.",
+                Some("Re-run the scan against the deployed URL to verify that HTTPS is available and that the public HTTP origin redirects to it."),
+                "A local preview server's transport does not establish the deployed site's HTTPS behavior.",
+                Some(serde_json::json!({ "reason": "localhost_preview_server" })),
+                None,
+            ));
+        }
+        // The page this scan graded arrived over cleartext and was not
+        // redirected to HTTPS on the way, because `PageContext::url` is the
+        // URL the fetch finished on. Probe the HTTPS origin root to find out
+        // whether HTTPS exists to redirect to.
+        return match origin_root_probe_url(page_url, "https") {
+            Some(url) => HttpsEnforcementStep::ProbeHttpsOrigin { url },
+            None => HttpsEnforcementStep::Done(skipped(
+                "Could not construct HTTPS URL for testing.",
+                None,
+                "The scanner could not construct the bounded public HTTPS-origin probe URL from the scanned URL.",
+                None,
+                None,
+            )),
+        };
     }
 
     // Probe the public HTTP origin root, not the scanned page URL. Copying
     // userinfo, a query token, or a secret-bearing path into a cleartext
     // request would create the exposure this check is meant to prevent.
-    match http_origin_probe_url(page_url) {
-        Some(url) => HttpsEnforcementStep::Probe { url },
+    match origin_root_probe_url(page_url, "http") {
+        Some(url) => HttpsEnforcementStep::ProbeHttpOrigin { url },
         None => HttpsEnforcementStep::Done(skipped(
             "Could not construct HTTP URL for testing.",
             None,
@@ -71,8 +111,74 @@ pub fn plan_https_enforcement(page_url: &url::Url) -> HttpsEnforcementStep {
     }
 }
 
-/// Grade the HTTP-origin probe outcome.
-pub fn evaluate_https_enforcement(probe_url: &str, outcome: ProbeOutcome) -> Vec<CheckResult> {
+/// Grade the HTTPS origin root of [`HttpsEnforcementStep::ProbeHttpsOrigin`].
+///
+/// The failure is established by the scan itself, not by this probe: the page
+/// this scan graded was delivered over cleartext HTTP and the fetch was not
+/// redirected to HTTPS. The probe only refines the wording, and it cannot
+/// establish more than "a response arrived" or "none did" - a 502 from a
+/// terminator whose backend is down still proves HTTPS is listening, and a
+/// timeout or reset does not prove HTTPS is absent.
+pub fn evaluate_https_availability(probe_url: &str, outcome: ProbeOutcome) -> Vec<CheckResult> {
+    let safe_probe_url = crate::log_sanitizer::log_safe_url_target(probe_url);
+    let https_answered = matches!(outcome, ProbeOutcome::Response(_));
+    let https_status = match &outcome {
+        ProbeOutcome::Response(response) => Some(response.status),
+        ProbeOutcome::Failure(_) => None,
+    };
+
+    let (title, description, manual_fix) = if let Some(status) = https_status {
+        (
+            "HTTP does not redirect to HTTPS",
+            format!(
+                "This scan fetched the page over cleartext HTTP and was never redirected to HTTPS, and the HTTPS origin root ({}) answered with status {}. HTTPS is reachable for this host, so plain-http visitors are being served over cleartext when they could be sent to it.",
+                safe_probe_url, status
+            ),
+            "At the public edge, redirect the HTTP origin to the equivalent HTTPS origin with an intentional permanent status, preserving paths and safe query semantics. Use 308 where non-GET method preservation matters, test representative routes/methods, and configure HSTS on HTTPS only after confirming the HTTPS estate is ready.",
+        )
+    } else {
+        (
+            // Not "the site has no HTTPS": one unanswered probe cannot
+            // separate an absent listener from a timeout, a reset, or a
+            // network in between. What is certain is the cleartext delivery
+            // this scan already observed, so the title says only that.
+            "No HTTPS response observed; site served over HTTP",
+            format!(
+                // Nor "the probe returned no response": a caller that planned
+                // this probe and never executed it hands the same failure
+                // outcome in (`evaluation::unexecuted_probe`), and
+                // saying a request came back empty would then be describing a
+                // request nobody made. State the absence, not its cause.
+                "This scan fetched the page over cleartext HTTP, and no HTTPS response was observed for the HTTPS origin root ({}). An unanswered probe, a timeout, a reset, a filtered port, and an origin with no HTTPS at all are indistinguishable here; what is established is that this page was served in cleartext.",
+                safe_probe_url
+            ),
+            "Obtain a certificate for the host (a free automated one from Let's Encrypt or your host's built-in provisioning is enough), serve the site over HTTPS, then redirect the HTTP origin to it with a permanent status. Confirm from a public network before adding HSTS.",
+        )
+    };
+
+    vec![CheckResult {
+        check_id: "security.https_enforcement".into(),
+        category: ScanCategory::Security,
+        title: title.into(),
+        description,
+        status: CheckStatus::Fail,
+        severity: Severity::High,
+        fix_prompt: None,
+        manual_fix: Some(manual_fix.into()),
+        raw_data: Some(serde_json::json!({
+            "scanned_over_http": true,
+            "https_probe_url": safe_probe_url,
+            "https_status": https_status,
+            "https_answered": https_answered,
+        })),
+        confidence: IssueConfidence::High,
+        confidence_reason: None,
+        why_it_matters: Some("Anything sent over cleartext HTTP can be read or modified by anyone on the network path between the visitor and the server, and browsers mark these pages as not secure.".into()),
+    }]
+}
+
+/// Grade the HTTP origin root of [`HttpsEnforcementStep::ProbeHttpOrigin`].
+pub fn evaluate_http_downgrade(probe_url: &str, outcome: ProbeOutcome) -> Vec<CheckResult> {
     let safe_probe_url = crate::log_sanitizer::log_safe_url_target(probe_url);
     let response = match outcome {
         ProbeOutcome::Response(response) => response,
@@ -216,9 +322,9 @@ enum HttpRedirectGrade {
     NoRedirectError,
 }
 
-fn http_origin_probe_url(source: &url::Url) -> Option<url::Url> {
+fn origin_root_probe_url(source: &url::Url, scheme: &str) -> Option<url::Url> {
     let mut target = source.clone();
-    target.set_scheme("http").ok()?;
+    target.set_scheme(scheme).ok()?;
     target.set_username("").ok()?;
     target.set_password(None).ok()?;
     target.set_port(None).ok()?;
@@ -316,26 +422,163 @@ mod tests {
             "https://user:password@example.com:8443/private/reset?token=secret#fragment",
         )
         .expect("test URL");
-        let HttpsEnforcementStep::Probe { url } = plan_https_enforcement(&source) else {
+        let HttpsEnforcementStep::ProbeHttpOrigin { url } = plan_https_enforcement(&source, false)
+        else {
             panic!("an https page must plan a downgrade probe");
         };
         assert_eq!(url.as_str(), "http://example.com/");
     }
 
     #[test]
-    fn an_http_scan_target_is_skipped_without_a_probe() {
-        let source = url::Url::parse("http://example.com/page").expect("test URL");
-        let HttpsEnforcementStep::Done(results) = plan_https_enforcement(&source) else {
-            panic!("an http page must not plan a downgrade probe");
+    fn an_http_scan_probes_the_https_origin_root_instead_of_giving_up() {
+        let source =
+            url::Url::parse("http://user:password@example.com/private/page?token=secret#frag")
+                .expect("test URL");
+        let HttpsEnforcementStep::ProbeHttpsOrigin { url } = plan_https_enforcement(&source, false)
+        else {
+            panic!("an http page must plan an HTTPS availability probe");
         };
-        assert_eq!(results[0].status, CheckStatus::Skipped);
-        assert!(results[0].description.contains("HTTPS was not tested"));
+        assert_eq!(url.as_str(), "https://example.com/");
+    }
+
+    #[test]
+    fn an_http_scan_whose_host_serves_https_is_a_missing_redirect_not_a_skip() {
+        let outcome = ProbeOutcome::Response(crate::probe::ProbeResponse {
+            status: 200,
+            final_url: "https://example.com/".into(),
+            content_type: None,
+            content_length: None,
+            headers: Vec::new(),
+            body: None,
+        });
+        let results = evaluate_https_availability("https://example.com/", outcome);
+        assert_eq!(results[0].status, CheckStatus::Fail);
+        assert_eq!(results[0].severity, Severity::High);
+        assert_eq!(results[0].title, "HTTP does not redirect to HTTPS");
+    }
+
+    #[test]
+    fn an_unanswered_https_probe_reports_what_was_seen_not_that_https_is_absent() {
+        // A timeout, a reset, and a host with no TLS listener are the same
+        // outcome here, and neverssl proves the difference matters: its HTTPS
+        // origin answers on some attempts and sends an empty reply on others.
+        // Whichever way that lands, the title must not assert HTTP-only.
+        for class in [
+            crate::probe::ProbeFailureClass::Transport,
+            crate::probe::ProbeFailureClass::Timeout,
+        ] {
+            let outcome = ProbeOutcome::Failure(crate::probe::ProbeFailure {
+                class,
+                detail: "error sending request".into(),
+            });
+            let results = evaluate_https_availability("https://neverssl.com/", outcome);
+            assert_eq!(results[0].status, CheckStatus::Fail);
+            assert_eq!(results[0].severity, Severity::High);
+            assert_eq!(
+                results[0].title,
+                "No HTTPS response observed; site served over HTTP"
+            );
+            assert!(
+                !results[0].title.contains("only"),
+                "{class:?}: one unanswered probe does not establish that the site has no HTTPS"
+            );
+            assert!(
+                !results[0].description.contains("HTTPS was not tested"),
+                "the cleartext delivery is observed, not untested"
+            );
+        }
+    }
+
+    #[test]
+    fn a_probe_the_caller_never_ran_is_not_described_as_a_request_that_came_back_empty() {
+        // The hosted lane synthesizes this exact outcome for a probe it
+        // planned and did not execute. The Fail is still sound, because the
+        // cleartext delivery comes from the page artifact rather than from
+        // this probe, but the description must not narrate a request nobody
+        // made.
+        let results = evaluate_https_availability(
+            "https://example.com/",
+            crate::evaluation::unexecuted_probe(),
+        );
+        assert_eq!(results[0].status, CheckStatus::Fail);
+        for claim in [
+            "returned no response",
+            "within the probe limits",
+            "from this network",
+        ] {
+            assert!(
+                !results[0].description.contains(claim),
+                "an unexecuted probe cannot support `{claim}`, got {}",
+                results[0].description
+            );
+        }
+        assert!(results[0]
+            .description
+            .contains("no HTTPS response was observed"));
+    }
+
+    #[test]
+    fn any_https_response_counts_as_reachable_including_a_gateway_error() {
+        // A 502 from a terminator whose backend is down still proves HTTPS is
+        // listening, which is what this branch claims and all it claims.
+        let outcome = ProbeOutcome::Response(crate::probe::ProbeResponse {
+            status: 502,
+            final_url: "https://example.com/".into(),
+            content_type: None,
+            content_length: None,
+            headers: Vec::new(),
+            body: None,
+        });
+        let results = evaluate_https_availability("https://example.com/", outcome);
+        assert_eq!(results[0].title, "HTTP does not redirect to HTTPS");
+        assert!(
+            results[0].description.contains("answered with status 502"),
+            "the status is reported rather than characterized, got {}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn a_local_http_scan_keeps_the_preview_skip_on_the_callers_own_verdict() {
+        // Whatever the runtime calls local is skipped here, whether or not
+        // this file would have recognized it: a `.test` or `.ddev.site` dev
+        // host skips for the same reason it skips in config.custom_404, which
+        // reads the same flag. (Which hosts get the flag is the runtime's
+        // decision, not this check's, and the desktop shell's tests pin that
+        // side, including a private-LAN literal it does not yet cover.)
+        for target in [
+            "http://localhost:4321/",
+            "http://127.0.0.1:4321/page",
+            "http://[::1]:8080/",
+            "http://my-app.ddev.site/",
+            "http://shop.test/checkout",
+            "http://192.168.1.40:8080/",
+        ] {
+            let source = url::Url::parse(target).expect("test URL");
+            let HttpsEnforcementStep::Done(results) = plan_https_enforcement(&source, true) else {
+                panic!("{target} must not plan a probe when the runtime calls it local");
+            };
+            assert_eq!(results[0].status, CheckStatus::Skipped);
+            assert!(results[0].description.contains("localhost preview"));
+        }
+    }
+
+    #[test]
+    fn a_public_http_scan_is_not_skipped_as_local() {
+        let source = url::Url::parse("http://neverssl.com/").expect("test URL");
+        assert!(
+            matches!(
+                plan_https_enforcement(&source, false),
+                HttpsEnforcementStep::ProbeHttpsOrigin { .. }
+            ),
+            "a public cleartext page must be probed, not skipped"
+        );
     }
 
     #[test]
     fn the_planned_request_never_follows_redirects_or_reads_a_body() {
         let url = url::Url::parse("http://example.com/").expect("test URL");
-        let request = http_origin_request(&url);
+        let request = origin_root_request(&url);
         assert_eq!(request.redirects, RedirectPolicy::None);
         assert_eq!(request.body, BodyPolicy::None);
     }
