@@ -253,7 +253,7 @@ pub fn evaluate_sitemap(
     let cross_origin_preview = evidence_preview(&safe_cross_origin, cross_origin_declared.len());
 
     let title = if inconclusive {
-        "Sitemap probe needs review"
+        "Sitemap probe did not complete"
     } else if has_cross_origin {
         "Cross-origin sitemap declaration not verified"
     } else if same_origin_probe_truncated {
@@ -324,7 +324,14 @@ pub fn evaluate_sitemap(
         check_id: "seo.sitemap".into(), category: ScanCategory::Seo,
         title: title.into(),
         description,
-        status: CheckStatus::Warn, severity: Severity::Low,
+        // An inconclusive probe establishes nothing about the sitemap, so it
+        // reports as skipped rather than as a warning the operator must clear.
+        status: if inconclusive {
+            CheckStatus::Skipped
+        } else {
+            CheckStatus::Warn
+        },
+        severity: Severity::Low,
         fix_prompt: None,
         manual_fix: Some(manual_fix),
         raw_data: Some(serde_json::json!({

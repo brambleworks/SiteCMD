@@ -126,9 +126,11 @@ fn inconclusive_probe_does_not_become_a_missing_sitemap() {
         }],
     };
     let results = evaluate_sitemap(&page(""), &RobotsTxtFetch::Status(404), &probe);
-    assert_eq!(results[0].status, CheckStatus::Warn);
+    // The probe established nothing, so the row is skipped, not a warning the
+    // operator is asked to clear.
+    assert_eq!(results[0].status, CheckStatus::Skipped);
     assert_eq!(results[0].severity, Severity::Low);
-    assert_eq!(results[0].title, "Sitemap probe needs review");
+    assert_eq!(results[0].title, "Sitemap probe did not complete");
     assert!(results[0].description.contains("does not prove"));
     assert_eq!(
         results[0].raw_data.as_ref().unwrap()["probe_outcome"],

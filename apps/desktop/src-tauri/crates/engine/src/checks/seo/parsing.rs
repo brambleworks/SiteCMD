@@ -25,9 +25,12 @@ pub fn extract_meta(body: &str, name: &str) -> Option<String> {
     let scannable = crate::checks::seo::headings::NON_CONTENT_BLOCK_RE.replace_all(body, " ");
     let lower = scannable.to_ascii_lowercase();
     for tag in crate::checks::html_attrs::tag_slices(&scannable, &lower, "meta") {
-        let matches_name = extract_attr_value(tag, "name")
-            .or_else(|| extract_attr_value(tag, "property"))
-            .is_some_and(|value| value.eq_ignore_ascii_case(name));
+        // Either spelling identifies the tag. Reading `name` first and
+        // stopping there rejected `<meta name="title" property="og:title">`,
+        // which real CMS templates emit and every consumer accepts.
+        let matches_name = ["name", "property"].iter().any(|attribute| {
+            extract_attr_value(tag, attribute).is_some_and(|value| value.eq_ignore_ascii_case(name))
+        });
 
         if matches_name {
             return extract_attr_value(tag, "content");
@@ -63,4 +66,50 @@ pub fn extract_document_title(body: &str) -> Option<String> {
     };
     let content = without_svg[content_start..close_start].trim();
     (!content.is_empty()).then(|| content.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_meta;
+
+    #[test]
+    fn a_tag_carrying_both_name_and_property_matches_either_one() {
+        // www.gov.uk emits this shape. Reading `name` and stopping there
+        // reported the page as having no Open Graph title.
+        let body = r#"<html><head>
+            <meta name="title" property="og:title" content="Welcome to GOV.UK">
+            <meta name="description" property="og:description" content="The best place to find government services">
+        </head><body></body></html>"#;
+        assert_eq!(
+            extract_meta(body, "og:title").as_deref(),
+            Some("Welcome to GOV.UK")
+        );
+        assert_eq!(
+            extract_meta(body, "og:description").as_deref(),
+            Some("The best place to find government services")
+        );
+        assert_eq!(
+            extract_meta(body, "title").as_deref(),
+            Some("Welcome to GOV.UK")
+        );
+        assert_eq!(extract_meta(body, "og:image"), None);
+    }
+
+    #[test]
+    fn each_spelling_alone_still_matches() {
+        assert_eq!(
+            extract_meta(r#"<meta property="og:title" content="A">"#, "og:title").as_deref(),
+            Some("A")
+        );
+        assert_eq!(
+            extract_meta(r#"<meta name="og:title" content="B">"#, "og:title").as_deref(),
+            Some("B")
+        );
+    }
+
+    #[test]
+    fn commented_out_meta_tags_are_still_excluded() {
+        let body = r#"<!-- <meta name="x" property="og:title" content="Ghost"> -->"#;
+        assert_eq!(extract_meta(body, "og:title"), None);
+    }
 }

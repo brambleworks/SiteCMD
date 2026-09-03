@@ -54,11 +54,6 @@ static ROLE_BUTTON_ATTR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)[\s"']role\s*=\s*["']?button(?-u:\b)"#).expect("role button regex")
 });
 
-/// Matches `<html` tag with optional `lang` attribute.
-static HTML_LANG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)<html\b[^>]*\blang\s*=\s*["']([^"']+)["']"#).expect("html lang regex")
-});
-
 /// Flag pages whose generic-container ratio exceeds 85% (High, 15).
 pub fn div_soup_ratio(ctx: &PolishContext) -> PolishResult {
     let div_count = DIV_RE.find_iter(&ctx.html).count();
@@ -114,15 +109,8 @@ pub fn heading_hierarchy(ctx: &PolishContext) -> PolishResult {
         .filter_map(|cap| cap[1].parse::<u32>().ok())
         .collect();
 
-    if headings.is_empty() {
-        return PolishResult::clear(
-            "heading-hierarchy",
-            "Heading Order Issues",
-            SignalWeight::Medium,
-            CATEGORY,
-        );
-    }
-
+    // No early return on an empty list: a page with no headings at all has no
+    // h1 either, and `seo.headings.h1` already says so.
     let h1_count = headings.iter().filter(|&&h| h == 1).count();
     let mut issues: Vec<String> = Vec::new();
 
@@ -310,7 +298,9 @@ pub fn button_vs_clickable_div(ctx: &PolishContext) -> PolishResult {
 
 /// Flag a missing document-language declaration (Low, 3).
 pub fn missing_lang(ctx: &PolishContext) -> PolishResult {
-    if HTML_LANG_RE.is_match(&ctx.html) {
+    // Shared with `accessibility.lang` so the two never disagree about one
+    // attribute; the quote-agnostic form accepts `<html lang=en>`.
+    if sitecmd_engine::checks::accessibility::html_checks::declares_document_language(&ctx.html) {
         PolishResult::clear(
             "missing-lang",
             "Missing Language Tag",

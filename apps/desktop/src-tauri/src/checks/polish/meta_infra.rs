@@ -76,10 +76,18 @@ static CANONICAL_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
 static SOURCE_MAP_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"//[#@]\s*sourceMappingURL\s*=").expect("source map regex"));
 
-/// Matches inline <script> blocks (captures body content)
-static INLINE_SCRIPT_BODY_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)<script(?:\s[^>]*)?>(.+?)</script>").expect("inline script body regex")
+/// Matches <script> elements, capturing the opening tag's attributes (group 1)
+/// and the element body (group 2) separately. The body is `(.*?)` so an empty
+/// element closes on its own end tag instead of swallowing the next element.
+static SCRIPT_ELEMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<script(\s[^>]*)?>(.*?)</script>").expect("script element regex")
 });
+
+/// Matches a `src` attribute in a `<script>` opening tag. The attribute
+/// boundary is `[\s"']`, not `\b` - a word boundary matches `data-src=` at the
+/// hyphen, which would classify an inline script as external.
+static SCRIPT_SRC_ATTR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)(?:^|[\s"'])src\s*="#).expect("script src attribute regex"));
 
 /// Matches console.log calls
 static CONSOLE_LOG_RE: LazyLock<Regex> =
@@ -295,16 +303,15 @@ pub fn source_maps_production(ctx: &PolishContext) -> PolishResult {
 pub fn console_log_production(ctx: &PolishContext) -> PolishResult {
     let mut total_console = 0usize;
 
-    // Check inline script blocks (skip those with src attribute)
-    for cap in INLINE_SCRIPT_BODY_RE.captures_iter(&ctx.html) {
-        let full_match = &cap[0];
-        // Skip external scripts (those with src attribute)
-        if full_match.to_lowercase().contains(" src=")
-            || full_match.to_lowercase().contains(" src =")
-        {
+    // Check inline script blocks. "External" is decided from the opening tag's
+    // own attributes; reading the whole match would let a `src` in the body (or
+    // in a neighbouring element) hide an inline script.
+    for cap in SCRIPT_ELEMENT_RE.captures_iter(&ctx.html) {
+        let opening_attrs = cap.get(1).map_or("", |m| m.as_str());
+        if SCRIPT_SRC_ATTR_RE.is_match(opening_attrs) {
             continue;
         }
-        let script_body = &cap[1];
+        let script_body = &cap[2];
         total_console += CONSOLE_LOG_RE.find_iter(script_body).count();
     }
 

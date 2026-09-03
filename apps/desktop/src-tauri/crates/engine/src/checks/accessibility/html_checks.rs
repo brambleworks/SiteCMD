@@ -23,6 +23,28 @@ static NAMED_ATTR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)(?:aria-label|aria-labelledby|title|alt)\s*=\s*["']?[^"'\s>]"#).unwrap()
 });
 
+/// Attribute-name prefixes client-side template frameworks use to bind a value
+/// at runtime: the Vue and Alpine shorthand (`:alt`), Vue's `v-bind:alt`,
+/// Alpine's `x-bind:alt`, and the event shorthand (`@click`). Angular wraps the
+/// name instead (`[alt]`), handled alongside them.
+const FRAMEWORK_BINDING_PREFIXES: [&str; 4] = [":", "v-bind:", "x-bind:", "@"];
+
+/// True when `tag` supplies `name` through a client-side template binding
+/// rather than a literal attribute. The bound value is produced in the browser,
+/// so the initial HTML shows neither whether it is present nor what it holds:
+/// a check that reads the served markup must report such an element as
+/// unmeasured, never as one that is missing the attribute.
+///
+/// Shared so the accessibility and performance checks that both grade `alt`
+/// and `src` decide this the same way.
+pub fn has_framework_binding(tag: &str, name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    FRAMEWORK_BINDING_PREFIXES
+        .iter()
+        .any(|prefix| crate::checks::html_attrs::has_attr(tag, &format!("{prefix}{name}")))
+        || crate::checks::html_attrs::has_attr(tag, &format!("[{name}]"))
+}
+
 /// Counts anchors with no visible text, labeling attribute, or labeled child.
 fn empty_link_count(body: &str) -> usize {
     ANCHOR_RE
@@ -44,6 +66,15 @@ fn empty_link_count(body: &str) -> usize {
         .count()
 }
 
+/// True when the root `<html>` tag declares a document language, reading the
+/// attribute quote-agnostically. Shared so every check that asks about this one
+/// attribute returns the same answer.
+pub fn declares_document_language(body: &str) -> bool {
+    HTML_TAG_RE
+        .captures(body)
+        .is_some_and(|caps| LANG_ATTR_RE.is_match(&caps[1]))
+}
+
 pub struct LangAttributeCheck;
 impl Check for LangAttributeCheck {
     fn id(&self) -> &str {
@@ -53,11 +84,7 @@ impl Check for LangAttributeCheck {
         ScanCategory::Accessibility
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
-        // Read quote-agnostic `lang` only from the root html tag.
-        let has_lang = HTML_TAG_RE
-            .captures(&ctx.body)
-            .map(|caps| LANG_ATTR_RE.is_match(&caps[1]))
-            .unwrap_or(false);
+        let has_lang = declares_document_language(&ctx.body);
         vec![CheckResult {
             check_id: "accessibility.lang".into(),
             category: ScanCategory::Accessibility,
@@ -116,6 +143,7 @@ impl Check for ImageAltAccessibilityCheck {
         let mut missing = 0u32;
         let mut empty = 0u32;
         let mut excluded_from_accessibility_tree = 0u32;
+        let mut template_bound_alt = 0u32;
         for tag in crate::checks::html_attrs::tag_slices(&scannable, &lower, "img") {
             let role = crate::checks::html_attrs::attr_value(tag, "role")
                 .unwrap_or_default()
@@ -129,23 +157,43 @@ impl Check for ImageAltAccessibilityCheck {
                 excluded_from_accessibility_tree += 1;
                 continue;
             }
+            let literal_alt = crate::checks::html_attrs::attr_value(tag, "alt");
+            if literal_alt.is_none() && has_framework_binding(tag, "alt") {
+                // A framework template binds alt at runtime. The served markup
+                // shows neither the value nor whether it is empty, so this
+                // element is unmeasured rather than missing its alt attribute.
+                template_bound_alt += 1;
+                continue;
+            }
             total += 1;
-            match crate::checks::html_attrs::attr_value(tag, "alt") {
+            match literal_alt {
                 None => missing += 1,
                 Some(value) if value.trim().is_empty() => empty += 1,
                 Some(_) => {}
             }
         }
+        let template_note = if template_bound_alt == 0 {
+            String::new()
+        } else {
+            format!(
+                " {} image{} bind{} alt through a client-side template (:alt, v-bind:alt, x-bind:alt, or [alt]), so the served markup does not show the value; {} not counted here.",
+                template_bound_alt,
+                if template_bound_alt == 1 { "" } else { "s" },
+                if template_bound_alt == 1 { "s" } else { "" },
+                if template_bound_alt == 1 { "it is" } else { "they are" }
+            )
+        };
         if total == 0 {
             return vec![CheckResult {
                 check_id: "accessibility.image_alt".into(),
                 category: ScanCategory::Accessibility,
                 title: "Image alternative-text attributes".into(),
                 description: format!(
-                    "No eligible <img> elements were found in the initial HTML. This source check does not inspect images inserted into the rendered DOM. {} image{} explicitly removed from the accessibility tree {} excluded.",
+                    "No eligible <img> elements were found in the initial HTML. This source check does not inspect images inserted into the rendered DOM. {} image{} explicitly removed from the accessibility tree {} excluded.{}",
                     excluded_from_accessibility_tree,
                     if excluded_from_accessibility_tree == 1 { "" } else { "s" },
-                    if excluded_from_accessibility_tree == 1 { "was" } else { "were" }
+                    if excluded_from_accessibility_tree == 1 { "was" } else { "were" },
+                    template_note
                 ),
                 status: CheckStatus::Pass,
                 severity: Severity::High,
@@ -156,6 +204,7 @@ impl Check for ImageAltAccessibilityCheck {
                     "missing_alt_attribute": 0,
                     "empty_alt_value": 0,
                     "excluded_from_accessibility_tree": excluded_from_accessibility_tree,
+                    "template_bound_alt": template_bound_alt,
                     "source_scope": "initial_html",
                     "rendered_dom_assessed": false,
                     "alt_quality_assessed": false
@@ -175,16 +224,17 @@ impl Check for ImageAltAccessibilityCheck {
             },
             description: if missing == 0 {
                 format!(
-                    "All {} eligible <img> elements in the initial HTML include an alt attribute; {} have an empty value. Attribute presence does not establish whether nonempty text accurately conveys each image's purpose or whether an empty value is appropriate.",
-                    total, empty
+                    "All {} eligible <img> elements in the initial HTML include an alt attribute; {} have an empty value. Attribute presence does not establish whether nonempty text accurately conveys each image's purpose or whether an empty value is appropriate.{}",
+                    total, empty, template_note
                 )
             } else {
                 format!(
-                    "{} of {} eligible <img> element{} in the initial HTML {} no alt attribute. This source check does not assess rendered-DOM changes or whether existing alternative text accurately conveys each image's purpose.",
+                    "{} of {} eligible <img> element{} in the initial HTML {} no alt attribute. This source check does not assess rendered-DOM changes or whether existing alternative text accurately conveys each image's purpose.{}",
                     missing,
                     total,
                     if total == 1 { "" } else { "s" },
-                    if missing == 1 { "has" } else { "have" }
+                    if missing == 1 { "has" } else { "have" },
+                    template_note
                 )
             },
             status: if missing == 0 {
@@ -205,6 +255,7 @@ impl Check for ImageAltAccessibilityCheck {
                     "missing_alt_attribute": missing,
                     "empty_alt_value": empty,
                     "excluded_from_accessibility_tree": excluded_from_accessibility_tree,
+                    "template_bound_alt": template_bound_alt,
                     "source_scope": "initial_html",
                     "rendered_dom_assessed": false,
                     "alt_quality_assessed": false,
@@ -497,6 +548,83 @@ impl Check for LinkTextCheck {
 static SKIP_HREF_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"["'\s]href\s*=\s*["']?#(?:main|content)(?-u:\b)"#).unwrap());
 
+/// An `href` attribute and its value, quoted or unquoted.
+static HREF_VALUE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?:^|[\s"'])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap()
+});
+
+/// True when a reference names another document rather than a place in this
+/// one: an absolute URL (`https:`, `mailto:`) or a protocol-relative host.
+fn points_at_another_document(reference: &str) -> bool {
+    if reference.starts_with("//") {
+        return true;
+    }
+    let scheme = match reference.split_once(':') {
+        Some((scheme, _)) => scheme,
+        None => return false,
+    };
+    // A `:` only introduces a scheme while it precedes the path, query, and
+    // fragment; `/a:b` and `?x=a:b` are same-document references.
+    !scheme.is_empty()
+        && !scheme.contains(['/', '?', '#'])
+        && scheme.starts_with(|ch: char| ch.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
+}
+
+/// True when one of a tag's `href` attributes targets a fragment of the
+/// current document. The fragment may follow a path or query
+/// (`href="/article#main"`), which server-rendered skip links use; an absolute
+/// or protocol-relative URL navigates away and bypasses nothing.
+fn targets_an_in_page_fragment(attrs: &str) -> bool {
+    HREF_VALUE_RE.captures_iter(attrs).any(|caps| {
+        let value = caps
+            .get(1)
+            .or_else(|| caps.get(2))
+            .or_else(|| caps.get(3))
+            .map_or("", |m| m.as_str())
+            .trim();
+        match value.split_once('#') {
+            Some((before, fragment)) => !fragment.is_empty() && !points_at_another_document(before),
+            None => false,
+        }
+    })
+}
+
+/// The wording a skip link uses, in an anchor's text or its `aria-label`.
+static SKIP_PHRASE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)skip\s+(?:to|nav)").unwrap());
+
+/// An `aria-label` attribute value, quoted or unquoted.
+static ARIA_LABEL_VALUE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)aria-label\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap()
+});
+
+/// True when the page carries an anchor that targets an in-page fragment and
+/// reads as a skip link. Prose that happens to say "skip to" bypasses nothing,
+/// so only anchors can satisfy the check.
+fn has_skip_link_anchor(body: &str) -> bool {
+    ANCHOR_RE.captures_iter(body).any(|caps| {
+        let attrs = &caps[1];
+        if !targets_an_in_page_fragment(attrs) {
+            return false;
+        }
+        let text = ANY_TAG_RE.replace_all(&caps[2], " ");
+        if SKIP_PHRASE_RE.is_match(&text) {
+            return true;
+        }
+        ARIA_LABEL_VALUE_RE.captures(attrs).is_some_and(|label| {
+            let value = label
+                .get(1)
+                .or_else(|| label.get(2))
+                .or_else(|| label.get(3))
+                .map_or("", |m| m.as_str());
+            SKIP_PHRASE_RE.is_match(value)
+        })
+    })
+}
+
 pub struct SkipNavCheck;
 impl Check for SkipNavCheck {
     fn id(&self) -> &str {
@@ -507,8 +635,7 @@ impl Check for SkipNavCheck {
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
         let lower = ctx.body_lower();
-        let has_skip =
-            lower.contains("skip to") || lower.contains("skip nav") || SKIP_HREF_RE.is_match(lower);
+        let has_skip = SKIP_HREF_RE.is_match(lower) || has_skip_link_anchor(lower);
         vec![CheckResult {
             check_id: "accessibility.skip_nav".into(),
             category: ScanCategory::Accessibility,

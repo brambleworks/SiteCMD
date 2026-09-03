@@ -2,9 +2,22 @@
 
 use super::{PolishContext, PolishResult, SignalCategory, SignalWeight};
 use regex::Regex;
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 const CATEGORY: SignalCategory = SignalCategory::AiAesthetic;
+
+/// An HTML comment.
+static HTML_COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<!--.*?-->").expect("html comment regex"));
+
+/// The page markup with comments removed. Nothing inside a comment is
+/// rendered, so a commented-out class name or colour is not a design choice the
+/// visitor sees. `<script>` and `<style>` blocks stay: the library markers and
+/// CSS declarations these signals count live in them.
+fn rendered_markup(ctx: &PolishContext) -> Cow<'_, str> {
+    HTML_COMMENT_RE.replace_all(&ctx.html, " ")
+}
 
 /// Matches CSS gradient declarations (linear-gradient, radial-gradient)
 static GRADIENT_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -94,7 +107,8 @@ static ROUND_ABSOLUTE_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 /// Detect unusually dense gradient usage as a soft aesthetic signal.
 pub fn gradient_backgrounds(ctx: &PolishContext) -> PolishResult {
-    let combined = format!("{}\n{}", ctx.html, ctx.css);
+    let html = rendered_markup(ctx);
+    let combined = format!("{}\n{}", html, ctx.css);
     let css_gradient_count = GRADIENT_RE.find_iter(&combined).count();
 
     let tw_gradient_count = combined.matches("bg-gradient").count();
@@ -176,10 +190,11 @@ pub fn gradient_backgrounds(ctx: &PolishContext) -> PolishResult {
 }
 /// Detect repeated backdrop blur; one use is common and not meaningful.
 pub fn glassmorphism(ctx: &PolishContext) -> PolishResult {
-    let combined = format!("{}\n{}", ctx.html, ctx.css);
+    let html = rendered_markup(ctx);
+    let combined = format!("{}\n{}", html, ctx.css);
 
     let css_blur = BACKDROP_BLUR_RE.find_iter(&combined).count();
-    let tw_blur = TW_BACKDROP_BLUR_RE.find_iter(&ctx.html).count();
+    let tw_blur = TW_BACKDROP_BLUR_RE.find_iter(&html).count();
     let total = css_blur + tw_blur;
 
     if total >= 3 {
@@ -210,9 +225,10 @@ pub fn glassmorphism(ctx: &PolishContext) -> PolishResult {
 
 /// Flag scroll-triggered animation on more than half of sections (Medium, 8).
 pub fn scroll_animations(ctx: &PolishContext) -> PolishResult {
-    let aos_count = AOS_RE.find_iter(&ctx.html).count();
-    let framer_count = FRAMER_SCROLL_RE.find_iter(&ctx.html).count();
-    let gsap_count = GSAP_SCROLL_RE.find_iter(&ctx.html).count();
+    let html = rendered_markup(ctx);
+    let aos_count = AOS_RE.find_iter(&html).count();
+    let framer_count = FRAMER_SCROLL_RE.find_iter(&html).count();
+    let gsap_count = GSAP_SCROLL_RE.find_iter(&html).count();
     let total_scroll_anims = aos_count + framer_count + gsap_count;
 
     if total_scroll_anims == 0 {
@@ -225,7 +241,7 @@ pub fn scroll_animations(ctx: &PolishContext) -> PolishResult {
     }
 
     // Both container counts and library markers are heuristic signals.
-    let container_count = SECTION_RE.find_iter(&ctx.html).count().max(1);
+    let container_count = SECTION_RE.find_iter(&html).count().max(1);
     let ratio = total_scroll_anims as f64 / container_count as f64;
 
     if ratio > 0.5 || total_scroll_anims >= 5 {
@@ -260,10 +276,11 @@ pub fn scroll_animations(ctx: &PolishContext) -> PolishResult {
 
 /// Flag more than 20 large border-radius declarations (Low, 3).
 pub fn excessive_border_radius(ctx: &PolishContext) -> PolishResult {
-    let tw_count = LARGE_RADIUS_TW_RE.find_iter(&ctx.html).count();
+    let html = rendered_markup(ctx);
+    let tw_count = LARGE_RADIUS_TW_RE.find_iter(&html).count();
 
     let mut css_count = 0usize;
-    for cap in LARGE_RADIUS_CSS_RE.captures_iter(&format!("{}\n{}", ctx.html, ctx.css)) {
+    for cap in LARGE_RADIUS_CSS_RE.captures_iter(&format!("{}\n{}", html, ctx.css)) {
         if let Ok(px) = cap[1].parse::<u32>() {
             if px >= 16 {
                 css_count += 1;
@@ -302,10 +319,11 @@ pub fn excessive_border_radius(ctx: &PolishContext) -> PolishResult {
 
 /// Flag three or more colored shadow declarations (Low, 3).
 pub fn glow_shadows(ctx: &PolishContext) -> PolishResult {
-    let combined = format!("{}\n{}", ctx.html, ctx.css);
+    let html = rendered_markup(ctx);
+    let combined = format!("{}\n{}", html, ctx.css);
 
     // Count Tailwind colored shadow utilities
-    let tw_colored = TW_COLORED_SHADOW_RE.find_iter(&ctx.html).count();
+    let tw_colored = TW_COLORED_SHADOW_RE.find_iter(&html).count();
 
     // Exclude zero-blur focus rings from colored glow detection.
     let mut css_colored = 0usize;
@@ -432,8 +450,9 @@ fn shadow_has_blur(shadow: &str) -> bool {
 pub fn floating_blobs(ctx: &PolishContext) -> PolishResult {
     // Check for class names that suggest blobs - inside class attribute
     // values only, so "glow"/"orb" in body copy do not count.
+    let html = rendered_markup(ctx);
     let mut blob_classes = 0usize;
-    for cap in CLASS_ATTR_RE.captures_iter(&ctx.html) {
+    for cap in CLASS_ATTR_RE.captures_iter(&html) {
         let value = cap
             .get(1)
             .or_else(|| cap.get(2))
@@ -444,11 +463,11 @@ pub fn floating_blobs(ctx: &PolishContext) -> PolishResult {
     }
 
     // Check for absolute + rounded-full pattern (either order in class string)
-    let abs_round = ABSOLUTE_ROUND_RE.find_iter(&ctx.html).count()
-        + ROUND_ABSOLUTE_RE.find_iter(&ctx.html).count();
+    let abs_round =
+        ABSOLUTE_ROUND_RE.find_iter(&html).count() + ROUND_ABSOLUTE_RE.find_iter(&html).count();
 
     // Check for CSS patterns: position:absolute + border-radius:50% + filter:blur
-    let combined = format!("{}\n{}", ctx.html, ctx.css);
+    let combined = format!("{}\n{}", html, ctx.css);
     let has_blob_css = combined.contains("border-radius: 50%")
         && combined.contains("filter: blur")
         && combined.contains("position: absolute");

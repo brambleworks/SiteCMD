@@ -110,6 +110,21 @@ fn a_missing_record_asks_for_the_mx_answer_and_gates_severity_on_it() {
     };
     let no_mx = pending.evaluate(&DnsOutcome::NoRecords);
     assert_eq!(no_mx[0].severity, Severity::Low);
+    assert_eq!(no_mx[0].status, CheckStatus::Warn);
+    assert!(
+        no_mx[0]
+            .description
+            .contains("publishes no MX records, so it shows no inbound mail setup"),
+        "{}",
+        no_mx[0].description
+    );
+    assert!(no_mx[0].description.contains("v=spf1 -all"));
+
+    let SpfStep::NeedsMx(pending) = evaluate_spf_txt("example.com", DnsOutcome::NoRecords) else {
+        panic!("a missing SPF record needs the MX gate");
+    };
+    let unknown_mx = pending.evaluate(&DnsOutcome::Failed("timed out".into()));
+    assert!(!unknown_mx[0].description.contains("MX records"));
 }
 
 #[test]

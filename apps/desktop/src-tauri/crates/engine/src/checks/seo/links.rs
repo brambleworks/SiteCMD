@@ -38,7 +38,22 @@ pub struct LinkTargets {
     pub internal: Vec<Url>,
     pub external: Vec<Url>,
     pub excluded_target_count: usize,
+    /// Destinations under a CDN-reserved path prefix, which no site route
+    /// serves; see [`is_reserved_path`].
+    pub excluded_reserved_path_count: usize,
     pub effective_base_url: String,
+}
+
+/// Cloudflare reserves `/cdn-cgi/` on every zone it fronts. Its email
+/// obfuscation emits `/cdn-cgi/l/email-protection#<encoded>` anchors that the
+/// browser decodes from the fragment, so a bare GET is 404 by design and the
+/// destination is never one of the site's own routes.
+const CLOUDFLARE_RESERVED_PREFIX: &str = "/cdn-cgi/";
+
+/// True for a URL path a CDN reserves for itself rather than the site.
+pub fn is_reserved_path(path: &str) -> bool {
+    path.get(..CLOUDFLARE_RESERVED_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CLOUDFLARE_RESERVED_PREFIX))
 }
 
 fn decode_href(href: &str) -> String {
@@ -85,6 +100,7 @@ pub fn resolve_link_targets(ctx: &PageContext, allow_target: impl Fn(&Url) -> bo
     let mut internal = Vec::new();
     let mut external = Vec::new();
     let mut excluded_target_count = 0;
+    let mut excluded_reserved_path_count = 0;
 
     for href in hrefs {
         let href = href.trim();
@@ -98,6 +114,10 @@ pub fn resolve_link_targets(ctx: &PageContext, allow_target: impl Fn(&Url) -> bo
         };
         if !matches!(resolved.scheme(), "http" | "https") || !allow_target(&resolved) {
             excluded_target_count += 1;
+            continue;
+        }
+        if is_reserved_path(resolved.path()) {
+            excluded_reserved_path_count += 1;
             continue;
         }
         resolved.set_fragment(None);
@@ -121,6 +141,7 @@ pub fn resolve_link_targets(ctx: &PageContext, allow_target: impl Fn(&Url) -> bo
         internal,
         external,
         excluded_target_count,
+        excluded_reserved_path_count,
         effective_base_url: base.as_str().to_string(),
     }
 }
@@ -343,6 +364,7 @@ fn link_probe_raw_data(
         "source_scope": "initial_html_anchor_href",
         "anchor_href_count": targets.anchor_href_count,
         "excluded_target_count": targets.excluded_target_count,
+        "excluded_reserved_paths": targets.excluded_reserved_path_count,
         "effective_base_target": evidence_url(&targets.effective_base_url),
         "eligible_candidate_count": eligible_candidate_count,
         "sample_limit": sample_limit,

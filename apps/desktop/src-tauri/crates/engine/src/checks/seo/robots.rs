@@ -16,8 +16,11 @@ pub enum RobotsTxtFetch {
     Found { body: String },
     /// Reachable but non-2xx.
     Status(u16),
-    /// Network-level failure, an unreadable body, or an HTML catch-all
-    /// rewrite standing in for the file.
+    /// A 2xx response whose body is an HTML page rather than a robots.txt: a
+    /// catch-all route answered for the path. The endpoint responded, so this
+    /// is not a network failure and re-running will not change it.
+    HtmlShell,
+    /// Network-level failure or an unreadable body.
     Error(String),
 }
 
@@ -40,9 +43,7 @@ pub fn robots_fetch_from_probe(outcome: ProbeOutcome) -> RobotsTxtFetch {
             match response.body {
                 Some(body) => {
                     if looks_like_html_shell(&content_type, &body.text) {
-                        RobotsTxtFetch::Error(
-                            "the server answered /robots.txt with an HTML page (catch-all rewrite), not a robots.txt".into(),
-                        )
+                        RobotsTxtFetch::HtmlShell
                     } else {
                         RobotsTxtFetch::Found { body: body.text }
                     }
@@ -224,10 +225,38 @@ pub fn evaluate_robots_txt(fetch: &RobotsTxtFetch) -> Vec<CheckResult> {
             Some(*code),
             "robots.txt returned a non-success response",
         )],
+        RobotsTxtFetch::HtmlShell => vec![robots_html_shell_result()],
         RobotsTxtFetch::Error(_) => vec![robots_unavailable_result(
             None,
             "the robots.txt request failed",
         )],
+    }
+}
+
+/// Result for a robots.txt path answered by an HTML catch-all route. The
+/// endpoint responded, so the copy must not call this a failed request or ask
+/// for a re-run.
+pub fn robots_html_shell_result() -> CheckResult {
+    CheckResult {
+        check_id: "seo.robots_txt".into(),
+        category: ScanCategory::Seo,
+        title: "Robots.txt policy not evaluated".into(),
+        description: "robots.txt answered with an HTML page (catch-all rewrite), not a robots.txt file, so no rules could be parsed and no robots policy conclusion was made. Serve the file as text/plain from that path if crawl rules are intended.".into(),
+        status: CheckStatus::Skipped,
+        severity: Severity::Low,
+        fix_prompt: None,
+        manual_fix: None,
+        raw_data: Some(serde_json::json!({
+            "robots_policy_evaluated": false,
+            "html_catch_all": true,
+            "probe_conclusive": false,
+        })),
+        confidence: IssueConfidence::High,
+        confidence_reason: Some(
+            "The response body is an HTML document, so the endpoint served a page rather than a robots.txt."
+                .into(),
+        ),
+        why_it_matters: None,
     }
 }
 
@@ -423,12 +452,29 @@ mod tests {
     }
 
     #[test]
-    fn html_catch_all_rewrite_is_an_error_not_an_empty_robots() {
+    fn html_catch_all_rewrite_is_its_own_outcome_not_an_empty_robots() {
         let outcome = response(200, "text/html; charset=utf-8", Some("<!doctype html>"));
         assert!(matches!(
             robots_fetch_from_probe(outcome),
-            RobotsTxtFetch::Error(_)
+            RobotsTxtFetch::HtmlShell
         ));
+    }
+
+    #[test]
+    fn an_html_catch_all_robots_policy_row_does_not_claim_a_failed_request() {
+        let rows = evaluate_robots_txt(&RobotsTxtFetch::HtmlShell);
+        assert_eq!(rows[0].status, CheckStatus::Skipped);
+        assert!(
+            !rows[0].description.contains("request failed"),
+            "{}",
+            rows[0].description
+        );
+        assert!(
+            rows[0].description.contains("catch-all rewrite"),
+            "{}",
+            rows[0].description
+        );
+        assert_eq!(rows[0].raw_data.as_ref().unwrap()["html_catch_all"], true);
     }
 
     #[test]

@@ -223,10 +223,20 @@ fn external_fact_plan(page: &PageContext) -> ExternalFactPlan {
             apex_txt_name: domain.clone(),
             apex_mx_name: domain.clone(),
             dmarc_txt_name: dmarc::dmarc_lookup_name(&domain),
+            // This plan is authored before any DNS answer exists, so it
+            // cannot know which provider the domain's SPF record names. It
+            // gathers the common defaults plus every selector an SPF include
+            // could derive, so the sweep that runs after the apex TXT answer
+            // resolves against facts that were actually fetched. Planning only
+            // the common list would make each derived selector come back as
+            // "not gathered", which reads as a failed probe and leaves the
+            // false warn this derivation exists to remove.
             dkim_txt_names: dkim::COMMON_SELECTORS
                 .iter()
+                .copied()
+                .chain(dkim::all_provider_selectors())
                 .map(|selector| DkimSelectorQuestion {
-                    selector: (*selector).to_string(),
+                    selector: selector.to_string(),
                     name: dkim::selector_lookup_name(selector, &domain),
                 })
                 .collect(),

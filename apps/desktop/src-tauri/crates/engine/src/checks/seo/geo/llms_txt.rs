@@ -127,6 +127,9 @@ pub fn evaluate_llms_txt(outcome: ProbeOutcome) -> Vec<CheckResult> {
                 ProbeFailureClass::BodyCapExceeded => {
                     "The successful response body could not be read within the probe limits."
                 }
+                ProbeFailureClass::DnsUnresolved => {
+                    "The endpoint's host did not resolve, so file presence/content was not evaluated."
+                }
                 ProbeFailureClass::Transport => {
                     "The endpoint request failed, so file presence/content was not evaluated."
                 }
