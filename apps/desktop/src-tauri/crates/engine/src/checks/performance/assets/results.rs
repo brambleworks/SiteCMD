@@ -72,6 +72,55 @@ fn cache_is_durable(cache_control: Option<&str>) -> bool {
     cache_max_age(&lower).is_some_and(|secs| secs >= IMMUTABLE_CACHE_MIN_SECS)
 }
 
+/// Same registrable domain (PSL eTLD+1) as the scanned page, so a site's own
+/// CDN subdomain is graded while another organization's origin is not. Hosts
+/// without a public suffix (localhost, IP literals) must match exactly.
+fn is_same_site(asset_url: &str, page_origin: Option<&str>) -> bool {
+    fn site(url: &str) -> Option<String> {
+        let parsed = url::Url::parse(url).ok()?;
+        let host = parsed
+            .host_str()?
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        Some(psl::domain_str(&host).map(str::to_string).unwrap_or(host))
+    }
+    match (page_origin.and_then(site), site(asset_url)) {
+        (Some(page), Some(asset)) => page == asset,
+        _ => false,
+    }
+}
+
+/// No page origin means no asset can be placed on the site or off it, so the
+/// check reports what it could not establish instead of grading nothing.
+fn unattributable_asset_caching_result(fingerprinted_count: usize) -> CheckResult {
+    CheckResult {
+        check_id: "performance.asset_caching".into(),
+        category: ScanCategory::Performance,
+        title: "Static asset caching not assessed".into(),
+        description: format!(
+            "{} sampled asset{} a fingerprint-like filename, but this run carried no page origin, so none of them could be attributed to the site or to a third party. Only the site's own assets are graded for cache freshness, so no verdict was reached.",
+            fingerprinted_count,
+            if fingerprinted_count == 1 {
+                " has"
+            } else {
+                "s have"
+            }
+        ),
+        status: CheckStatus::Skipped,
+        severity: Severity::Low,
+        fix_prompt: None,
+        manual_fix: None,
+        raw_data: Some(serde_json::json!({
+            "reason": "no_page_origin",
+            "fingerprinted_sampled": fingerprinted_count,
+            "min_durable_secs": IMMUTABLE_CACHE_MIN_SECS,
+        })),
+        confidence: IssueConfidence::High,
+        confidence_reason: None,
+        why_it_matters: None,
+    }
+}
+
 pub(super) fn asset_caching_result(
     measured: &[MeasuredAsset],
     page_origin: Option<&str>,
@@ -83,11 +132,35 @@ pub(super) fn asset_caching_result(
         .iter()
         .filter(|asset| (200..300).contains(&asset.status_code) && looks_fingerprinted(&asset.url))
         .collect();
-    let weak: Vec<&MeasuredAsset> = fingerprinted
+    // Without a page origin no asset can be attributed to the site or to a
+    // third party, so same-site membership is unknown rather than empty and
+    // there is no verdict to report. With nothing fingerprinted the answer is
+    // the same either way, so that case falls through to the normal wording.
+    if page_origin.is_none() && !fingerprinted.is_empty() {
+        return unattributable_asset_caching_result(fingerprinted.len());
+    }
+    // Only the site's own assets are graded: another origin sets its own
+    // cache headers, and the site owner cannot change them.
+    let (same_site, third_party): (Vec<&MeasuredAsset>, Vec<&MeasuredAsset>) = fingerprinted
+        .iter()
+        .copied()
+        .partition(|asset| is_same_site(&asset.url, page_origin));
+    let weak: Vec<&MeasuredAsset> = same_site
         .iter()
         .copied()
         .filter(|asset| !cache_is_durable(asset.cache_control.as_deref()))
         .collect();
+    let third_party_note = if third_party.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " {} sampled third-party asset{} with a fingerprint-like filename {} not graded because another origin sets {} cache headers.",
+            third_party.len(),
+            if third_party.len() == 1 { "" } else { "s" },
+            if third_party.len() == 1 { "was" } else { "were" },
+            if third_party.len() == 1 { "its" } else { "their" },
+        )
+    };
 
     let status = if weak.is_empty() {
         CheckStatus::Pass
@@ -117,18 +190,25 @@ pub(super) fn asset_caching_result(
     let description = if fingerprinted.is_empty() {
         "No sampled static-asset filename matched this check's fingerprint-like token pattern."
             .to_string()
+    } else if same_site.is_empty() {
+        format!(
+            "No sampled same-site asset filename matched this check's fingerprint-like token pattern.{}",
+            third_party_note
+        )
     } else if weak.is_empty() {
         format!(
-            "All {} sampled assets with fingerprint-like filenames are served with at least one week of browser or shared-cache freshness. Filename shape does not prove the URLs are content-addressed.",
-            fingerprinted.len()
+            "All {} sampled same-site assets with fingerprint-like filenames are served with at least one week of browser or shared-cache freshness. Filename shape does not prove the URLs are content-addressed.{}",
+            same_site.len(),
+            third_party_note
         )
     } else {
         format!(
-            "{} of {} sampled assets with fingerprint-like filenames {} served without the check's one-week freshness threshold: {}. The names look content-hashed, but source markup alone does not prove that each URL changes whenever its bytes change.",
+            "{} of {} sampled same-site assets with fingerprint-like filenames {} served without the check's one-week freshness threshold: {}. The names look content-hashed, but source markup alone does not prove that each URL changes whenever its bytes change.{}",
             weak.len(),
-            fingerprinted.len(),
+            same_site.len(),
             if weak.len() == 1 { "is" } else { "are" },
-            listed.join("; ")
+            listed.join("; "),
+            third_party_note
         )
     };
 
@@ -154,6 +234,7 @@ pub(super) fn asset_caching_result(
         },
         raw_data: Some(serde_json::json!({
             "fingerprinted_sampled": fingerprinted.len(),
+            "third_party_sampled": third_party.len(),
             "weak_count": weak.len(),
             "min_durable_secs": IMMUTABLE_CACHE_MIN_SECS,
             "weak": weak
@@ -178,11 +259,16 @@ pub(super) fn asset_caching_result(
     }
 }
 
+/// This row sums decoded sizes over a bounded sample and says so in its own
+/// description ("not observed navigation transfer"), so it never carries a
+/// severity that claims a measured user-facing cost: Warn is advisory and
+/// Fail tops out at Medium. `performance.page_weight` keeps the escalating
+/// tier because the HTML document size it grades is directly observed.
 fn asset_weight_verdict(total_bytes: u64) -> (CheckStatus, Severity) {
     if total_bytes > ASSET_WEIGHT_FAIL_BYTES {
-        (CheckStatus::Fail, Severity::High)
+        (CheckStatus::Fail, Severity::Medium)
     } else if total_bytes > ASSET_WEIGHT_WARN_BYTES {
-        (CheckStatus::Warn, Severity::Medium)
+        (CheckStatus::Warn, Severity::Low)
     } else {
         (CheckStatus::Pass, Severity::Low)
     }

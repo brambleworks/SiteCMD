@@ -1,27 +1,16 @@
 //! Flags large executable inline blocks with unminified formatting.
 
+use crate::checks::html_attrs::{attr_value, has_attr, raw_text_elements, slice_offset};
 use crate::checks::{Check, CheckResult, CheckStatus, PageContext, ScanCategory, Severity};
-use regex::Regex;
-use std::sync::LazyLock;
-
-static UNMIN_SCRIPT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<script(\s[^>]*)?>(.+?)</script>").unwrap());
-static UNMIN_STYLE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<style(?:\s[^>]*)?>(.+?)</style>").unwrap());
-static SCRIPT_TYPE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)type\s*=\s*["']?([a-z0-9/+.-]+)"#).unwrap());
 
 /// Whether a script tag contains executable JavaScript rather than data.
-fn is_executable_script(attrs: &str) -> bool {
-    match SCRIPT_TYPE_RE.captures(attrs) {
+fn is_executable_script(tag: &str) -> bool {
+    match attr_value(tag, "type") {
         None => true,
-        Some(caps) => {
-            let script_type = caps[1].to_ascii_lowercase();
-            matches!(
-                script_type.as_str(),
-                "module" | "text/javascript" | "application/javascript"
-            )
-        }
+        Some(script_type) => matches!(
+            script_type.trim().to_ascii_lowercase().as_str(),
+            "" | "module" | "text/javascript" | "application/javascript"
+        ),
     }
 }
 
@@ -46,21 +35,25 @@ impl Check for UnminifiedCodeCheck {
         // Skip tiny inline blocks (<500 bytes) - those are fine
         let min_size = 500;
 
-        for cap in UNMIN_SCRIPT_RE.captures_iter(&ctx.body) {
-            let attrs = cap.get(1).map(|m| m.as_str()).unwrap_or("");
-            if !is_executable_script(attrs) {
+        let lower = ctx.body_lower();
+
+        for (tag, content) in raw_text_elements(&ctx.body, lower, "script") {
+            // An external script's element content is empty; its code lives at
+            // the src URL and is never inspected here. Reading past the empty
+            // body previously merged the next block into this one and graded
+            // page markup as inline script.
+            if has_attr(tag, "src") || !is_executable_script(tag) {
                 continue;
             }
-            let content = &cap[2];
             if content.len() >= min_size && looks_unminified(content) {
                 candidate_scripts += 1;
                 candidate_total_bytes += content.len();
                 if block_locations.len() < 5 {
-                    let m = cap.get(0).expect("captures_iter yields full match");
+                    let start = slice_offset(&ctx.body, tag);
                     block_locations.push(serde_json::json!({
                         "kind": "script",
-                        "line": line_number_at(&ctx.body, m.start()),
-                        "byte_offset": m.start(),
+                        "line": line_number_at(&ctx.body, start),
+                        "byte_offset": start,
                         "size_bytes": content.len(),
                         "preview": preview(content),
                     }));
@@ -68,17 +61,19 @@ impl Check for UnminifiedCodeCheck {
             }
         }
 
-        for cap in UNMIN_STYLE_RE.captures_iter(&ctx.body) {
-            let content = &cap[1];
-            if content.len() >= min_size && looks_unminified(content) {
+        for (tag, content) in raw_text_elements(&ctx.body, lower, "style") {
+            if content.len() >= min_size
+                && looks_unminified(content)
+                && !declarations_look_minified(content)
+            {
                 candidate_styles += 1;
                 candidate_total_bytes += content.len();
                 if block_locations.len() < 5 {
-                    let m = cap.get(0).expect("captures_iter yields full match");
+                    let start = slice_offset(&ctx.body, tag);
                     block_locations.push(serde_json::json!({
                         "kind": "style",
-                        "line": line_number_at(&ctx.body, m.start()),
-                        "byte_offset": m.start(),
+                        "line": line_number_at(&ctx.body, start),
+                        "byte_offset": start,
                         "size_bytes": content.len(),
                         "preview": preview(content),
                     }));
@@ -131,7 +126,7 @@ impl Check for UnminifiedCodeCheck {
                     "candidate_script_blocks": candidate_scripts,
                     "candidate_style_blocks": candidate_styles,
                     "candidate_total_bytes": candidate_total_bytes,
-                    "heuristic": "at_least_500_bytes_more_than_10_lines_and_short_average_lines_with_formatting_signal",
+                    "heuristic": "at_least_500_bytes_more_than_10_lines_and_short_average_lines_with_formatting_signal_and_for_styles_multi_line_rule_bodies",
                     // Up to 5 location records so AI fix prompts can grep
                     // the offending markup. Each entry has kind, line,
                     // byte_offset, size_bytes, and a 120-char preview.
@@ -178,6 +173,70 @@ fn preview(content: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// Whether a stylesheet's declarations are already minified, whatever the
+/// layout around them is. `looks_unminified` reads line count, indentation,
+/// and comments, so a build that emits one minified rule per line under a
+/// `/* section */` comment matched it while carrying no removable declaration
+/// whitespace at all. The removable bytes live inside rule bodies, so that is
+/// what this measures: a body that never spans a line has nothing left to
+/// strip. Only innermost bodies count, since an `@media` wrapper spans lines
+/// whenever the rules it holds are on separate lines.
+fn declarations_look_minified(css: &str) -> bool {
+    // (start byte offset, whether a nested block was seen inside it)
+    let mut open: Vec<(usize, bool)> = Vec::new();
+    let mut bodies = 0usize;
+    let mut multi_line_bodies = 0usize;
+    // A brace inside a quoted value (`content: "{"`) or a comment is not a
+    // block boundary, so both are skipped rather than counted.
+    let mut quote: Option<u8> = None;
+    let mut in_comment = false;
+    let bytes = css.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_comment {
+            if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                in_comment = false;
+                index += 2;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+        match quote {
+            // A backslash escapes the next byte inside a CSS string.
+            Some(_) if byte == b'\\' => index += 1,
+            Some(active) if byte == active => quote = None,
+            Some(_) => {}
+            None if matches!(byte, b'"' | b'\'') => quote = Some(byte),
+            None if byte == b'/' && bytes.get(index + 1) == Some(&b'*') => {
+                in_comment = true;
+                index += 2;
+                continue;
+            }
+            None if byte == b'{' => open.push((index, false)),
+            None if byte == b'}' => {
+                if let Some((start, has_nested)) = open.pop() {
+                    if !has_nested {
+                        bodies += 1;
+                        if bytes[start..index].contains(&b'\n') {
+                            multi_line_bodies += 1;
+                        }
+                    }
+                    if let Some(parent) = open.last_mut() {
+                        parent.1 = true;
+                    }
+                }
+            }
+            None => {}
+        }
+        index += 1;
+    }
+    // Too few rules to read a build style from; leave the verdict to the
+    // whitespace heuristic.
+    bodies >= 3 && multi_line_bodies * 5 < bodies
 }
 
 /// Heuristic: code is probably unminified if it has many newlines relative to its size
@@ -303,6 +362,149 @@ mod tests {
                 .contains("does not measure transfer savings"),
             "{:?}",
             result.confidence_reason
+        );
+    }
+
+    #[test]
+    fn an_empty_external_script_never_absorbs_the_markup_that_follows_it() {
+        // Two adjacent external scripts and then a large HTML body. The old
+        // `(.+?)` body group could not close on its own end tag, so the match
+        // ran to the next `</script>` and page markup was graded as inline
+        // script (wordpress.org, drupal.org, github.com in the live corpus).
+        let filler: String = (0..60)
+            .map(|i| format!("  <li class=\"item-{i}\"><a href=\"/page/{i}\">Item {i}</a></li>\n"))
+            .collect();
+        // The page markup sits between the two external scripts, exactly as on
+        // wordpress.org: the first tag's body ran to the second tag's closing
+        // `</script>` and swallowed everything in between.
+        let html = format!(
+            "<script defer src=\"/a.js\"></script>\n<ul>\n{filler}</ul>\n<script src=\"/b.js\"></script>"
+        );
+        let results = super::UnminifiedCodeCheck.run(&ctx(&html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn an_inline_script_after_an_empty_external_script_is_measured_on_its_own() {
+        let code: String = (0..40)
+            .map(|i| format!("    var field_{i} = {i}; // init\n"))
+            .collect();
+        let html = format!("<script src=\"/a.js\"></script>\n<script>\n{code}\n</script>");
+        let result = super::UnminifiedCodeCheck.run(&ctx(&html))[0].clone();
+
+        assert_eq!(result.status, CheckStatus::Warn, "{}", result.description);
+        let raw = result.raw_data.as_ref().expect("raw data");
+        assert_eq!(raw["candidate_script_blocks"], 1);
+        assert_eq!(raw["candidate_total_bytes"], (code.len() + 2) as u64);
+        let preview = raw["block_locations"][0]["preview"]
+            .as_str()
+            .expect("preview");
+        assert!(
+            preview.starts_with("var field_0"),
+            "the reported block must be the inline script, not the tag before it: {preview}"
+        );
+    }
+
+    #[test]
+    fn a_json_ld_block_after_an_empty_external_script_is_still_data() {
+        let html = format!(
+            "<script defer src=\"/a.js\"></script><script type=\"application/ld+json\">{{\n{}\n}}</script>",
+            big_pretty_block("schema")
+        );
+        let results = super::UnminifiedCodeCheck.run(&ctx(&html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn one_minified_css_rule_per_line_is_not_unminified_formatting() {
+        // The smarthomeu.com shape: minified declarations, one rule per line,
+        // six-space indentation and `/* section */` comments around them.
+        let rules: String = (0..30)
+            .map(|i| format!("      .u-{i}{{margin:{i}px;padding:{i}px;color:#111}}\n"))
+            .collect();
+        let css = format!("\n      /* Fonts */\n{rules}      @media(max-width:767px){{.page{{padding-top:56px}}.navbar-brand img{{height:40px}}}}\n    ");
+        assert!(css.len() >= 500, "fixture must clear the size floor");
+        assert!(
+            super::looks_unminified(&css),
+            "the whitespace heuristic must still match, or this test proves nothing"
+        );
+        let results = super::UnminifiedCodeCheck.run(&ctx(&format!("<style>{css}</style>")));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn css_with_declarations_on_their_own_lines_is_still_flagged() {
+        let rules: String = (0..15)
+            .map(|i| {
+                format!(
+                    "      .u-{i} {{\n        margin: {i}px;\n        color: #111111;\n      }}\n"
+                )
+            })
+            .collect();
+        let results = super::UnminifiedCodeCheck.run(&ctx(&format!("<style>\n{rules}</style>")));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Warn,
+            "{}",
+            results[0].description
+        );
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("raw data")["candidate_style_blocks"],
+            1
+        );
+    }
+
+    #[test]
+    fn a_brace_in_a_comment_or_a_string_is_not_a_rule_body() {
+        // `content: "{"` and a commented-out rule are text, not structure. A
+        // lexical brace count would read them as unclosed bodies and hand the
+        // wrong ratio to the minified-declaration test.
+        let minified: String = (0..30)
+            .map(|i| format!("      .u-{i}{{margin:{i}px;content:\"{{\"}}\n"))
+            .collect();
+        let css =
+            format!("\n      /* a commented rule: .x {{ color: red;\n         }} */\n{minified}");
+        assert!(
+            super::declarations_look_minified(&css),
+            "30 single-line rule bodies must still read as minified declarations"
+        );
+
+        let pretty: String = (0..15)
+            .map(|i| format!("      .u-{i} {{\n        content: \"{{\";\n      }}\n"))
+            .collect();
+        assert!(
+            !super::declarations_look_minified(&pretty),
+            "a brace inside a quoted value must not close the rule that holds it"
+        );
+    }
+
+    #[test]
+    fn commented_out_markup_is_not_measured_as_inline_code() {
+        let code: String = (0..40)
+            .map(|i| format!("    var field_{i} = {i}; // init\n"))
+            .collect();
+        let html = format!("<!-- <script>\n{code}\n</script> -->");
+        let results = super::UnminifiedCodeCheck.run(&ctx(&html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
         );
     }
 

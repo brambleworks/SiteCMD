@@ -217,8 +217,7 @@ fn format_negotiating_cdns_are_not_flagged_as_legacy() {
 
 #[test]
 fn single_missing_lazy_image_uses_singular_grammar() {
-    let html =
-        r#"<img src="hero.webp" width="1" height="1"><img src="second.webp" width="1" height="1">"#;
+    let html = r#"<img src="hero.webp" width="800" height="600"><img src="second.webp" width="800" height="600">"#;
     let results = ImageOptimizationCheck.run(&ctx(html));
     let lazy = results
         .iter()
@@ -257,7 +256,7 @@ fn single_image_missing_dimensions_uses_singular_and_hedged_cls_claim() {
 
 #[test]
 fn empty_or_non_numeric_dimensions_do_not_reserve_an_intrinsic_ratio() {
-    let html = r#"<img src="a.webp" width="" height="auto"><img src="b.webp" width="0" height="10" loading="lazy">"#;
+    let html = r#"<img src="a.webp" width="" height="auto"><img src="b.webp" width="eight" height="10" loading="lazy">"#;
     let results = ImageOptimizationCheck.run(&ctx(html));
     let dims = results
         .iter()
@@ -354,4 +353,223 @@ fn one_font_display_declaration_does_not_hide_an_unconfigured_face() {
     let results = FontLoadingCheck.run(&ctx(html));
     assert_eq!(results[0].status, CheckStatus::Warn);
     assert!(results[0].description.contains("1 @font-face declaration"));
+}
+
+/// The BBC article-card shape: a `<picture>` whose `<source type="image/webp">`
+/// carries the responsive candidates and whose `<img>` keeps a .jpg fallback.
+/// A supporting browser downloads the WebP, so grading the fallback URL called
+/// 92 of 93 images legacy on bbc.co.uk.
+#[test]
+fn a_jpeg_fallback_inside_a_webp_picture_is_not_a_legacy_source() {
+    let html = r#"<picture><source srcSet="https://cdn.example.net/a.jpg.webp 480w, https://cdn.example.net/a-800.jpg.webp 800w" type="image/webp" sizes="480px"/><img alt="story" src="https://cdn.example.net/a.jpg" srcSet="https://cdn.example.net/a.jpg 480w" width="240" height="135" loading="lazy"/></picture>"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    assert!(
+        !results
+            .iter()
+            .any(|result| result.check_id == "performance.images.format"),
+        "a WebP source in the enclosing picture answers the format question: {:?}",
+        results
+            .iter()
+            .map(|result| result.description.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn an_avif_srcset_candidate_answers_the_format_question_for_its_own_element() {
+    let html = r#"<img src="/hero.png" srcset="/hero.avif 1x, /hero-2x.avif 2x" width="800" height="600" loading="lazy">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    assert!(!results
+        .iter()
+        .any(|result| result.check_id == "performance.images.format"));
+}
+
+#[test]
+fn a_picture_without_a_modern_source_still_grades_its_fallback() {
+    let html = r#"<picture><source srcset="/wide.png" media="(min-width: 800px)"><img src="/hero.png" width="800" height="600" loading="lazy"></picture>"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    let format = results
+        .iter()
+        .find(|result| result.check_id == "performance.images.format")
+        .expect("a picture offering only PNG keeps the legacy-source finding");
+    assert_eq!(format.raw_data.as_ref().unwrap()["legacy_looking_count"], 1);
+}
+
+#[test]
+fn a_modern_picture_does_not_exempt_an_unrelated_image_after_it() {
+    let html = r#"<picture><source srcset="/a.webp" type="image/webp"><img src="/a.jpg" width="8" height="6" loading="lazy"></picture>
+        <img src="/standalone.png" width="8" height="6" loading="lazy">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    let format = results
+        .iter()
+        .find(|result| result.check_id == "performance.images.format")
+        .expect("the standalone PNG is still a candidate");
+    assert_eq!(format.raw_data.as_ref().unwrap()["legacy_looking_count"], 1);
+    assert!(
+        format.description.contains("standalone.png"),
+        "{}",
+        format.description
+    );
+}
+
+#[test]
+fn one_repeated_source_url_is_listed_once() {
+    // github.com listed particles-170bd1fd231f4669.png three times as "3 values".
+    let repeated: String = (0..3)
+        .map(|_| {
+            r#"<img src="/assets/particles.png" width="8" height="6" loading="lazy">"#.to_string()
+        })
+        .collect();
+    let results = ImageOptimizationCheck.run(&ctx(&repeated));
+    let format = results
+        .iter()
+        .find(|result| result.check_id == "performance.images.format")
+        .expect("format subcheck must fire");
+    let examples = format.raw_data.as_ref().unwrap()["legacy_looking_srcs"]
+        .as_array()
+        .expect("examples array")
+        .clone();
+    assert_eq!(examples.len(), 1, "{examples:?}");
+    assert_eq!(format.raw_data.as_ref().unwrap()["legacy_looking_count"], 3);
+}
+
+#[test]
+fn pixel_spacers_and_tracking_beacons_are_not_page_images() {
+    // hn: `<img src="s.gif" height="1" width="14">` and `height="10" width="0"`.
+    // bbc: a comScore beacon with no dimensions at all.
+    let html = r#"<img src="/hero.webp" width="800" height="600">
+        <img src="s.gif" height="1" width="14">
+        <img src="s.gif" height="10" width="0">
+        <img src="https://sb.scorecardresearch.com/p?c1=2&amp;c2=17986528" alt="">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    assert!(
+        results.len() == 1 && results[0].check_id == "performance.images",
+        "only the hero image is gradeable: {:?}",
+        results
+            .iter()
+            .map(|result| result.check_id.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(results[0].status, CheckStatus::Pass);
+    assert!(
+        results[0]
+            .description
+            .contains("3 `<img>` elements were not graded (3 tracking beacons or spacers)"),
+        "{}",
+        results[0].description
+    );
+    let raw = results[0].raw_data.as_ref().expect("raw data");
+    assert_eq!(raw["img_elements_found"], 4);
+    assert_eq!(raw["beacon_or_spacer_elements"], 3);
+}
+
+#[test]
+fn framework_bound_sources_are_reported_as_ungraded_not_as_defects() {
+    // smarthomeu.com: an Alpine template element with no literal src at all was
+    // graded as an image missing width, height, and lazy loading.
+    let html = r#"<img src="/hero.webp" width="800" height="600">
+        <img x-show="product.image" :src="product.image" :alt="product.title">
+        <img v-bind:src="item.url" alt="vue">
+        <img [src]="item.url" alt="angular">
+        <img src="/real.webp" @loading="mode" width="8" height="6">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    assert!(
+        results.len() == 1 && results[0].check_id == "performance.images",
+        "bound elements carry no measurable image: {:?}",
+        results
+            .iter()
+            .map(|result| format!("{}: {}", result.check_id, result.description))
+            .collect::<Vec<_>>()
+    );
+    let raw = results[0].raw_data.as_ref().expect("raw data");
+    // Three elements bind `src` itself and are not images this check can see.
+    // The fourth has a literal src and only binds `loading`, so it is a real
+    // image whose lazy-loading state alone is unreadable.
+    assert_eq!(raw["template_binding_elements"], 3);
+    assert!(
+        results[0]
+            .description
+            .contains("3 client-side template bindings"),
+        "{}",
+        results[0].description
+    );
+}
+
+#[test]
+fn a_runtime_bound_attribute_only_withdraws_the_sub_check_that_reads_it() {
+    // A literal src with `:width`/`:height` is still a gradeable image URL:
+    // dropping it from performance.images.format would hide a real finding.
+    let html = r#"<img src="/first.webp" width="8" height="6" loading="lazy">
+        <img src="/hero.png" :width="w" :height="h" :loading="mode">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+
+    let format = results
+        .iter()
+        .find(|result| result.check_id == "performance.images.format")
+        .expect("the legacy-looking src is still graded");
+    assert_eq!(format.raw_data.as_ref().unwrap()["legacy_looking_count"], 1);
+
+    assert!(
+        !results
+            .iter()
+            .any(|result| result.check_id == "performance.images.dimensions"),
+        "bound width/height is unreadable, not missing"
+    );
+    assert!(
+        !results
+            .iter()
+            .any(|result| result.check_id == "performance.images.lazy"),
+        "bound loading is unreadable, not missing"
+    );
+}
+
+#[test]
+fn a_bound_attribute_count_is_reported_next_to_the_finding_it_limits() {
+    let html = r#"<img src="/first.webp" width="8" height="6">
+        <img src="/second.webp" :loading="mode" width="8" height="6">
+        <img src="/third.webp" width="8" height="6">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    let lazy = results
+        .iter()
+        .find(|result| result.check_id == "performance.images.lazy")
+        .expect("the third image is a lazy candidate");
+
+    assert_eq!(
+        lazy.raw_data.as_ref().unwrap()["runtime_bound_loading_elements"],
+        1
+    );
+    assert!(
+        lazy.description
+            .contains("1 further element binds `loading` at runtime"),
+        "{}",
+        lazy.description
+    );
+}
+
+#[test]
+fn one_ungraded_element_is_described_in_the_singular() {
+    let html =
+        r#"<img src="/hero.webp" width="8" height="6"><img src="s.gif" width="1" height="1">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    assert!(
+        results[0]
+            .description
+            .contains("1 `<img>` element was not graded (1 tracking beacon or spacer)"),
+        "{}",
+        results[0].description
+    );
+}
+
+#[test]
+fn a_literal_source_with_a_bound_alt_is_still_a_real_image() {
+    // Only the bound attribute is unmeasurable; the element itself is real.
+    let html = r#"<img src="/first.webp" width="8" height="6">
+        <img src="/hero.png" :alt="product.title">"#;
+    let results = ImageOptimizationCheck.run(&ctx(html));
+    assert!(results
+        .iter()
+        .any(|result| result.check_id == "performance.images.format"));
+    assert!(results
+        .iter()
+        .any(|result| result.check_id == "performance.images.dimensions"));
 }
