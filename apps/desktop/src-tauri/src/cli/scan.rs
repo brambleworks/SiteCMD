@@ -54,7 +54,7 @@ async fn run_standard(
     let incomplete_reason: Option<String> = None;
 
     if args.json {
-        print_json(&scan);
+        print_json(&scan, incomplete_reason.as_deref());
     } else {
         print_text(&scan, incomplete_reason.as_deref());
     }
@@ -120,9 +120,12 @@ async fn run_diff(
     let mut new_scan = new_scan;
 
     #[cfg(feature = "browser")]
-    let _incomplete_reason = do_browser_analysis(&url, &args, &mut new_scan);
+    let incomplete_reason = do_browser_analysis(&url, &args, &mut new_scan);
 
-    print_diff(&old_scan, &new_scan);
+    #[cfg(not(feature = "browser"))]
+    let incomplete_reason: Option<String> = None;
+
+    print_diff(&old_scan, &new_scan, incomplete_reason.as_deref());
 
     // Overwrite `.sitecmd/` files.
     if let Err(e) = crate::cli::export::export_scan(&sitecmd_dir, &new_scan) {
@@ -200,6 +203,8 @@ async fn run_scan_inner(
         args.timeout,
         args.scan_type,
         false,
+        None,
+        // Single-page CLI scan: no other page to share stylesheets with.
         None,
     )
     .await
@@ -284,16 +289,28 @@ fn check_threshold(scan: &ScanResult, args: &ScanArgs) -> u8 {
     0
 }
 
-fn print_json(scan: &ScanResult) {
-    #[cfg(feature = "browser")]
-    {
-        // browser_analysis metadata is already merged into scan via append_webview_results
-        println!("{}", serde_json::to_string_pretty(scan).unwrap_or_default());
+fn print_json(scan: &ScanResult, incomplete_reason: Option<&str>) {
+    // Check results are already merged into `scan` by append_webview_results;
+    // what is not in there is why a layer produced none, which is exactly what
+    // a CI gate reading this JSON needs to tell an incomplete run from a clean
+    // one. Added at the edge rather than on ScanResult because it describes
+    // this invocation, not the persisted scan.
+    println!("{}", scan_json(scan, incomplete_reason));
+}
+
+/// The `--json` payload: the scan, plus the reason a layer of it did not run.
+fn scan_json(scan: &ScanResult, incomplete_reason: Option<&str>) -> String {
+    let mut payload = match serde_json::to_value(scan) {
+        Ok(value) => value,
+        Err(_) => return String::new(),
+    };
+    if let (Some(reason), Some(object)) = (incomplete_reason, payload.as_object_mut()) {
+        object.insert(
+            "incompleteReason".to_string(),
+            serde_json::Value::String(reason.to_string()),
+        );
     }
-    #[cfg(not(feature = "browser"))]
-    {
-        println!("{}", serde_json::to_string_pretty(scan).unwrap_or_default());
-    }
+    serde_json::to_string_pretty(&payload).unwrap_or_default()
 }
 
 fn severity_label(s: &Severity) -> &'static str {
@@ -378,7 +395,30 @@ pub fn print_text(result: &ScanResult, incomplete_accessibility: Option<&str>) {
     }
 }
 
-fn print_diff(old: &ScanResult, new: &ScanResult) {
+/// The lines above a diff's issue lists: what the score did, and the reason a
+/// layer of the new scan did not run.
+///
+/// A comparison is only meaningful between two scans that ran the same checks.
+/// When a layer is skipped, every issue it would have found reads as "fixed"
+/// against a complete previous scan, so the reason has to reach the reader of
+/// the comparison, not only the reader of a single scan.
+fn diff_header(
+    old: &ScanResult,
+    new: &ScanResult,
+    delta: &str,
+    incomplete_reason: Option<&str>,
+) -> String {
+    let mut header = format!(
+        "SiteCMD diff - {}\nScore: {} \u{2192} {} ({})\n\n",
+        new.url, old.overall_score, new.overall_score, delta
+    );
+    if let Some(reason) = incomplete_reason {
+        header.push_str(&format!("Accessibility incomplete: {}\n\n", reason));
+    }
+    header
+}
+
+fn print_diff(old: &ScanResult, new: &ScanResult, incomplete_reason: Option<&str>) {
     eprintln!(); // clear progress line
 
     let score_delta = new.overall_score as i32 - old.overall_score as i32;
@@ -388,11 +428,7 @@ fn print_diff(old: &ScanResult, new: &ScanResult) {
         format!("{}", score_delta)
     };
 
-    println!("SiteCMD diff - {}", new.url);
-    println!(
-        "Score: {} \u{2192} {} ({})\n",
-        old.overall_score, new.overall_score, delta_str
-    );
+    print!("{}", diff_header(old, new, &delta_str, incomplete_reason));
 
     // Build sets of check IDs from failing issues
     let old_failing = failing_check_ids(old);
@@ -578,6 +614,57 @@ mod tests {
                 "{artifact} should be written"
             );
         }
+    }
+
+    #[test]
+    fn a_skipped_browser_layer_states_its_reason_in_the_json_payload() {
+        // The JSON is what a CI gate reads. A run whose browser layer refused
+        // to grade must not look identical to one that graded a clean page.
+        let reason = "could not confirm which document was graded";
+        let payload: serde_json::Value =
+            serde_json::from_str(&scan_json(&scan(vec![]), Some(reason))).expect("valid JSON");
+        assert_eq!(
+            payload.get("incompleteReason").and_then(|v| v.as_str()),
+            Some(reason)
+        );
+        // Every field the payload already carried is still there.
+        assert_eq!(
+            payload.get("url").and_then(|v| v.as_str()),
+            Some("https://example.com")
+        );
+    }
+
+    #[test]
+    fn a_skipped_browser_layer_states_its_reason_in_the_diff_too() {
+        // `sitecmd scan --diff` is the other output a CI gate reads, and a skipped
+        // layer distorts a comparison more than a single scan: its issues
+        // vanish from the new side and read as fixed.
+        let reason = "could not confirm which document was graded";
+        let header = diff_header(&scan(vec![]), &scan(vec![]), "+0", Some(reason));
+        assert!(
+            header.contains(reason),
+            "the diff must state why the run was incomplete, got {header:?}"
+        );
+        assert!(header.contains("Score: 80 \u{2192} 80 (+0)"));
+    }
+
+    #[test]
+    fn a_complete_diff_claims_nothing_about_completeness() {
+        let header = diff_header(&scan(vec![]), &scan(vec![]), "+0", None);
+        assert!(
+            !header.contains("incomplete"),
+            "a complete run must not be labelled incomplete, got {header:?}"
+        );
+    }
+
+    #[test]
+    fn a_complete_run_carries_no_incomplete_reason() {
+        let payload: serde_json::Value =
+            serde_json::from_str(&scan_json(&scan(vec![]), None)).expect("valid JSON");
+        assert!(
+            payload.get("incompleteReason").is_none(),
+            "a complete run must not claim to be incomplete"
+        );
     }
 
     #[test]

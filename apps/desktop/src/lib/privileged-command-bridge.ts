@@ -196,11 +196,13 @@ export const NATIVE_INTENT_CONNECTOR_COMMANDS: ReadonlySet<string> = new Set([
 
 // Keep aligned with Rust's SENSITIVE_FILESYSTEM_ACCESS_COMMANDS.
 export const NATIVE_INTENT_FILESYSTEM_COMMANDS: ReadonlySet<string> = new Set([
+  "update_project_path",
   "open_path_in_editor",
   "reveal_path",
   "register_agent_tool",
   "unregister_agent_tool",
-  "launch_agent_handoff",
+  // launch_agent_handoff stays off this list on purpose: it only opens the
+  // agent's app with a prompt staged in its composer.
 ]);
 
 const BROKER_COMMAND_BY_SCOPE: Record<PrivilegedBridgeScope, PrivilegedBrokerCommand> = {

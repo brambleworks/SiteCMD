@@ -193,16 +193,12 @@ impl Database {
         self.dispatch_async(op, rx).await
     }
 
-    /// Async-aware mutable operation (transactions). No domain method calls
-    /// this yet (only `run` has a caller so far, in `get_project_path_async`);
-    /// it exists now so `run`/`run_mut` land as one pair and a later migration
-    /// commit only has to call it, not build it. Covered directly by
-    /// `run_mut_delivers_the_worker_s_value` in `db::tests`.
+    /// Async-aware mutable operation (transactions), used by the scan-run
+    /// persistence path in `persist_normalized_scan_run_async`.
     ///
     /// The closure is sent to the worker before this future first awaits,
     /// so it runs exactly once even if the caller's future is dropped; only
     /// the reply is lost on cancellation.
-    #[allow(dead_code)] // first write-path caller lands in a later migration commit
     pub(crate) async fn run_mut<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> T + Send + 'static,

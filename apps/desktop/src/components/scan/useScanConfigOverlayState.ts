@@ -25,7 +25,6 @@ import {
 } from "./scan-config-overlay-model";
 
 interface UseScanConfigOverlayStateOptions {
-  canUseAccessibilityDeepScan: boolean;
   initialAxeEnabled: boolean;
   initialScanType: ScanMode;
   onStart: (config: ScanConfig) => void;
@@ -36,7 +35,6 @@ interface UseScanConfigOverlayStateOptions {
 }
 
 export function useScanConfigOverlayState({
-  canUseAccessibilityDeepScan,
   initialAxeEnabled,
   initialScanType,
   onStart,
@@ -51,6 +49,9 @@ export function useScanConfigOverlayState({
   const [search, setSearch] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const [inspectLocalDatabases, setInspectLocalDatabases] = useState(false);
+  // The axe-core pass is part of the free local workbench, so it starts on
+  // and the switch exists to trade coverage for a faster run.
+  const [axeEnabled, setAxeEnabled] = useState(initialAxeEnabled);
   // Preserve the engine's scope refusal wording across every client.
   const [scopeError, setScopeError] = useState<string | null>(null);
   const [resolvedSiteId, setResolvedSiteId] = useState<number | undefined>(siteId);
@@ -69,7 +70,8 @@ export function useScanConfigOverlayState({
     initialScanType === "code" && !canUseCodeScan ? "web" : initialScanType;
   const scanType: ScanMode =
     requestedScanType !== "code" && !hasSite && canUseCodeScan ? "code" : requestedScanType;
-  const axeEnabled = scanType === "code" ? false : initialAxeEnabled && canUseAccessibilityDeepScan;
+  // Code-only runs have no page to load, so the browser pass cannot apply.
+  const accessibilityEnabled = scanType !== "code" && axeEnabled;
 
   const resolveThenLoad = useCallback(
     async (options?: { force?: boolean }) => {
@@ -193,7 +195,7 @@ export function useScanConfigOverlayState({
     }
     onStart({
       urls,
-      axeEnabled: canUseAccessibilityDeepScan ? axeEnabled : false,
+      axeEnabled: accessibilityEnabled,
       inspectLocalDatabases,
       scanType,
     });
@@ -218,8 +220,7 @@ export function useScanConfigOverlayState({
         });
     }
   }, [
-    axeEnabled,
-    canUseAccessibilityDeepScan,
+    accessibilityEnabled,
     hasSite,
     inspectLocalDatabases,
     onStart,
@@ -240,7 +241,8 @@ export function useScanConfigOverlayState({
     : { label: "Full Web", description: "All web categories" };
 
   return {
-    axeEnabled,
+    axeEnabled: accessibilityEnabled,
+    setAxeEnabled,
     canUseCodeScan,
     discovering,
     filtered,

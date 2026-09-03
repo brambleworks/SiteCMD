@@ -2,8 +2,6 @@
 
 use rusqlite::Connection;
 
-use crate::checks::CheckStatus;
-
 use super::helpers::parse_required_enum;
 use super::{Database, DbError};
 
@@ -99,11 +97,32 @@ fn load_normalized_findings(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(findings)
 }
+
 impl Database {
-    #[tracing::instrument(skip(self), fields(execution_id))]
+    /// The whole execution: every run, each with all of its findings.
     pub fn get_scan_execution_detail(
         &self,
         execution_id: i64,
+    ) -> Result<Option<crate::core::scan_execution::ScanExecutionDetail>, DbError> {
+        self.load_scan_execution_detail(execution_id, None)
+    }
+
+    /// One run of an execution. The summary still describes the whole
+    /// execution; only the returned run details, and the findings read out of
+    /// SQLite at all, are narrowed to `run_id`.
+    pub fn get_scan_execution_detail_for_run(
+        &self,
+        execution_id: i64,
+        run_id: i64,
+    ) -> Result<Option<crate::core::scan_execution::ScanExecutionDetail>, DbError> {
+        self.load_scan_execution_detail(execution_id, Some(run_id))
+    }
+
+    #[tracing::instrument(skip(self), fields(execution_id, run_filter))]
+    fn load_scan_execution_detail(
+        &self,
+        execution_id: i64,
+        run_filter: Option<i64>,
     ) -> Result<Option<crate::core::scan_execution::ScanExecutionDetail>, DbError> {
         let Some(execution) = self.get_scan_execution(execution_id)? else {
             return Ok(None);
@@ -130,12 +149,13 @@ impl Database {
                 )
                 .map_err(DbError::from)
             })??;
-        let runs = self.execute(move |conn| {
+        let (runs, run_summaries) = self.execute(move |conn| {
             let mut statement = conn.prepare(
                 "SELECT id, parent_run_id, source, run_kind, status,
-                        timestamp_text, started_at, completed_at, raw_score,
-                        duration_ms, coverage_json, diagnostics_json,
-                        status_detail, detail_state
+                        timestamp_text, raw_score, duration_ms, issues_total,
+                        issues_critical, issues_high, issues_medium, issues_low,
+                        diagnostics_json, started_at, completed_at,
+                        coverage_json, status_detail, detail_state
                  FROM scan_runs
                  WHERE execution_id = ?1
                  ORDER BY CASE run_kind
@@ -145,63 +165,80 @@ impl Database {
                      ELSE 3 END,
                      started_at, id",
             )?;
+            // Each row yields the run's summary plus the extra columns only the
+            // detail carries. The stored issue counts are written from the run's
+            // findings in the same transaction that inserts them, so a summary
+            // never depends on the caller having read those findings back.
             let headers = statement
                 .query_map([execution_id], |row| {
                     Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, Option<i64>>(1)?,
-                        parse_required_enum(2, "scan_runs.source", &row.get::<_, String>(2)?)?,
-                        parse_required_enum(3, "scan_runs.run_kind", &row.get::<_, String>(3)?)?,
-                        parse_required_enum(4, "scan_runs.status", &row.get::<_, String>(4)?)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, Option<i64>>(7)?,
-                        row.get::<_, Option<u32>>(8)?,
-                        super::from_row::row_u64(row, 9)?,
-                        json_column(row, 10, "scan_runs.coverage_json")?,
-                        json_column(row, 11, "scan_runs.diagnostics_json")?,
-                        row.get::<_, Option<String>>(12)?,
-                        row.get::<_, String>(13)?,
+                        crate::core::scan_execution::ScanRunSummary {
+                            id: row.get(0)?,
+                            parent_run_id: row.get(1)?,
+                            source: parse_required_enum(
+                                2,
+                                "scan_runs.source",
+                                &row.get::<_, String>(2)?,
+                            )?,
+                            run_kind: parse_required_enum(
+                                3,
+                                "scan_runs.run_kind",
+                                &row.get::<_, String>(3)?,
+                            )?,
+                            status: parse_required_enum(
+                                4,
+                                "scan_runs.status",
+                                &row.get::<_, String>(4)?,
+                            )?,
+                            timestamp: row.get(5)?,
+                            raw_score: row.get(6)?,
+                            duration_ms: super::from_row::row_u64(row, 7)?,
+                            issues_total: row.get(8)?,
+                            issues_critical: row.get(9)?,
+                            issues_high: row.get(10)?,
+                            issues_medium: row.get(11)?,
+                            issues_low: row.get(12)?,
+                            diagnostics: json_column(row, 13, "scan_runs.diagnostics_json")?,
+                        },
+                        (
+                            row.get::<_, i64>(14)?,
+                            row.get::<_, Option<i64>>(15)?,
+                            json_column(row, 16, "scan_runs.coverage_json")?,
+                            row.get::<_, Option<String>>(17)?,
+                            row.get::<_, String>(18)?,
+                        ),
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             let mut runs = Vec::with_capacity(headers.len());
-            for (
-                id,
-                parent_run_id,
-                source,
-                run_kind,
-                status,
-                timestamp,
-                started_at,
-                completed_at,
-                raw_score,
-                duration_ms,
-                coverage,
-                diagnostics,
-                status_detail,
-                detail_state,
-            ) in headers
+            let mut run_summaries = Vec::with_capacity(headers.len());
+            for (summary, (started_at, completed_at, coverage, status_detail, detail_state)) in
+                headers
             {
                 runs.push(crate::core::scan_execution::ScanRunDetail {
-                    id,
-                    parent_run_id,
-                    source,
-                    run_kind,
-                    status,
-                    timestamp,
+                    id: summary.id,
+                    parent_run_id: summary.parent_run_id,
+                    source: summary.source,
+                    run_kind: summary.run_kind,
+                    status: summary.status,
+                    timestamp: summary.timestamp.clone(),
                     started_at,
                     completed_at,
-                    raw_score,
-                    duration_ms,
+                    raw_score: summary.raw_score,
+                    duration_ms: summary.duration_ms,
                     coverage,
-                    diagnostics,
+                    diagnostics: summary.diagnostics.clone(),
                     status_detail,
                     detail_state,
-                    findings: load_normalized_findings(conn, id)?,
+                    findings: if run_filter.is_none_or(|requested| requested == summary.id) {
+                        load_normalized_findings(conn, summary.id)?
+                    } else {
+                        Vec::new()
+                    },
                 });
+                run_summaries.push(summary);
             }
-            Ok::<_, DbError>(runs)
+            Ok::<_, DbError>((runs, run_summaries))
         })??;
         let latest_run = |kind| {
             runs.iter()
@@ -238,73 +275,14 @@ impl Database {
             )
             .unwrap_or(u32::MAX),
             code_scan_id: latest_run(crate::core::normalized_scan::ScanRunKind::Code),
-            runs: runs
-                .iter()
-                .map(|run| crate::core::scan_execution::ScanRunSummary {
-                    id: run.id,
-                    parent_run_id: run.parent_run_id,
-                    source: run.source,
-                    run_kind: run.run_kind,
-                    status: run.status,
-                    timestamp: run.timestamp.clone(),
-                    raw_score: run.raw_score,
-                    duration_ms: run.duration_ms,
-                    issues_total: u32::try_from(
-                        run.findings
-                            .iter()
-                            .filter(|finding| {
-                                matches!(finding.verdict, CheckStatus::Fail | CheckStatus::Warn)
-                            })
-                            .count(),
-                    )
-                    .unwrap_or(u32::MAX),
-                    issues_critical: u32::try_from(
-                        run.findings
-                            .iter()
-                            .filter(|finding| {
-                                matches!(finding.verdict, CheckStatus::Fail | CheckStatus::Warn)
-                                    && finding.severity == crate::checks::Severity::Critical
-                            })
-                            .count(),
-                    )
-                    .unwrap_or(u32::MAX),
-                    issues_high: u32::try_from(
-                        run.findings
-                            .iter()
-                            .filter(|finding| {
-                                matches!(finding.verdict, CheckStatus::Fail | CheckStatus::Warn)
-                                    && finding.severity == crate::checks::Severity::High
-                            })
-                            .count(),
-                    )
-                    .unwrap_or(u32::MAX),
-                    issues_medium: u32::try_from(
-                        run.findings
-                            .iter()
-                            .filter(|finding| {
-                                matches!(finding.verdict, CheckStatus::Fail | CheckStatus::Warn)
-                                    && finding.severity == crate::checks::Severity::Medium
-                            })
-                            .count(),
-                    )
-                    .unwrap_or(u32::MAX),
-                    issues_low: u32::try_from(
-                        run.findings
-                            .iter()
-                            .filter(|finding| {
-                                matches!(finding.verdict, CheckStatus::Fail | CheckStatus::Warn)
-                                    && finding.severity == crate::checks::Severity::Low
-                            })
-                            .count(),
-                    )
-                    .unwrap_or(u32::MAX),
-                    diagnostics: run.diagnostics.clone(),
-                })
-                .collect(),
+            runs: run_summaries,
         };
         Ok(Some(crate::core::scan_execution::ScanExecutionDetail {
             summary,
-            runs,
+            runs: match run_filter {
+                Some(requested) => runs.into_iter().filter(|run| run.id == requested).collect(),
+                None => runs,
+            },
         }))
     }
 
@@ -355,3 +333,7 @@ impl Database {
         })?
     }
 }
+
+#[cfg(test)]
+#[path = "scan_execution_detail_tests.rs"]
+mod tests;

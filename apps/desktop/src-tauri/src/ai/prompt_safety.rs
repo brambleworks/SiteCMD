@@ -27,9 +27,37 @@ pub(crate) fn quote_untrusted_prompt_text(value: &str, max_chars: usize) -> Stri
     escaped
 }
 
+/// Quote untrusted text and indent it as a Markdown code block so it renders
+/// as literal evidence. Indented rather than fenced because a fence can be
+/// closed by the content; an indented block cannot be escaped from. This is
+/// what keeps a scanned `<title>` like `![x](https://evil/p.png)` from
+/// becoming a live image or link when the prompt is shown in the app.
+pub(crate) fn quote_untrusted_prompt_block(value: &str, max_chars: usize) -> String {
+    quote_untrusted_prompt_text(value, max_chars)
+        .lines()
+        .map(|line| format!("    {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::quote_untrusted_prompt_text;
+    use super::{quote_untrusted_prompt_block, quote_untrusted_prompt_text};
+
+    #[test]
+    fn quoted_prompt_block_indents_every_line_so_markdown_cannot_render_it() {
+        let block = quote_untrusted_prompt_block(
+            "![beacon](https://attacker.example/p.png)\n[phish](https://attacker.example/x)\n```",
+            200,
+        );
+
+        for line in block.lines() {
+            assert!(line.starts_with("    "), "unindented line: {line:?}");
+        }
+        assert!(block.contains("    ![beacon](https://attacker.example/p.png)"));
+        assert!(block.contains("    [phish](https://attacker.example/x)"));
+        assert!(block.contains("    ```"));
+    }
 
     #[test]
     fn quoted_prompt_data_cannot_close_the_trusted_delimiter() {

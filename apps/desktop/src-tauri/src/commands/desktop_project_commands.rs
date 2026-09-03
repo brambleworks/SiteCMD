@@ -178,21 +178,28 @@ fn package_manager_script_alias_must_run_manually(executable: &str, args: &[Stri
     let command = args.first().map(String::as_str).unwrap_or_default();
     let subcommand = args.get(1).map(String::as_str).unwrap_or_default();
     match executable {
-        "npm" => matches!(
-            command,
-            "build"
-                | "exec"
-                | "explore"
-                | "rebuild"
-                | "restart"
-                | "run"
-                | "start"
-                | "stop"
-                | "test"
-                | "uninstall"
-                | "remove"
-                | "x"
-        ),
+        "npm" => {
+            // Default-deny like the other package managers: npm resolves
+            // aliases (`run-script`, `rum`, `urn`, `t`, `rb`, `un`, `it`,
+            // `ic`, ...) and unambiguous prefixes, so a denylist of canonical
+            // names can never be complete.
+            const SAFE_COMMANDS: &[&str] = &["add", "ci", "i", "install", "up", "update"];
+            matches!(
+                command,
+                "build"
+                    | "exec"
+                    | "explore"
+                    | "rebuild"
+                    | "restart"
+                    | "run"
+                    | "start"
+                    | "stop"
+                    | "test"
+                    | "uninstall"
+                    | "remove"
+                    | "x"
+            ) || (!command.is_empty() && !SAFE_COMMANDS.contains(&command))
+        }
         "pnpm" => {
             const SAFE_COMMANDS: &[&str] = &["add", "i", "install", "up", "update"];
             matches!(

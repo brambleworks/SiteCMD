@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
-import { AddProjectOverlay } from "@/app/AddProjectOverlay";
 import type { AppShellHooks } from "@/app/AppProviders";
 import { AppRoutes } from "@/app/AppRoutes";
 import { HistoryProvider } from "@/app/HistoryProvider";
@@ -8,7 +7,13 @@ import { NavigationProvider } from "@/app/NavigationProvider";
 import { useAppProjectCreation } from "@/app/useAppProjectCreation";
 import { useAppScanActions } from "@/app/useAppScanActions";
 import { useBaselineScanQueue } from "@/app/useBaselineScanQueue";
-import { FirstRunWalkthrough } from "@/app/lazy-pages";
+import {
+  AddProjectOverlay,
+  CommandPalette,
+  FirstRunWalkthrough,
+  ScanSummaryOverlay,
+  TelemetryConsentPrompt,
+} from "@/app/lazy-pages";
 import { StartupShell } from "@/app/StartupShell";
 import {
   createProjectDeletedHandler,
@@ -30,13 +35,10 @@ import { TopBar } from "@/components/layout/TopBar";
 import { UpdateBanner } from "@/components/layout/UpdateBanner";
 import { JobsTray } from "@/components/layout/JobsTray";
 import { ValidationStaleBanner } from "@/components/billing/ValidationStaleBanner";
-import { TelemetryConsentPrompt } from "@/components/privacy/TelemetryConsentPrompt";
 import { useHasCompletedFirstScan } from "@/lib/onboarding-flags";
 import { useLicenseActivateDeepLink } from "@/hooks/useLicenseActivateDeepLink";
 import { NavSidebar, type NavTarget } from "@/components/layout/NavSidebar";
 import { toNavPage } from "@/components/layout/nav-page";
-import { CommandPalette } from "@/components/layout/CommandPalette";
-import { ScanSummaryOverlay } from "@/components/scan/ScanSummaryOverlay";
 import { useToast } from "@/hooks/useToast";
 import { useRenderSanityCheck } from "@/lib/render-sanity";
 import { useAlerts } from "@/hooks/useAlerts";
@@ -48,8 +50,15 @@ import { useDesktopPrefs } from "@/lib/desktop-prefs";
 import { readPersistedShellPage, writePersistedShellPage } from "@/lib/app-shell-state";
 import { useAppShellOrchestration } from "@/hooks/useAppShellOrchestration";
 import { type PostScanFollowUpBanner } from "@/lib/scan-follow-up";
-import { loadPrimaryWorkflowCue } from "@/lib/scan-completion-effects";
 import { readOnboardingSetupSteps, removeOnboardingSetupStep } from "@/lib/onboarding-setup";
+
+// Scheduled-scan copy is the only shell caller of the completion module, and it
+// runs long after first paint, so the cue loads with the same lazy chunk as the
+// completion handlers.
+const loadPrimaryWorkflowCue = async (
+  projectId: number | null | undefined,
+  url: string | null | undefined,
+) => (await import("@/lib/scan-completion-effects")).loadPrimaryWorkflowCue(projectId, url);
 
 export function AppContent({ scanHook, historyHook }: AppShellHooks) {
   useRenderSanityCheck("AppContent");
@@ -181,7 +190,8 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
   const runProjectBaselineScan = useCallback(() => {
     // Empty urls: planScan falls back to the active environment URL, which is
     // fresh by the time the queue fires this.
-    void handleScan({ urls: [], axeEnabled: false, scanType: "full" });
+    // The baseline carries the axe pass so later runs compare like for like.
+    void handleScan({ urls: [], axeEnabled: true, scanType: "full" });
   }, [handleScan]);
 
   const { queueBaselineScan } = useBaselineScanQueue({
@@ -493,26 +503,38 @@ export function AppContent({ scanHook, historyHook }: AppShellHooks) {
         </main>
       </div>
       {showAddProject && (
-        <AddProjectOverlay
-          onCreated={handleProjectCreated}
-          onCancel={closeAddProject}
-          onNavigate={navigateTo}
-        />
+        <Suspense fallback={null}>
+          <AddProjectOverlay
+            onCreated={handleProjectCreated}
+            onCancel={closeAddProject}
+            onNavigate={navigateTo}
+          />
+        </Suspense>
       )}
-      <CommandPalette
-        open={showCommandPalette}
-        onClose={closeCommandPalette}
-        onNavigate={navigateTo}
-        onAction={handleCommandAction}
-      />
-      {showScanSummary && scanSummary ? (
-        <ScanSummaryOverlay
-          summary={scanSummary}
-          onClose={closeScanSummary}
-          onReviewIssues={reviewScanSummaryIssues}
-        />
+      {showCommandPalette ? (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open
+            onClose={closeCommandPalette}
+            onNavigate={navigateTo}
+            onAction={handleCommandAction}
+          />
+        </Suspense>
       ) : null}
-      {showTelemetryConsentPrompt ? <TelemetryConsentPrompt /> : null}
+      {showScanSummary && scanSummary ? (
+        <Suspense fallback={null}>
+          <ScanSummaryOverlay
+            summary={scanSummary}
+            onClose={closeScanSummary}
+            onReviewIssues={reviewScanSummaryIssues}
+          />
+        </Suspense>
+      ) : null}
+      {showTelemetryConsentPrompt ? (
+        <Suspense fallback={null}>
+          <TelemetryConsentPrompt />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

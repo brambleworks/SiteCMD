@@ -13,11 +13,14 @@ describe("Markdown sanitization", () => {
     expect(container.innerHTML).not.toContain("<script");
   });
 
-  it("strips javascript: hrefs from markdown links", async () => {
+  it("renders a javascript: link as inert text, not an anchor", async () => {
     const { container } = render(<Markdown>{"[click](javascript:alert('xss'))"}</Markdown>);
-    await waitFor(() => expect(container.querySelector("a")).not.toBeNull());
-    const href = container.querySelector("a")?.getAttribute("href") ?? "";
-    expect(href.toLowerCase()).not.toContain("javascript:");
+    await waitFor(() => expect(container.querySelector(".markdown-body p")).not.toBeNull());
+    // rehype-sanitize drops the href and the renderer drops the anchor with it,
+    // so the label survives as plain text with nothing to click.
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain("click");
+    expect(container.innerHTML.toLowerCase()).not.toContain("javascript:");
   });
 
   it("shows the raw text while the renderer chunk loads", () => {

@@ -144,8 +144,8 @@ pub fn build_code_fix_prompt_with_framework(issue: &CodeIssue, framework: &str) 
         .as_ref()
         .map(|value| {
             format!(
-                "\n\n## Evidence\n{}",
-                super::prompt_safety::quote_untrusted_prompt_text(value, 1500)
+                "\n\n## Evidence\n\n{}",
+                super::prompt_safety::quote_untrusted_prompt_block(value, 1500)
             )
         })
         .unwrap_or_default();
@@ -155,8 +155,8 @@ pub fn build_code_fix_prompt_with_framework(issue: &CodeIssue, framework: &str) 
         .as_ref()
         .map(|value| {
             format!(
-                "\n\n## Source Excerpt (secrets pre-redacted)\n{}",
-                super::prompt_safety::quote_untrusted_prompt_text(value, 2000),
+                "\n\n## Source Excerpt (secrets pre-redacted)\n\n{}",
+                super::prompt_safety::quote_untrusted_prompt_block(value, 2000),
             )
         })
         .unwrap_or_default();

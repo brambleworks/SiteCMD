@@ -421,3 +421,43 @@ fn every_kind_states_whether_it_observes_routes() {
         );
     }
 }
+
+#[test]
+fn the_route_bound_never_hides_a_route_the_claim_covers() {
+    let coverage = ScanCoverageManifest::derive(
+        ScanCoverageKind::PageSet,
+        vec![
+            "https://example.com/a".into(),
+            "https://example.com/b".into(),
+        ],
+        &[
+            outcome("https://example.com/a", "security.csp", CheckStatus::Pass),
+            outcome("https://example.com/b", "security.csp", CheckStatus::Pass),
+        ],
+        ClaimBasis::PerRoute,
+    );
+
+    let bound = coverage.route_bound().expect("a page run observes routes");
+    assert_eq!(bound, ["https://example.com/a", "https://example.com/b"]);
+    for route in bound {
+        assert!(coverage.covers(Some(route), "security.csp"));
+    }
+    assert!(
+        !coverage.covers(Some("https://example.com/c"), "security.csp"),
+        "a reader may skip every route outside the bound because the claim refuses them"
+    );
+}
+
+#[test]
+fn a_project_claim_states_no_route_bound() {
+    let coverage = ScanCoverageManifest::declared(
+        ScanCoverageKind::Project,
+        Vec::new(),
+        vec!["code_scan.security".into()],
+    );
+
+    assert!(
+        coverage.route_bound().is_none(),
+        "a project claim covers any route, so no reader may narrow by route"
+    );
+}

@@ -44,6 +44,12 @@ impl std::error::Error for BodyReadError {
 
 /// Read an HTTP response body without allowing chunked or dishonest responses
 /// to allocate beyond the caller's byte budget.
+///
+/// `max_bytes` bounds the bytes this function yields, which for a compressed
+/// response are the decoded bytes: reqwest strips `Content-Length` when it
+/// decodes, so the declared-length shortcut cannot be used to smuggle a small
+/// wire body that inflates past the cap, and the chunk loop measures what the
+/// decoder produced.
 pub async fn read_body_limited(
     mut response: reqwest::Response,
     max_bytes: u64,
@@ -107,7 +113,51 @@ where
     serde_json::from_slice(&body).map_err(|error| format!("invalid JSON response: {error}"))
 }
 
-/// Shared HTTP client for production URLs.
+/// The whole reason a request failed, including the causes the top-level
+/// message hides.
+///
+/// reqwest's `Display` renders only its own layer, so an expired certificate,
+/// a refused connection, and a name that does not resolve all reach the user
+/// as the same sentence: "error sending request for url (...)". Every one of
+/// those reasons is already sitting in the error's source chain, which is
+/// where the TLS verifier's "certificate is expired" lives. This appends each
+/// layer that says something the text so far does not, so the reported reason
+/// is the runtime's own words rather than a phrase list this code would have
+/// to keep in step with reqwest, hyper, and rustls.
+pub fn describe_request_error(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut described = error.to_string();
+    let mut current = error.source();
+    while let Some(layer) = current {
+        let text = layer.to_string();
+        if !text.is_empty() && !described.contains(&text) {
+            described.push_str(": ");
+            described.push_str(&text);
+        }
+        current = layer.source();
+    }
+    described
+}
+
+/// The message for a page fetch that never produced a response, shared by the
+/// scan and verification paths so both name the same cause the same way.
+pub fn fetch_failure(url: impl fmt::Display, error: &(dyn std::error::Error + 'static)) -> String {
+    format!("Failed to fetch {}: {}", url, describe_request_error(error))
+}
+
+/// Negotiate response compression for ordinary traffic.
+///
+/// reqwest decodes gzip and brotli transparently, and the limited body readers
+/// above count the decoded chunks, so a caller's byte cap bounds what a
+/// compressed response is allowed to expand into rather than only what crossed
+/// the wire. deflate stays off because origins implement it inconsistently, and
+/// zstd stays off because it would add a C library to the build; both are
+/// disabled explicitly so a transitive feature cannot switch them on.
+fn negotiate_bounded_compression(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder.gzip(true).brotli(true).no_deflate().no_zstd()
+}
+
+/// Shared HTTP client for production URLs, and the ordinary-traffic client for
+/// registry metadata, integration APIs, and page fetches.
 /// Reuses TCP/TLS connections across requests.
 pub fn client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
@@ -115,7 +165,7 @@ pub fn client() -> &'static Client {
         // call `run()` (the CLI, examples) still need a crypto provider
         // installed before a client with a rustls backend can be built.
         let _ = rustls::crypto::ring::default_provider().install_default();
-        Client::builder()
+        negotiate_bounded_compression(Client::builder())
             .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
             .user_agent(crate::constants::USER_AGENT.as_str())
             .redirect(safe_redirect_policy(false))
@@ -131,7 +181,7 @@ pub fn client() -> &'static Client {
 pub fn localhost_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        Client::builder()
+        negotiate_bounded_compression(Client::builder())
             .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
             .user_agent(crate::constants::USER_AGENT.as_str())
             .redirect(safe_redirect_policy(true))
@@ -145,10 +195,12 @@ pub fn localhost_client() -> &'static Client {
 
 /// HTTP client that does NOT follow redirects.
 /// Used by redirect chain checks, HTTPS enforcement, and open redirect detection.
+/// These read the status line, `location`, and bounded bodies, never a
+/// wire-level size or encoding, so they are ordinary traffic.
 pub fn no_redirect_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        Client::builder()
+        negotiate_bounded_compression(Client::builder())
             .timeout(crate::constants::CHECK_PROBE_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .user_agent(crate::constants::USER_AGENT.as_str())
@@ -163,7 +215,7 @@ pub fn no_redirect_client() -> &'static Client {
 pub fn credentialed_service_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        Client::builder()
+        negotiate_bounded_compression(Client::builder())
             .timeout(crate::constants::API_TIMEOUT_SHORT)
             .redirect(reqwest::redirect::Policy::none())
             .user_agent(crate::constants::USER_AGENT.as_str())
@@ -179,6 +231,14 @@ pub fn webhook_client() -> &'static Client {
 }
 
 /// Policy-guarded client that preserves raw content-encoding responses.
+///
+/// Measurement probes fetch through this client, never through the shared
+/// ordinary-traffic clients above. They report what the server actually sent:
+/// `performance.compression` grades the `Content-Encoding` header, which
+/// transparent decoding removes, and the asset sampler reports transfer size,
+/// which decoding would inflate to the decompressed size. Auto-decompression is
+/// therefore turned off for every codec, deflate and zstd included, so enabling
+/// their crate features later cannot silently start decoding here.
 pub fn no_decompress_client(is_strict_local: bool) -> &'static Client {
     static STRICT: LazyLock<Client> = LazyLock::new(|| build_no_decompress_client(true));
     static PUBLIC: LazyLock<Client> = LazyLock::new(|| build_no_decompress_client(false));
@@ -200,6 +260,7 @@ fn build_no_decompress_client(is_strict_local: bool) -> Client {
         .no_gzip()
         .no_brotli()
         .no_deflate()
+        .no_zstd()
         .build()
         .expect("Failed to build no-decompress HTTP client")
 }
@@ -235,11 +296,169 @@ fn safe_redirect_policy(allow_local_dev: bool) -> reqwest::redirect::Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     fn ptr<T>(r: &T) -> *const T {
         r as *const T
+    }
+
+    /// gzip a payload the way an origin would, so the tests exercise a real
+    /// decoder rather than a hand-written byte fixture.
+    fn gzip(payload: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(payload).expect("gzip the test payload");
+        encoder.finish().expect("finish the gzip stream")
+    }
+
+    /// Answer exactly one request with a `Content-Encoding: gzip` body and
+    /// hand back the request head the client sent.
+    async fn serve_one_gzip_response(listener: TcpListener, body: Vec<u8>) -> String {
+        let (mut stream, _) = listener.accept().await.expect("accept gzip request");
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).await.expect("read request head");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream
+            .write_all(head.as_bytes())
+            .await
+            .expect("write response head");
+        stream.write_all(&body).await.expect("write gzip body");
+        stream.shutdown().await.expect("close gzip response");
+        String::from_utf8_lossy(&request).into_owned()
+    }
+
+    /// Bind a loopback server serving one gzip response, returning its URL and
+    /// the join handle carrying the observed request head.
+    async fn gzip_server(body: Vec<u8>) -> (String, tokio::task::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind gzip server");
+        let addr = listener.local_addr().expect("gzip server address");
+        let served = tokio::spawn(serve_one_gzip_response(listener, body));
+        (format!("http://{addr}/payload"), served)
+    }
+
+    #[tokio::test]
+    async fn ordinary_clients_negotiate_gzip_and_decode_transparently() {
+        let payload = "SiteCMD registry metadata compresses well. ".repeat(200);
+        for (label, ordinary) in [
+            ("production", client()),
+            ("localhost", localhost_client()),
+            ("no-redirect", no_redirect_client()),
+            ("credentialed service", credentialed_service_client()),
+        ] {
+            let (url, served) = gzip_server(gzip(payload.as_bytes())).await;
+            let response = ordinary
+                .get(&url)
+                .send()
+                .await
+                .unwrap_or_else(|error| panic!("{label} client request failed: {error}"));
+
+            assert!(
+                response.headers().get("content-encoding").is_none(),
+                "{label} client must consume Content-Encoding while decoding, not pass it through"
+            );
+
+            let body = read_text_limited(response, 1024 * 1024, std::time::Duration::from_secs(5))
+                .await
+                .unwrap_or_else(|error| panic!("{label} client body read failed: {error}"));
+            assert_eq!(
+                body, payload,
+                "{label} client must hand callers the decoded body"
+            );
+
+            let request = served.await.expect("gzip server task").to_ascii_lowercase();
+            let accept_encoding = request
+                .lines()
+                .find(|line| line.starts_with("accept-encoding:"))
+                .unwrap_or_else(|| {
+                    panic!("{label} client sent no Accept-Encoding header:\n{request}")
+                });
+            assert!(
+                accept_encoding.contains("gzip"),
+                "{label} client must offer gzip, got `{accept_encoding}`"
+            );
+            assert!(
+                accept_encoding.contains("br"),
+                "{label} client must offer brotli, got `{accept_encoding}`"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn body_limit_rejects_a_response_that_inflates_past_the_cap() {
+        // 256 KiB of one repeated byte: a few hundred bytes on the wire, far
+        // past the cap once decoded. Bounding only the wire bytes would accept
+        // it, which is the zip-bomb shape this cap exists to refuse.
+        let inflated = vec![b'a'; 256 * 1024];
+        let compressed = gzip(&inflated);
+        let max_bytes = 4096;
+        assert!(
+            (compressed.len() as u64) < max_bytes,
+            "fixture must be under the cap on the wire, got {} bytes",
+            compressed.len()
+        );
+
+        let (url, served) = gzip_server(compressed).await;
+        let response = client().get(&url).send().await.expect("request gzip bomb");
+        let result =
+            read_body_limited(response, max_bytes, std::time::Duration::from_secs(5)).await;
+
+        assert!(
+            matches!(
+                result,
+                Err(BodyReadError::TooLarge {
+                    max_bytes: 4096,
+                    ..
+                })
+            ),
+            "the cap must apply to decoded bytes, got {result:?}"
+        );
+        let _ = served.await;
+    }
+
+    #[tokio::test]
+    async fn measurement_probe_client_returns_the_raw_encoded_body() {
+        let payload = "measurement probes grade the wire response. ".repeat(64);
+        let compressed = gzip(payload.as_bytes());
+        let (url, served) = gzip_server(compressed.clone()).await;
+
+        let response = no_decompress_client(false)
+            .get(&url)
+            // The compression check sends this header explicitly; the client
+            // must still refuse to decode what comes back.
+            .header("Accept-Encoding", "gzip, deflate, br, zstd")
+            .send()
+            .await
+            .expect("probe the gzip response");
+
+        assert_eq!(
+            response
+                .headers()
+                .get("content-encoding")
+                .and_then(|value| value.to_str().ok()),
+            Some("gzip"),
+            "the probe client must preserve Content-Encoding for the compression check to grade"
+        );
+        let body = read_body_limited(response, 1024 * 1024, std::time::Duration::from_secs(5))
+            .await
+            .expect("read the raw probe body");
+        assert_eq!(
+            body, compressed,
+            "the probe client must hand back the bytes the server sent, not the decoded payload"
+        );
+        let _ = served.await;
     }
 
     #[test]
@@ -283,6 +502,111 @@ mod tests {
         assert_ne!(ptr(webhook_client()), ptr(no_redirect_client()));
         assert_ne!(ptr(webhook_client()), ptr(localhost_client()));
         assert_eq!(ptr(webhook_client()), ptr(credentialed_service_client()));
+    }
+
+    /// One layer of a synthetic error chain shaped like reqwest's.
+    #[derive(Debug)]
+    struct Layer {
+        message: String,
+        source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    }
+
+    impl Layer {
+        fn leaf(message: &str) -> Self {
+            Self {
+                message: message.to_string(),
+                source: None,
+            }
+        }
+
+        fn wrapping(message: &str, source: Layer) -> Self {
+            Self {
+                message: message.to_string(),
+                source: Some(Box::new(source)),
+            }
+        }
+    }
+
+    impl fmt::Display for Layer {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(&self.message)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.source.as_deref().map(|source| source as _)
+        }
+    }
+
+    #[test]
+    fn an_expired_certificate_reaches_the_user_as_an_expired_certificate() {
+        // The shape the CLI hit on expired.badssl.com: reqwest names only the
+        // URL, and the verifier's reason is two layers down.
+        let error = Layer::wrapping(
+            "error sending request for url (https://expired.badssl.com/)",
+            Layer::wrapping(
+                "client error (Connect)",
+                Layer::leaf(
+                    "invalid peer certificate: Other(OtherError(\"\\\"*.badssl.com\\\" certificate is expired: -67818\"))",
+                ),
+            ),
+        );
+        assert!(
+            !error.to_string().contains("certificate is expired"),
+            "negative control: the top-level message alone must not already carry the reason, or this test proves nothing"
+        );
+        let described = describe_request_error(&error);
+        assert!(
+            described.contains("certificate is expired"),
+            "the verifier's reason must survive the walk, got {described}"
+        );
+        assert!(
+            described.starts_with("error sending request for url"),
+            "the top-level message stays first, got {described}"
+        );
+    }
+
+    #[test]
+    fn a_refused_connection_and_a_missing_name_stay_distinguishable() {
+        let refused = describe_request_error(&Layer::wrapping(
+            "error sending request for url (http://example.com/)",
+            Layer::wrapping(
+                "tcp connect error",
+                Layer::leaf("Connection refused (os error 61)"),
+            ),
+        ));
+        assert!(refused.contains("Connection refused"), "got {refused}");
+
+        let unresolved = describe_request_error(&Layer::wrapping(
+            "error sending request for url (http://nope.invalid/)",
+            Layer::wrapping(
+                "dns error",
+                Layer::leaf("failed to lookup address information"),
+            ),
+        ));
+        assert!(
+            unresolved.contains("failed to lookup address information"),
+            "got {unresolved}"
+        );
+        assert_ne!(refused, unresolved);
+    }
+
+    #[test]
+    fn a_cause_already_quoted_by_its_wrapper_is_not_repeated() {
+        let described = describe_request_error(&Layer::wrapping(
+            "invalid peer certificate: expired",
+            Layer::leaf("expired"),
+        ));
+        assert_eq!(described, "invalid peer certificate: expired");
+    }
+
+    #[test]
+    fn an_error_without_a_cause_is_reported_unchanged() {
+        assert_eq!(
+            describe_request_error(&Layer::leaf("too many redirects")),
+            "too many redirects"
+        );
     }
 
     #[tokio::test]

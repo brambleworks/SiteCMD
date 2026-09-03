@@ -105,6 +105,163 @@ test("path patterns follow the gitignore semantics the CLI uses", () => {
   assert.ok(!pathMatchesSuppression("src/keys.js", "src/keys.jsx"));
 });
 
+// Equivalence corpus. Every expectation below was captured from the
+// backtracking glob-to-regex matcher the bounded matcher replaced, so this
+// table pins the exact prior semantics rather than restating an intent.
+const CORPUS_PATHS = [
+  "",
+  "examples",
+  "examples/insecure.ts",
+  "examples/deep/insecure.ts",
+  "src/examples/insecure.ts",
+  "src/config.ts",
+  "src/keys.js",
+  "src/keys.jsx",
+  "src/a.ts",
+  "src/ab.ts",
+  "src/.rc.json",
+  "src/deep/thing.fixture.ts",
+  "thing.fixture.ts",
+  ".rc.json",
+  "tests",
+  "a/b",
+  "ab",
+  "axxb",
+  "a/x/b",
+  "vendor/pkg/node_modules/lib/index.js",
+  "vendor/node_modules/lib.js",
+  "assets/js/app.min.js",
+  "packages/core/src",
+  "packages/core/src/index.ts",
+  "packages/core/deep/src",
+  "a.b+c",
+  "a.bxc",
+  "[bracket]",
+  "{brace}",
+  "back\\slash",
+  "dist/bundle.js",
+  "predist/bundle.js",
+];
+
+/** A pattern that reduces to a bare wildcard accepts every path, the empty one included. */
+const EVERY_PATH = CORPUS_PATHS;
+
+const CORPUS_EXPECTED_MATCHES = [
+  [
+    "examples",
+    ["examples", "examples/insecure.ts", "examples/deep/insecure.ts", "src/examples/insecure.ts"],
+  ],
+  [
+    "examples/",
+    ["examples", "examples/insecure.ts", "examples/deep/insecure.ts", "src/examples/insecure.ts"],
+  ],
+  ["/examples", ["examples", "examples/insecure.ts", "examples/deep/insecure.ts"]],
+  ["examples/*", ["examples/insecure.ts", "examples/deep/insecure.ts"]],
+  ["examples/**", ["examples/insecure.ts", "examples/deep/insecure.ts"]],
+  [
+    "**/examples",
+    ["examples", "examples/insecure.ts", "examples/deep/insecure.ts", "src/examples/insecure.ts"],
+  ],
+  [
+    "**/examples/**",
+    ["examples/insecure.ts", "examples/deep/insecure.ts", "src/examples/insecure.ts"],
+  ],
+  ["src/keys.js", ["src/keys.js"]],
+  [
+    "src/**",
+    [
+      "src/examples/insecure.ts",
+      "src/config.ts",
+      "src/keys.js",
+      "src/keys.jsx",
+      "src/a.ts",
+      "src/ab.ts",
+      "src/.rc.json",
+      "src/deep/thing.fixture.ts",
+    ],
+  ],
+  [
+    "src/**/",
+    [
+      "src/examples/insecure.ts",
+      "src/config.ts",
+      "src/keys.js",
+      "src/keys.jsx",
+      "src/a.ts",
+      "src/ab.ts",
+      "src/.rc.json",
+      "src/deep/thing.fixture.ts",
+    ],
+  ],
+  [
+    "src/**/*.ts",
+    [
+      "src/examples/insecure.ts",
+      "src/config.ts",
+      "src/a.ts",
+      "src/ab.ts",
+      "src/deep/thing.fixture.ts",
+    ],
+  ],
+  ["src/?.ts", ["src/a.ts"]],
+  ["src/??.ts", ["src/ab.ts"]],
+  ["/src/*.ts", ["src/config.ts", "src/a.ts", "src/ab.ts"]],
+  ["*.fixture.ts", ["src/deep/thing.fixture.ts", "thing.fixture.ts"]],
+  ["**/*.fixture.ts", ["src/deep/thing.fixture.ts", "thing.fixture.ts"]],
+  ["?rc.json", ["src/.rc.json", ".rc.json"]],
+  ["test?", ["tests"]],
+  // `?` is one character that is never a separator, so this cannot reach "a/b".
+  ["a?b", []],
+  ["a**b", ["a/b", "ab", "axxb", "a/x/b"]],
+  [
+    "vendor/**/node_modules/**",
+    ["vendor/pkg/node_modules/lib/index.js", "vendor/node_modules/lib.js"],
+  ],
+  ["packages/*/src", ["packages/core/src", "packages/core/src/index.ts"]],
+  ["packages/*/src/**", ["packages/core/src/index.ts"]],
+  // Regex metacharacters stay literal; a backslash pattern can never match a
+  // path whose separators were already normalized to forward slashes.
+  ["a.b+c", ["a.b+c"]],
+  ["[bracket]", ["[bracket]"]],
+  ["{brace}", ["{brace}"]],
+  ["back\\slash", []],
+  ["dist", ["dist/bundle.js"]],
+  ["*", EVERY_PATH],
+  ["**", EVERY_PATH],
+  ["***", EVERY_PATH],
+  ["**/", EVERY_PATH],
+  ["**/**", EVERY_PATH],
+];
+
+test("the bounded matcher reproduces the previous matcher over the pattern corpus", () => {
+  assert.equal(CORPUS_EXPECTED_MATCHES.length, 33);
+  for (const [pattern, expected] of CORPUS_EXPECTED_MATCHES) {
+    const matched = CORPUS_PATHS.filter((path) => pathMatchesSuppression(pattern, path));
+    assert.deepEqual(matched, expected, `pattern ${JSON.stringify(pattern)}`);
+  }
+});
+
+// The backtracking matcher took about 15 ms on the first case here and grew
+// exponentially with pattern and path length: about 11.6 s on the second.
+// A suppression pattern is attacker-influenced repo config and this runs
+// synchronously for every finding, so the budget has to hold for both.
+test("an adversarial suppression pattern matches in bounded time", () => {
+  const cases = [
+    [`${"**/".repeat(8)}z`, `${"a/".repeat(15)}b`],
+    [`${"**/".repeat(12)}z`, `${"a/".repeat(24)}b`],
+  ];
+  for (const [pattern, path] of cases) {
+    const started = process.hrtime.bigint();
+    const matched = pathMatchesSuppression(pattern, path);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.equal(matched, false);
+    assert.ok(
+      elapsedMs < 20,
+      `a ${pattern.length}-character pattern against a ${path.length}-character path took ${elapsedMs.toFixed(1)} ms`,
+    );
+  }
+});
+
 // codeFinding seeds the real camelCase detail_json shape, so this is the
 // product-path assertion: a suppressed camelCase row is hidden from
 // getIssuesForProject (backs get_issues) and listed by getRepoSuppressedIssues

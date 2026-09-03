@@ -12,8 +12,15 @@ pub const AXE_CORE_VERSION: &str = "4.11.2";
 /// layout-shift, and long-task entries as the page loads.
 pub const CWV_OBSERVER_SCRIPT: &str = include_str!("../../browser/cwv_observer.js");
 
-/// Core Web Vitals readback, evaluated after the page settles.
+/// Core Web Vitals readback, evaluated after the page settles. It returns
+/// the JSON for runtimes that can read an eval value and leaves the same
+/// object in [`CWV_RESULT_GLOBAL`] for the ones that cannot.
 pub const CWV_READ_SCRIPT: &str = include_str!("../../browser/cwv_read.js");
+
+/// Where the observer accumulates Core Web Vitals and the readback leaves its
+/// completed object (the Tauri webview reads it through `document.title`
+/// in chunks, the same way as [`AXE_RESULT_GLOBAL`]).
+pub const CWV_RESULT_GLOBAL: &str = "__SHK_CWV__";
 
 /// axe-core payload for native injectors; wasm runtimes provide it as an asset.
 #[cfg(feature = "browser-payload")]
@@ -78,7 +85,11 @@ pub fn axe_run_script(caps: AxeEvidenceCaps) -> String {
             payload = {{ error: 'axe-core not loaded' }};
         }} else {{
             var results = await axe.run(document, {{
-                runOnly: {{ type: 'tag', values: [{tags}] }}
+                runOnly: {{ type: 'tag', values: [{tags}] }},
+                // axe is injected into the main frame only. With iframes on,
+                // axe would wait for pings to frames that carry no axe and
+                // add nothing but the delay.
+                iframes: false
             }});
             var ruleIds = function (bucket) {{
                 return (bucket || []).map(function (entry) {{ return String(entry.id); }});
@@ -115,6 +126,13 @@ pub fn axe_run_script(caps: AxeEvidenceCaps) -> String {
         }}
     }} catch (e) {{
         payload = {{ error: (e && e.message) || 'axe-core failed' }};
+    }}
+    // The adapter grades a payload only when it names the document it
+    // was asked about.
+    try {{
+        payload.document_url = String(window.location.href);
+    }} catch (e) {{
+        payload.document_url = null;
     }}
     window.{global} = payload;
     return JSON.stringify(payload);
@@ -206,9 +224,30 @@ mod tests {
 
     #[test]
     fn the_observer_payload_publishes_where_the_readback_looks() {
-        assert!(CWV_OBSERVER_SCRIPT.contains("__SHK_CWV__"));
-        assert!(CWV_READ_SCRIPT.contains("___SHK_CWV___"));
-        assert!(CWV_READ_SCRIPT.contains("return json"));
+        assert!(CWV_OBSERVER_SCRIPT.contains(&format!("window.{CWV_RESULT_GLOBAL} = ")));
+        assert!(CWV_READ_SCRIPT.contains(&format!("window.{CWV_RESULT_GLOBAL} = c")));
+        assert!(CWV_READ_SCRIPT.contains("return JSON.stringify(c)"));
+        // A whole payload never fits in a document title (WebKit caps one at
+        // 1000 units), so title-polling runtimes read the global in chunks
+        // and the readback must not try to publish through the title itself.
+        assert!(!CWV_READ_SCRIPT.contains("document.title"));
+    }
+
+    #[test]
+    fn the_run_script_stays_in_the_main_frame() {
+        // axe is injected into the main frame only; with iframes left on it
+        // would wait for pings to frames that carry no axe and add nothing.
+        let script = axe_run_script(AxeEvidenceCaps::DEFAULT);
+        assert!(script.contains("iframes: false"));
+    }
+
+    #[test]
+    fn both_payloads_record_the_document_they_were_read_from() {
+        // The adapter refuses to grade a payload that names another document,
+        // so every payload has to say which one it describes.
+        let script = axe_run_script(AxeEvidenceCaps::DEFAULT);
+        assert!(script.contains("payload.document_url = String(window.location.href)"));
+        assert!(CWV_READ_SCRIPT.contains("c.document_url = String(window.location.href)"));
     }
 
     #[cfg(feature = "browser-payload")]

@@ -14,21 +14,10 @@ use crate::integrations::adapters::{Credentials, IntegrationAdapter, PollContext
 type AdapterKey = (String, i64, String);
 const MAX_CONCURRENT_ADAPTER_POLLS: usize = 4;
 
-/// Multiplier applied to a Free-tier project's adapter cadence so we don't
-/// burn external API quota on a tier that doesn't pay. Core/Pro use the
-/// adapter's declared cadence as-is.
-const FREE_CADENCE_MULTIPLIER: u32 = 6;
-
-fn tier_adjusted_cadence(
-    base: std::time::Duration,
-    tier: crate::licensing::config::Tier,
-) -> std::time::Duration {
-    if matches!(tier, crate::licensing::config::Tier::Free) {
-        base * FREE_CADENCE_MULTIPLIER
-    } else {
-        base
-    }
-}
+// Polling cadence is tier-independent: every adapter authenticates with the
+// user's own credentials against the user's own account, so a poll spends the
+// user's quota and none of ours. Tiers entitle connected services and catalog
+// access, never local features.
 
 /// Keep the first, production-preferred environment for each project.
 fn first_env_per_project(project_envs: &[(i64, String)]) -> Vec<(i64, String)> {
@@ -388,8 +377,6 @@ impl IntegrationScheduler {
                 return;
             }
         };
-        // Resolve licensing once per scheduler tick.
-        let tier = db.get_effective_tier();
         let one_env_per_project = first_env_per_project(&project_envs);
 
         for adapter in &self.adapters {
@@ -406,12 +393,7 @@ impl IntegrationScheduler {
 
                 let due = {
                     let mut last = self.last_run.lock().await;
-                    mark_due_or_seed(
-                        &mut last,
-                        key,
-                        now,
-                        tier_adjusted_cadence(adapter.cadence(), tier),
-                    )
+                    mark_due_or_seed(&mut last, key, now, adapter.cadence())
                 };
                 if !due {
                     continue;

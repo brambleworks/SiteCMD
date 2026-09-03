@@ -3,6 +3,43 @@ const DOCS_INDEX = "docs/README.md";
 const CONTRIBUTING = "CONTRIBUTING.md";
 const CONNECTED_SPECS = "docs/engineering/connected-service";
 const LOCALHOST_FIXTURES = "apps/desktop/src-tauri/src/core/localhost.rs";
+const README = "README.md";
+const PRODUCT_FACTS = "product-facts.json";
+
+// The README restates generated check counts. Drift turns a fact a reader can
+// verify against the registries into a marketing claim they cannot.
+const README_COUNT_ROWS = [
+  ["Web Scan", "web"],
+  ["Code Scan", "codeScan"],
+  ["Accessibility", "axe"],
+  ["Polish", "polish"],
+];
+
+function checkCountFailures(read, exists) {
+  if (!exists(README) || !exists(PRODUCT_FACTS)) return [];
+  const readme = read(README);
+  const counts = JSON.parse(read(PRODUCT_FACTS)).checkCounts;
+  const failures = [];
+  for (const [label, key] of README_COUNT_ROWS) {
+    const row = new RegExp(`^\\|\\s*${label}\\s*\\|\\s*(\\d+)\\s*\\|`, "m").exec(readme);
+    if (!row) {
+      failures.push(
+        `${README} must keep a "${label}" row in its check-count table; ${PRODUCT_FACTS} publishes ${counts[key]}.`,
+      );
+    } else if (Number(row[1]) !== counts[key]) {
+      failures.push(
+        `${README} says ${label} runs ${row[1]} checks and ${PRODUCT_FACTS} says ${counts[key]}. Run pnpm facts:generate, then update the table.`,
+      );
+    }
+  }
+  const ecosystems = /across (\d+) package ecosystems/.exec(readme);
+  if (!ecosystems || Number(ecosystems[1]) !== counts.dependencyEcosystems) {
+    failures.push(
+      `${README} must say dependency findings resolve across ${counts.dependencyEcosystems} package ecosystems, the count ${PRODUCT_FACTS} publishes.`,
+    );
+  }
+  return failures;
+}
 
 // Product-intent phrasing belongs in docs/qa, where reviewers read it.
 const INTENT_PHRASES =
@@ -13,7 +50,7 @@ const PRIVATE_RECORD_DEFERRAL = /commercial (?:terms )?spec|RFC's economics sect
 const WALKTHROUGH_PENDING_TASK_8 = `${PRODUCT_DOCS}/get-value-in-5-minutes.md`;
 
 export function publicFaceFailures(read, exists, listFiles) {
-  const failures = [];
+  const failures = checkCountFailures(read, exists);
 
   for (const file of listFiles(
     PRODUCT_DOCS,

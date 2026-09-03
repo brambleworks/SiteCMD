@@ -1,5 +1,24 @@
 export type PagerItem = number | "gap";
 
+export interface PageWindow<T> {
+  /** The requested page clamped into the range the rows actually cover. */
+  page: number;
+  totalPages: number;
+  rows: T[];
+}
+
+/**
+ * One page of rows plus the page numbers a Pager needs. Lists that can hold
+ * thousands of entries render through this so the mounted row count stays at
+ * the page size and the Pager reveals the rest.
+ */
+export function pageWindow<T>(rows: readonly T[], page: number, pageSize: number): PageWindow<T> {
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const start = (currentPage - 1) * pageSize;
+  return { page: currentPage, totalPages, rows: rows.slice(start, start + pageSize) };
+}
+
 const WINDOW_LIMIT = 7;
 
 /**

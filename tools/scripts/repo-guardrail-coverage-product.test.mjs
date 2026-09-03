@@ -704,7 +704,7 @@ describe.concurrent(
       expectGuardrailFailure(
         onboardingCopyFailures,
         (fixtureRoot) => {
-          const guidePath = "apps/desktop/src/components/layout/PageGuide.tsx";
+          const guidePath = "apps/desktop/src/components/layout/PageGuidePanel.tsx";
           const source = readFixtureFile(fixtureRoot, guidePath);
           const mutated = source.replace(
             "Open Issues, Updates, or Alerts when an item needs investigation or action.",
@@ -712,7 +712,7 @@ describe.concurrent(
           );
           if (mutated === source) {
             throw new Error(
-              "fixture mutation was a no-op: PageGuide.tsx no longer contains the dashboard triage line",
+              "fixture mutation was a no-op: PageGuidePanel.tsx no longer contains the dashboard triage line",
             );
           }
           writeFixtureFile(fixtureRoot, guidePath, mutated);

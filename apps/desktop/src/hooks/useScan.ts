@@ -29,7 +29,9 @@ import {
 } from "@/lib/scan-telemetry";
 import { safeListen } from "@/lib/tauri-events";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { asWebScanFocus } from "@/lib/scan-progress-model";
 import {
+  beginScanRun,
   publishMultiScanProgress,
   publishScanProgress,
   resetScanProgress,
@@ -407,7 +409,7 @@ export function useScan(): UseScanReturn {
       setIssueChanges(null);
       setExecutionIncompleteDetail(null);
       setError(null);
-      resetScanProgress();
+      beginScanRun({ web: asWebScanFocus(options?.scanType), code: false });
       recordWorkflowHealthEvent("run_scan", "started", {
         kind: options?.scanType ?? "health",
         mode: "single",
@@ -520,7 +522,14 @@ export function useScan(): UseScanReturn {
       setIssueChanges(null);
       setExecutionIncompleteDetail(null);
       setError(null);
-      resetScanProgress();
+      beginScanRun({
+        web:
+          request.requestedMode !== "code" && request.urls.length > 0
+            ? asWebScanFocus(request.webFocus)
+            : null,
+        code: request.requestedMode !== "web" && Boolean(request.projectPath),
+        pageCount: request.urls.length,
+      });
       clearListeners();
       recordWorkflowHealthEvent("run_scan", "started", {
         kind: request.requestedMode,
@@ -642,7 +651,7 @@ export function useScan(): UseScanReturn {
       setIssueChanges(null);
       setExecutionIncompleteDetail(null);
       setError(null);
-      resetScanProgress();
+      beginScanRun({ web: null, code: true });
       clearListeners();
       const codeScanStartedAt = performance.now();
       recordWorkflowHealthEvent("run_scan", "started", {

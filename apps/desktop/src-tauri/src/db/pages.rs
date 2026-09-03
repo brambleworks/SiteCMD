@@ -8,7 +8,12 @@ use super::types::PageRecord;
 use super::Database;
 
 impl Database {
-    /// Save discovered pages for a site (upsert - updates last_seen_at on conflict)
+    /// Save discovered pages for a site (upsert - updates last_seen_at on conflict).
+    ///
+    /// One transaction and one prepared statement for the whole import: a
+    /// sitemap can carry thousands of URLs, and a per-row commit both costs a
+    /// disk sync each time and leaves a half-imported sitemap behind when a
+    /// row fails.
     #[tracing::instrument(skip(self, urls), fields(site_id, source = %source))]
     pub fn save_pages(
         &self,
@@ -18,20 +23,33 @@ impl Database {
     ) -> Result<usize, DbError> {
         let urls = urls.to_vec();
         let source = source.to_string();
-        self.execute(move |conn| {
-            let mut count = 0;
-            for url_str in &urls {
-                let path = url::Url::parse(url_str)
-                    .map(|u| u.path().to_string())
-                    .unwrap_or_else(|_| url_str.clone());
-                conn.execute(
-                    "INSERT INTO pages (site_id, url, path, source, last_seen_at)
-                     VALUES (:site_id, :url, :path, :source, datetime('now'))
-                     ON CONFLICT(site_id, url) DO UPDATE SET last_seen_at = datetime('now'), source = :source",
-                    named_params! { ":site_id": site_id, ":url": url_str, ":path": path, ":source": source },
-                )?;
-                count += 1;
-            }
+        self.execute_mut(move |conn| {
+            let tx = conn.transaction()?;
+            let count = upsert_pages(&tx, site_id, &urls, &source)?;
+            tx.commit()?;
+            Ok(count)
+        })?
+    }
+
+    /// Replace a site's pages with a freshly discovered set.
+    ///
+    /// The clear and the import commit together. A refused row leaves the
+    /// sitemap the site already had rather than wiping it, which a separate
+    /// clear followed by a failed import would do.
+    #[tracing::instrument(skip(self, urls), fields(site_id, source = %source))]
+    pub fn replace_pages(
+        &self,
+        site_id: i64,
+        urls: &[String],
+        source: &str,
+    ) -> Result<usize, DbError> {
+        let urls = urls.to_vec();
+        let source = source.to_string();
+        self.execute_mut(move |conn| {
+            let tx = conn.transaction()?;
+            tx.execute("DELETE FROM pages WHERE site_id = ?1", params![site_id])?;
+            let count = upsert_pages(&tx, site_id, &urls, &source)?;
+            tx.commit()?;
             Ok(count)
         })?
     }
@@ -44,15 +62,6 @@ impl Database {
                 "SELECT id, site_id, url, path, title, last_seen_at, source FROM pages WHERE site_id = ?1 ORDER BY path"
             )?;
             from_row::query_vec::<PageRecord>(&mut stmt, &[&site_id])
-        })?
-    }
-
-    /// Clear all pages for a site
-    #[tracing::instrument(skip(self), fields(site_id))]
-    pub fn clear_pages(&self, site_id: i64) -> Result<(), DbError> {
-        self.execute(move |conn| {
-            conn.execute("DELETE FROM pages WHERE site_id = ?1", params![site_id])?;
-            Ok(())
         })?
     }
 
@@ -82,3 +91,32 @@ impl Database {
         })?
     }
 }
+
+/// Upsert one import's rows through a single prepared statement.
+fn upsert_pages(
+    tx: &rusqlite::Transaction<'_>,
+    site_id: i64,
+    urls: &[String],
+    source: &str,
+) -> Result<usize, DbError> {
+    let mut count = 0;
+    let mut upsert = tx.prepare(
+        "INSERT INTO pages (site_id, url, path, source, last_seen_at)
+         VALUES (:site_id, :url, :path, :source, datetime('now'))
+         ON CONFLICT(site_id, url) DO UPDATE SET last_seen_at = datetime('now'), source = :source",
+    )?;
+    for url_str in urls {
+        let path = url::Url::parse(url_str)
+            .map(|parsed| parsed.path().to_string())
+            .unwrap_or_else(|_| url_str.clone());
+        upsert.execute(
+            named_params! { ":site_id": site_id, ":url": url_str, ":path": path, ":source": source },
+        )?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+#[cfg(test)]
+#[path = "pages_tests.rs"]
+mod tests;

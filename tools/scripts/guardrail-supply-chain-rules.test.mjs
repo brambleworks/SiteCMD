@@ -14,11 +14,15 @@ function workspace(overridesBlock, { minimumReleaseAge = 1440 } = {}) {
   );
 }
 
+// The default graph declares the overridden package under an open range, so a
+// case that is only about justification, review date or exact pinning does not
+// also trip the "nothing depends on it" check. An empty list means the opposite
+// - the package is absent - and is asserted on explicitly below.
 function failuresFor(overridesBlock, options = {}) {
   const source = workspace(overridesBlock, options);
   return supplyChainSafetyFailures(() => source, {
     today: TODAY,
-    installedRanges: options.installedRanges ?? (() => []),
+    installedRanges: options.installedRanges ?? (() => ["*"]),
   });
 }
 
@@ -155,6 +159,30 @@ describe("override justification policy", () => {
       { installedRanges: () => ["^8.20.0", "8.21.0"] },
     );
     expect(failures).toEqual([]);
+  });
+
+  it("rejects a security override for a package nothing depends on", () => {
+    const failures = failuresFor(
+      ["  # GHSA-aaaa-bbbb-cccc - patched upstream", REVIEWED, '  sharp: "^0.35.3"'].join("\n"),
+      { installedRanges: () => [] },
+    );
+    expect(failures.some((f) => f.includes("nothing in the installed graph depends on"))).toBe(
+      true,
+    );
+  });
+
+  it("rejects a non-security override for a package nothing depends on", () => {
+    const failures = failuresFor(
+      [
+        "  # non-security: deduplication - ink and miniflare disagree.",
+        REVIEWED,
+        '  ws: "^8.21.0"',
+      ].join("\n"),
+      { installedRanges: () => [] },
+    );
+    expect(failures.some((f) => f.includes("nothing in the installed graph depends on"))).toBe(
+      true,
+    );
   });
 
   it("skips the bind check when node_modules is absent", () => {

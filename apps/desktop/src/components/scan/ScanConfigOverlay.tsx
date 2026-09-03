@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Pager } from "@/components/ui/pager";
 import {
   getScanStartLabel,
   getTimeEstimate,
@@ -8,6 +10,8 @@ import {
   type ScanConfig,
 } from "@/components/scan/scan-config-overlay-model";
 import { useScanConfigOverlayState } from "@/components/scan/useScanConfigOverlayState";
+import { useResetOnChange } from "@/hooks/useResetOnChange";
+import { pageWindow } from "@/lib/pagination";
 import {
   Search,
   X,
@@ -18,10 +22,15 @@ import {
   Clock3,
   ListChecks,
   Database,
+  Accessibility,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type { ScanConfig, ScanConfigPreset, ScanMode } from "./scan-config-overlay-model";
+
+// A sitemap can list thousands of routes; the checklist mounts one page of
+// them and the pager reveals the rest, as the Issues list does.
+const SCOPE_PAGE_SIZE = 50;
 
 interface ScanConfigOverlayProps {
   siteUrl: string;
@@ -41,9 +50,12 @@ export function ScanConfigOverlay({
   projectPath,
   onStart,
   onCancel,
+  initialScanType = "full",
+  initialAxeEnabled = true,
 }: ScanConfigOverlayProps) {
   const {
     axeEnabled,
+    setAxeEnabled,
     canUseCodeScan,
     hasSite,
     discovering,
@@ -64,15 +76,19 @@ export function ScanConfigOverlay({
     setSearch,
     togglePage,
   } = useScanConfigOverlayState({
-    canUseAccessibilityDeepScan: false,
-    initialAxeEnabled: false,
-    initialScanType: "full",
+    initialAxeEnabled,
+    initialScanType,
     onStart,
     projectPath,
     projectId,
     siteId,
     siteUrl,
   });
+
+  const [scopePage, setScopePage] = useState(1);
+  // A new filter or a fresh discovery changes what the first page holds.
+  useResetOnChange(`${search}:${pages.length}`, () => setScopePage(1));
+  const scopeWindow = pageWindow(filtered, scopePage, SCOPE_PAGE_SIZE);
 
   const selectedPageCount = selected.size || 1;
   const estimatedTime = getTimeEstimate(selectedPageCount, axeEnabled, scanType, canUseCodeScan);
@@ -143,6 +159,37 @@ export function ScanConfigOverlay({
           </section>
         ) : null}
 
+        {hasSite && scanType !== "code" ? (
+          <section className="scan-config-section">
+            <div className="settings-control-row">
+              <div className="row-start min-w-0">
+                <span className="icon-badge icon-badge--sm icon-badge--muted">
+                  <Accessibility className="icon-md" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-body-muted text-strong">Accessibility analysis</p>
+                  <p className="text-meta text-relaxed">
+                    Runs axe-core on each selected page in the hidden browser and adds WCAG A and AA
+                    findings to the results. It adds a few seconds per page; switch it off for a
+                    quicker run.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                unstyled
+                className="toggle-switch"
+                data-on={axeEnabled ? "true" : "false"}
+                role="switch"
+                aria-checked={axeEnabled}
+                aria-label="Accessibility analysis"
+                onClick={() => setAxeEnabled(!axeEnabled)}>
+                <span className="toggle-switch-thumb" />
+              </Button>
+            </div>
+          </section>
+        ) : null}
+
         {!hasSite ? (
           <p className="text-meta text-relaxed">
             This project has no site URL, so this run covers the linked folder only. Add an
@@ -207,7 +254,7 @@ export function ScanConfigOverlay({
             )}
 
             <div className="scan-config-scroll-list">
-              {filtered.map((page) => {
+              {scopeWindow.rows.map((page) => {
                 const isSelected = selected.has(page.url);
                 return (
                   <Button
@@ -235,6 +282,14 @@ export function ScanConfigOverlay({
                 <div className="text-body-muted scan-config-empty">No pages match "{search}"</div>
               )}
             </div>
+
+            <Pager
+              page={scopeWindow.page}
+              totalPages={scopeWindow.totalPages}
+              onChange={setScopePage}
+              label="Scan scope pages"
+              itemLabel="scope"
+            />
           </section>
         ) : (
           <section className="scan-config-section">

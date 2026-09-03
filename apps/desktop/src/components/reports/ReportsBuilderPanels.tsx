@@ -144,8 +144,8 @@ export function ReportsSnapshotPanel({
           <p className="section-label-block">Latest Included Snapshot</p>
           <p className="text-body text-muted-foreground rep-snap-desc">
             Pulled from the latest data that will feed this report window, so you can see whether
-            the export will include fresh Web Scan issues, linked code issues, and connected
-            operational data before you generate it.
+            the export will include fresh Web Scan issues, code issues, and connected operational
+            data before you generate it.
           </p>
         </div>
         <Button

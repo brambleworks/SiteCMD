@@ -70,3 +70,24 @@ export const AddProjectForm = lazy(() =>
 export const FirstRunWalkthrough = lazy(() =>
   import("@/app/FirstRunWalkthrough").then((m) => ({ default: m.FirstRunWalkthrough })),
 );
+
+// Shell overlays that only mount on demand. None of them is on screen at first
+// paint, so keeping them lazy keeps the eager graph inside the initial-page
+// budget.
+export const AddProjectOverlay = lazy(() =>
+  import("@/app/AddProjectOverlay").then((m) => ({ default: m.AddProjectOverlay })),
+);
+
+export const CommandPalette = lazy(() =>
+  import("@/components/layout/CommandPalette").then((m) => ({ default: m.CommandPalette })),
+);
+
+export const ScanSummaryOverlay = lazy(() =>
+  import("@/components/scan/ScanSummaryOverlay").then((m) => ({ default: m.ScanSummaryOverlay })),
+);
+
+export const TelemetryConsentPrompt = lazy(() =>
+  import("@/components/privacy/TelemetryConsentPrompt").then((m) => ({
+    default: m.TelemetryConsentPrompt,
+  })),
+);

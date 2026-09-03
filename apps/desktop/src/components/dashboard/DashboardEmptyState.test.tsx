@@ -30,7 +30,7 @@ describe("DashboardEmptyState", () => {
     unmount();
 
     render(<DashboardEmptyState {...baseProps} url="" projectPath="/Users/dev/app" />);
-    expect(screen.getByText(/Checks your linked code for database/i)).toBeInTheDocument();
+    expect(screen.getByText(/Checks your code for database/i)).toBeInTheDocument();
     expect(screen.queryByText(/live site/i)).not.toBeInTheDocument();
   });
 

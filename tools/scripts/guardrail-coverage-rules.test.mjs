@@ -77,7 +77,8 @@ fn resolve_covered_absences(tx: &Transaction<'_>) -> Result<(), DbError> {
         return Ok(());
     }
     let coverage = as_stored_keys(&batch.coverage);
-    let resolved = open.filter(|row| coverage.covers(route.as_deref(), check_id));
+    let resolved = load_open_candidates(tx, &scope, &coverage)?
+        .filter(|row| coverage.covers(route.as_deref(), check_id));
     Ok(())
 }
 
@@ -285,6 +286,16 @@ describe("coverage guardrail", () => {
     );
     expect(failuresWith({ [PROJECTION]: flat }).join(" ")).toContain(
       "still switches on limit_pages",
+    );
+  });
+
+  it("fails when the candidate query is inlined back into the resolver", () => {
+    const inlined = HEALTHY[PROJECTION].replace(
+      "load_open_candidates(tx, &scope, &coverage)?",
+      'tx.prepare("SELECT id, signal_id, check_id, page_url FROM work_items")?',
+    );
+    expect(failuresWith({ [PROJECTION]: inlined }).join(" ")).toContain(
+      "must read its candidates through load_open_candidates",
     );
   });
 

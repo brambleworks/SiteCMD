@@ -282,11 +282,14 @@ function loadOpenIssueRows(
 ): SuppressedView<Issue> {
   const db = getDb();
   const [noSlash, withSlash] = envUrlVariants(envUrl);
+  // No source filter: the desktop's get_active_issue_groups reads every active
+  // work_items row, so the SiteCMD Score counts dependency and integration
+  // findings alongside scan findings. Filtering here would return fewer issues
+  // than the score reports.
   let sql = `SELECT id, source, category, check_id, severity, title, description, fix_prompt, page_url,
                     relative_path, line, confidence, detail_json
              FROM work_items
-             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
-               AND source IN ('web_scan', 'code_scan')`;
+             WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL`;
   const params: unknown[] = [projectId, noSlash, withSlash];
   if (opts?.requireFixPrompt) sql += ` AND fix_prompt IS NOT NULL AND fix_prompt != ''`;
   sql = addMinimumSeverityFilter(sql, params, opts?.min_severity);
@@ -381,7 +384,11 @@ export type IssueOccurrence = Issue & {
   confidence_reason: string | null;
 };
 
-/** Every open occurrence of one check, most severe first; code findings may occur in many files. */
+/**
+ * Every open occurrence of one check, most severe first; code findings may
+ * occur in many files. Sources are not filtered, so get_issue resolves every
+ * check_id get_issues can list.
+ */
 export function getIssueOccurrences(
   projectId: number,
   envUrl: string,
@@ -394,7 +401,7 @@ export function getIssueOccurrences(
               relative_path, line, confidence, detail_json, manual_fix, why_it_matters, confidence_reason
        FROM work_items
        WHERE project_id = ? AND env_url IN (?, ?) AND resolved_at IS NULL
-         AND source IN ('web_scan', 'code_scan') AND check_id = ?
+         AND check_id = ?
        ORDER BY CASE severity
          WHEN 'critical' THEN 0
          WHEN 'high' THEN 1
@@ -658,7 +665,20 @@ export function getProjectEnvironmentUrls(projectId: number): string[] {
   return rows.map((row) => row.url);
 }
 
+/** Each history row aggregates findings, so tools must load the list once and reuse it. */
+let scanHistoryLoads = 0;
+
+/** Test seam: how many times getScanHistory has run since the last reset. */
+export function __test_scanHistoryLoads(): number {
+  return scanHistoryLoads;
+}
+
+export function __test_resetScanHistoryLoads(): void {
+  scanHistoryLoads = 0;
+}
+
 export function getScanHistory(url: string, limit = 10): ScanScore[] {
+  scanHistoryLoads += 1;
   const db = getDb();
   const [noSlash, withSlash] = envUrlVariants(url);
   return db
@@ -709,9 +729,4 @@ export function getScanHistory(url: string, limit = 10): ScanScore[] {
   `,
     )
     .all(noSlash, withSlash, limit) as unknown as ScanScore[];
-}
-
-/** Scan ids come from get_scan_history; the workspace cache has no ids (scan_id 0). */
-export function getScanById(url: string, scanId: number): ScanScore | null {
-  return getScanHistory(url, 100).find((scan) => scan.scan_id === scanId) ?? null;
 }

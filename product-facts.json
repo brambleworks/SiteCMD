@@ -189,7 +189,10 @@
     "privateNetworkSubresourceRulePlatforms": [
       "macos",
       "windows"
-    ]
+    ],
+    "failsClosedWithoutRules": true,
+    "locksWebRtcInAllFrames": true,
+    "disclaimsResolvedPrivateAddresses": true
   },
   "scannerIdentity": {
     "docsUrl": "https://sitecmd.com/scanner",

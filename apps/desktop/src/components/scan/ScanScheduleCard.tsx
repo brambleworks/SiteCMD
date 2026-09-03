@@ -45,7 +45,7 @@ export function ScanScheduleCard({ projectId, environmentId, projectPath }: Scan
 
   const hasLinkedProject = Boolean(projectPath?.trim());
   const codeInclusionNote = hasLinkedProject
-    ? "Each run is a full scan: web checks plus a Code Scan of the linked project."
+    ? "Each run is a full scan: web checks plus a Code Scan of the project code."
     : "Each run is a web scan. Link a project folder to include a Code Scan.";
 
   useResetOnChange(scheduleQuery.data, () => {

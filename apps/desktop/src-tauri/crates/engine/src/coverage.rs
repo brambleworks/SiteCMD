@@ -233,6 +233,20 @@ impl ScanCoverageManifest {
         }
     }
 
+    /// The routes that bound what this manifest can cover, or `None` when the
+    /// manifest observes no routes and any route may be covered.
+    ///
+    /// A reader may narrow its candidate rows to these routes plus the
+    /// routeless observations before asking [`covers`](Self::covers), which
+    /// stays authoritative: a route outside the bound is refused by `covers`
+    /// anyway, so the narrowing only avoids reading rows that would be
+    /// rejected.
+    pub fn route_bound(&self) -> Option<&[String]> {
+        self.kind
+            .is_route_scoped()
+            .then_some(self.page_urls.as_slice())
+    }
+
     fn claims_check(&self, check_id: &str) -> bool {
         let key = claim_key(check_id);
         self.checks

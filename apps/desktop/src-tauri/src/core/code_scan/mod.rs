@@ -75,7 +75,7 @@ pub(crate) fn read_bounded_project_text(
     crate::core::safe_fs::read_bounded_text_under_root(root, path, max_bytes)
 }
 #[cfg(test)]
-use filesystem::{is_vendored_path, should_skip_walker_dir};
+use filesystem::{is_drupal_scaffold_file, is_vendored_path, should_skip_walker_dir};
 mod file_analysis;
 use file_analysis::{analyze_file, FileSignalSummary};
 mod supply_chain;
@@ -224,7 +224,6 @@ where
     audit_project_with_options_and_progress(root, CodeScanOptions::default(), progress)
 }
 
-#[tracing::instrument(skip(root, progress))]
 pub fn audit_project_with_options_and_progress<F>(
     root: &Path,
     options: CodeScanOptions,
@@ -233,8 +232,30 @@ pub fn audit_project_with_options_and_progress<F>(
 where
     F: Fn(CodeScanAuditProgress),
 {
+    audit_project_with_control(root, options, progress, || false).map_err(|error| error.to_string())
+}
+
+/// Audit a project while observing cancellation. `cancelled` is polled between
+/// stages and before every file, so a cancelled run stops inside the analyze
+/// pass instead of finishing it, and returns no report at all.
+#[tracing::instrument(skip(root, progress, cancelled))]
+pub fn audit_project_with_control<F, C>(
+    root: &Path,
+    options: CodeScanOptions,
+    progress: F,
+    cancelled: C,
+) -> Result<CodeScanReport, CodeScanError>
+where
+    F: Fn(CodeScanAuditProgress),
+    C: Fn() -> bool + Sync,
+{
     if !root.is_dir() {
-        return Err("Project path is not a valid directory".into());
+        return Err(CodeScanError::Failed(
+            "Project path is not a valid directory".into(),
+        ));
+    }
+    if cancelled() {
+        return Err(CodeScanError::Cancelled);
     }
 
     let project_info = crate::core::project::detect_project(root);
@@ -247,10 +268,13 @@ where
     let manifests = collect_package_manifests(&project_files);
     emit_code_scan_progress(&progress, "code-scan.collect-files", "complete", 0, 15);
     if files.is_empty() && !has_project_root_marker(root) {
-        return Err(
+        return Err(CodeScanError::Failed(
             "Code Scan could not find app source files, schema files, or project config in the linked project folder. Choose the project root that contains your project manifest (package.json, composer.json, Cargo.toml, go.mod, pyproject.toml) or source directories like src, app, pages, or api."
                 .into(),
-        );
+        ));
+    }
+    if cancelled() {
+        return Err(CodeScanError::Cancelled);
     }
 
     let mut issues = Vec::new();
@@ -260,11 +284,15 @@ where
     // controller as an authenticated (or throttled) surface.
     let laravel_protection = collect_laravel_route_protection(&files);
     let laravel_protection = &laravel_protection;
+    let cancelled = &cancelled;
     // Strided workers distribute clustered files, then rejoin results in file
     // order to preserve deterministic issue output.
     let mut summaries: Vec<FileSignalSummary> = Vec::with_capacity(files.len());
     if files.len() <= 1 {
         for file in &files {
+            if cancelled() {
+                return Err(CodeScanError::Cancelled);
+            }
             let (file_issues, summary) = analyze_file(file, laravel_protection);
             issues.extend(file_issues);
             summaries.push(summary);
@@ -279,16 +307,19 @@ where
             let handles: Vec<_> = (0..worker_count)
                 .map(|worker| {
                     scope.spawn(move || {
-                        files
-                            .iter()
-                            .enumerate()
-                            .skip(worker)
-                            .step_by(worker_count)
-                            .map(|(index, file)| {
-                                let (file_issues, summary) = analyze_file(file, laravel_protection);
-                                (index, file_issues, summary)
-                            })
-                            .collect::<Vec<_>>()
+                        let mut analyzed = Vec::new();
+                        for (index, file) in
+                            files.iter().enumerate().skip(worker).step_by(worker_count)
+                        {
+                            // Polled before every file so cancellation lands
+                            // inside the analyze pass, not after it.
+                            if cancelled() {
+                                break;
+                            }
+                            let (file_issues, summary) = analyze_file(file, laravel_protection);
+                            analyzed.push((index, file_issues, summary));
+                        }
+                        analyzed
                     })
                 })
                 .collect();
@@ -325,6 +356,11 @@ where
             }
         });
     }
+    // Workers stop at their next file boundary, so a cancelled analyze pass
+    // holds a partial issue set that must never become a report.
+    if cancelled() {
+        return Err(CodeScanError::Cancelled);
+    }
     emit_code_scan_progress(
         &progress,
         "code-scan.analyze-source",
@@ -352,6 +388,9 @@ where
         issues.len(),
         68,
     );
+    if cancelled() {
+        return Err(CodeScanError::Cancelled);
+    }
     emit_code_scan_progress(
         &progress,
         "code-scan.operations",
@@ -374,6 +413,9 @@ where
         issues.len(),
         80,
     );
+    if cancelled() {
+        return Err(CodeScanError::Cancelled);
+    }
     emit_code_scan_progress(
         &progress,
         "code-scan.ai-scaffolding",
@@ -389,6 +431,9 @@ where
         issues.len(),
         82,
     );
+    if cancelled() {
+        return Err(CodeScanError::Cancelled);
+    }
     emit_code_scan_progress(&progress, "code-scan.finalize", "running", issues.len(), 84);
     apply_framework_auth_overrides(project_info.framework.as_deref(), &files, &mut issues);
     // Sole production caller of the code-issue severity policy (guardrail-pinned).

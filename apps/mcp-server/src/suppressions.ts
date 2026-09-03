@@ -59,28 +59,119 @@ export function codeFindingFingerprint(identity: CodeFindingIdentity): string {
   return `sha256:${createHash("sha256").update(material, "utf8").digest("hex")}`;
 }
 
-/** gitignore subset: leading or inner slash anchors, `**` spans directories, a match on a directory covers its children. */
-export function pathMatchesSuppression(pattern: string, relativePath: string): boolean {
-  let body = pattern.startsWith("/") ? pattern.slice(1) : pattern;
-  if (body.endsWith("/")) body = body.slice(0, -1);
-  const anchored = pattern.startsWith("/") || body.includes("/");
-  let source = "";
+const SEPARATOR = "/";
+
+/**
+ * `*`, `?` and `**` are the only metacharacters this subset understands.
+ * Everything else, brackets and braces included, is a literal character.
+ */
+type GlobToken =
+  | { kind: "literal"; character: string }
+  | { kind: "oneCharacter" } // `?`: one character that is not a separator.
+  | { kind: "segmentRun" } // `*`: any run of characters within one segment.
+  | { kind: "pathRun" } // `**`: any run of characters, separators included.
+  | { kind: "descendantPrefix" }; // `**/`: nothing, or any run ending in a separator.
+
+function tokenizeGlob(body: string): GlobToken[] {
+  const tokens: GlobToken[] = [];
   for (let index = 0; index < body.length; index += 1) {
     const character = body[index];
     if (character === "*" && body[index + 1] === "*") {
-      const swallowsSlash = body[index + 2] === "/";
-      source += swallowsSlash ? "(?:.*/)?" : ".*";
-      index += swallowsSlash ? 2 : 1;
+      const swallowsSeparator = body[index + 2] === SEPARATOR;
+      tokens.push({ kind: swallowsSeparator ? "descendantPrefix" : "pathRun" });
+      index += swallowsSeparator ? 2 : 1;
     } else if (character === "*") {
-      source += "[^/]*";
+      tokens.push({ kind: "segmentRun" });
     } else if (character === "?") {
-      source += "[^/]";
+      tokens.push({ kind: "oneCharacter" });
     } else {
-      source += character.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      tokens.push({ kind: "literal", character });
     }
   }
-  const matcher = new RegExp(`${anchored ? "^" : "(?:^|/)"}${source}(?:/|$)`);
-  return matcher.test(relativePath.replace(/\\/g, "/"));
+  return tokens;
+}
+
+/**
+ * Advances every candidate offset at once instead of backtracking, so chained
+ * `**` cannot blow up: the work is bounded by token count times path length.
+ * `reached[offset]` means some prefix of the tokens consumed the path up to
+ * `offset` from one of the permitted start offsets.
+ */
+function matchesGlobTokens(tokens: GlobToken[], path: string, anchored: boolean): boolean {
+  const end = path.length;
+  let reached = new Uint8Array(end + 1);
+  let next = new Uint8Array(end + 1);
+  reached[0] = 1;
+  // An unanchored pattern may also begin at the start of any inner segment.
+  if (!anchored) {
+    for (let offset = 0; offset < end; offset += 1) {
+      if (path[offset] === SEPARATOR) reached[offset + 1] = 1;
+    }
+  }
+
+  for (const token of tokens) {
+    switch (token.kind) {
+      case "literal": {
+        next.fill(0);
+        for (let offset = 0; offset < end; offset += 1) {
+          if (reached[offset] && path[offset] === token.character) next[offset + 1] = 1;
+        }
+        break;
+      }
+      case "oneCharacter": {
+        next.fill(0);
+        for (let offset = 0; offset < end; offset += 1) {
+          if (reached[offset] && path[offset] !== SEPARATOR) next[offset + 1] = 1;
+        }
+        break;
+      }
+      case "segmentRun": {
+        let open = 0;
+        for (let offset = 0; offset <= end; offset += 1) {
+          if (reached[offset]) open = 1;
+          next[offset] = open;
+          if (path[offset] === SEPARATOR) open = 0; // the run cannot cross a separator
+        }
+        break;
+      }
+      case "pathRun": {
+        let open = 0;
+        for (let offset = 0; offset <= end; offset += 1) {
+          if (reached[offset]) open = 1;
+          next[offset] = open;
+        }
+        break;
+      }
+      case "descendantPrefix": {
+        next.set(reached); // `**/` is optional, so it may consume nothing
+        let open = 0;
+        for (let offset = 0; offset < end; offset += 1) {
+          if (reached[offset]) open = 1;
+          if (open && path[offset] === SEPARATOR) next[offset + 1] = 1;
+        }
+        break;
+      }
+    }
+    const spent = reached;
+    reached = next;
+    next = spent;
+    if (!reached.includes(1)) return false;
+  }
+
+  // The pattern has to land on a separator or the end of the path, which is what
+  // makes a match on a directory cover everything beneath it.
+  for (let offset = 0; offset <= end; offset += 1) {
+    if (reached[offset] && (offset === end || path[offset] === SEPARATOR)) return true;
+  }
+  return false;
+}
+
+/** gitignore subset: leading or inner slash anchors, `**` spans directories, a match on a directory covers its children. */
+export function pathMatchesSuppression(pattern: string, relativePath: string): boolean {
+  let body = pattern.startsWith(SEPARATOR) ? pattern.slice(1) : pattern;
+  if (body.endsWith(SEPARATOR)) body = body.slice(0, -1);
+  const anchored = pattern.startsWith(SEPARATOR) || body.includes(SEPARATOR);
+  return matchesGlobTokens(tokenizeGlob(body), relativePath.replace(/\\/g, SEPARATOR), anchored);
 }
 
 function validated(index: number, raw: unknown): Suppression {

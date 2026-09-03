@@ -127,6 +127,15 @@ describe("resolveCommandTimeoutMs", () => {
 });
 
 describe("native user-intent commands", () => {
+  it("does not put a system dialog in front of the coding agent handoff", () => {
+    // The handoff opens the agent's app with a prompt staged in its
+    // composer; nothing runs until the person sends it there.
+    expect(NATIVE_INTENT_FILESYSTEM_COMMANDS.has("launch_agent_handoff")).toBe(false);
+    expect(nativeIntentManifest().run_filesystem_access_command).not.toContain(
+      "launch_agent_handoff",
+    );
+  });
+
   it("matches the audited command-security manifest", () => {
     const manifest = nativeIntentManifest();
     expect([...NATIVE_INTENT_CONNECTOR_COMMANDS].sort()).toEqual(

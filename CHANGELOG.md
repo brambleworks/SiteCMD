@@ -11,6 +11,142 @@ public repository history.
 
 ## [Unreleased]
 
+### Fixed
+
+- Web scans of pages that embed third-party iframes graded the wrong
+  document. The hidden browser followed the iframe and measured that page
+  instead, producing an accessibility failure, a load time, and a JavaScript
+  error that belonged to somebody else's page. It now verifies which document
+  it measured and reports the browser layer as unavailable rather than
+  reporting a verdict about a different page. Every scan also reported one
+  JavaScript error that was SiteCMD's own permission request, not the site's.
+- Half the open-redirect probes went unanswered on some sites, taking the
+  redirect walk and the www check down with them, because the scan opened all
+  of them at once and tripped its own HTTP/2 client's protection. Probes to a
+  single origin are now bounded.
+- Time to first byte was measured while the scanner's own requests were in
+  flight, so a server that accepts connections slowly was blamed for the
+  scanner's retries.
+- A check that cannot reach a verdict now reports as skipped with the reason
+  instead of guessing a warning. A rate-limited 404 probe, an unresolved www
+  host, and a partial sitemap read all say what happened.
+- A site served only over HTTP now fails the HTTPS check instead of skipping
+  it, so an unencrypted site no longer scores well on security.
+- Cross-page checks compared pages the scan never really reached: an error
+  page could be reported as a duplicate title, and one page reached through
+  two URLs was reported as a duplicate of itself.
+- Checks matched words inside comments and scripts. A commented-out heading
+  counted as a heading, and the words "skip to" in a sentence passed for a
+  skip link.
+- Sitemap dates written in the shorter standard form were all reported
+  invalid, one site had all 1385 flagged. Cloudflare's email-protection link
+  was counted as a broken link, and mail signing was reported missing on
+  domains that sign through a provider the check never probed.
+- A published contact address in structured data was read as a leaked
+  password, a form posting to the site's own subdomain was graded by neither
+  of the two checks that cover it, and a site whose only analytics is
+  cookieless was told it needs a cookie banner.
+- Code Scan reported findings for code that was not there: one rule matched
+  the words "import" and "export" anywhere in a file, dependencies installed
+  from GitHub were called registry mismatches, files a framework installs
+  itself were graded as the project's own, and a structured-data block
+  excused every raw-HTML sink in its file.
+- Coding agents reading SiteCMD through its MCP server could not see
+  dependency findings that the score counts, and asking about one was refused
+  even though the app itself accepts it.
+
+### Changed
+
+- Cancelling a scan now stops it. The code scan checks for cancellation
+  before every file and between stages, the browser analysis abandons its
+  wait and releases the hidden browser window, and a cancelled run saves
+  nothing and reports nothing. Cancelling and starting again no longer leaves
+  the old scan running underneath the new one.
+- Ordinary requests ask servers for compressed responses and cap the
+  decompressed size, so registry metadata and other large downloads move less
+  data. The measurement probes behind the performance checks still fetch raw
+  bytes, so transfer sizes and compression headers stay true. Time to first
+  byte is now measured the way a browser would see it, with compression
+  negotiated, so that number can shift once for origins that compress on the
+  fly.
+- The "Fix with" handoff to a coding agent no longer shows the system's Allow
+  Protected Action dialog. It only opens the agent's app with the prompt
+  staged in its composer; nothing runs until you send it there.
+- Web scans on Linux no longer run the browser layer, so Core Web Vitals and
+  accessibility analysis report as unavailable there. The Linux webview gives
+  SiteCMD no private-network subresource filter, and the app now refuses to
+  load a page in it rather than expose the local network. Every other check
+  still runs.
+
+### Fixed
+
+- Long scans no longer reload every open finding for the whole site after
+  each page. The projection asks only for the routes the page covered.
+- Sitemap imports run in one transaction. A refused row keeps the previous
+  list instead of leaving a partial or empty one, and the refresh reports the
+  error instead of claiming success.
+- The code scan compiled its request-variable matchers once per evaluation
+  instead of once per file, which took a 40 KB route file tens of seconds. It
+  now takes milliseconds.
+- Multi-page scans download each shared stylesheet once per scan instead of
+  once per page. A stylesheet that timed out is still retried on the next
+  page; only a definite refusal is remembered for the rest of the scan.
+- Opening one scan's details fetches only that run's findings instead of
+  every run in the execution.
+- The MCP server matched suppression patterns with a regex that a short
+  pattern could stall for seconds. Matching now takes time linear in the
+  pattern and path, and scan comparison loads history once instead of three
+  times.
+- The dashboard kept one full code scan report per project in memory for the
+  life of the app, including deleted projects. The cache is bounded and
+  clears on deletion and when a newer scan lands.
+- The scan-scope picker, sitemap settings, and issue Locations lists page
+  their rows the way the Issues list does, so a site with thousands of pages
+  no longer mounts every row at once.
+- The startup bundle gate missed part of the eager graph and reported a false
+  pass. It now walks every static import, including the boot stylesheet, and
+  the page guide panel, command palette, scan summary, add-project, and
+  telemetry consent overlays, and the scan completion handlers load on
+  demand to keep startup under budget.
+- The scan progress percent no longer sprints, freezes, and leaps. It was
+  mapped straight onto check counts, so ninety in-memory checks filled half
+  the ring in the first second, the network-bound origin checks then held it
+  flat for anything from one to thirteen seconds, then leapt to the end. One
+  time-aware model now owns the number for the overlay ring, the jobs tray,
+  and the system tray: every event sets a floor, the estimate drifts toward
+  the end of the current phase between events, each step of a full scan fills
+  its own ring, and the number never moves backward within a step.
+- The scan form offers accessibility analysis again. The axe-core pass is on
+  by default for web scans, with a switch to skip it for a quicker run, and
+  the first baseline scan of a new project includes it so later runs compare
+  like for like. The option had been wired to a paid gate that no longer
+  existed, so no desktop scan could run it.
+- Browser analysis now delivers Core Web Vitals, the browser build, and axe
+  results again. The analyzer read every result back through the window
+  title, which Tauri only updates from the page when asked, so each read
+  silently timed out and every scan recorded the browser layer as having run
+  with nothing to show for it.
+- Accessibility results and Core Web Vitals now cross from the scanned page in
+  chunks. The platform truncates a document title to 1000 characters, so a
+  full axe report written into one title never parsed and the pass timed out
+  after 20 seconds; a Web Vitals payload carrying several JavaScript errors
+  was lost the same way.
+- Accessibility analysis no longer takes fifteen seconds a page. The hidden
+  analyzer window was timer-throttled as a background tab, on macOS by WebKit
+  and on Windows by Chromium, and axe-core schedules its rule batches through
+  timers. The analyzer now switches the throttle off before the page loads,
+  so axe finishes in well under a second and the page under measurement runs
+  at its normal speed.
+
+### Security
+
+- The hidden analyzer webview removes the WebRTC and WebTransport interfaces
+  from every frame before a scanned page's scripts run, closing the one path a
+  page had around the private-network subresource rules on macOS and Windows.
+- The PageSpeed API key is no longer captured as a tracing span field. No
+  shipped build wrote it to a log file, because span fields are only forwarded
+  at trace level and the app never logs at that level.
+
 ## [1.2.0] - 2026-09-01
 
 ### Added

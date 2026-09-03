@@ -3,7 +3,24 @@ import { countGroupedCodeIssues } from "@/lib/issue-ranking";
 import type { CodeIssue, CodeScanDomain, CodeScanResult, CodeScanSummary } from "@/lib/types";
 import type { LatestCodeScanSnapshot, ProjectSignalSnapshot } from "@/lib/project-summary-types";
 
+// Full code scan reports are heavy (a complete issue list per project), so
+// the primed cache is bounded and evicted least-recently-used. Both reads
+// (a merge that prefers the primed entry) and writes count as "used".
+const MAX_PRIMED_CODE_SCAN_SNAPSHOTS = 5;
+
 const primedCodeScanSnapshots = new Map<number, LatestCodeScanSnapshot>();
+
+// Map iteration order is insertion order, so deleting then re-setting a key
+// moves it to the end and the first key is always the least recently used.
+function touchPrimedCodeScanSnapshot(projectId: number, snapshot: LatestCodeScanSnapshot) {
+  primedCodeScanSnapshots.delete(projectId);
+  primedCodeScanSnapshots.set(projectId, snapshot);
+  while (primedCodeScanSnapshots.size > MAX_PRIMED_CODE_SCAN_SNAPSHOTS) {
+    const oldestProjectId = primedCodeScanSnapshots.keys().next().value;
+    if (oldestProjectId === undefined) break;
+    primedCodeScanSnapshots.delete(oldestProjectId);
+  }
+}
 
 function summarizeTopDomain(issues: CodeIssue[]): {
   topDomain: CodeScanDomain | null;
@@ -129,8 +146,16 @@ export function shouldPreferPrimed(
 function mergePrimedCodeScan(snapshot: ProjectSignalSnapshot): ProjectSignalSnapshot {
   const primed = primedCodeScanSnapshots.get(snapshot.projectId);
   if (!shouldPreferPrimed(primed, snapshot)) {
+    // Persisted scan data has caught up with (or passed) the primed report,
+    // so the cached copy is redundant. Drop it instead of holding the full
+    // report indefinitely.
+    if (primed) {
+      primedCodeScanSnapshots.delete(snapshot.projectId);
+    }
     return snapshot;
   }
+  // The primed report is still the freshest source; mark it recently used.
+  touchPrimedCodeScanSnapshot(snapshot.projectId, primed);
   const mergedPrimedSummary = mergeSummaryWithPersistedCounts(
     primed.summary,
     snapshot.codeScanSummary,
@@ -165,7 +190,7 @@ export function mergePrimedCodeScanForAccess(
 
 export function primeLatestCodeScanSnapshot(result: CodeScanResult) {
   const hasDetailedIssuePayload = result.issues.length > 0 || result.issueCount === 0;
-  primedCodeScanSnapshots.set(result.projectId, {
+  touchPrimedCodeScanSnapshot(result.projectId, {
     summary: buildCodeScanSummary(result),
     result: hasDetailedIssuePayload ? result : null,
   });

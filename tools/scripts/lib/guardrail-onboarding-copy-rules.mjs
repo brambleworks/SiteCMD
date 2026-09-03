@@ -1,5 +1,6 @@
 const ONBOARDING_COPY_FILES = [
   "apps/desktop/src/components/layout/PageGuide.tsx",
+  "apps/desktop/src/components/layout/PageGuidePanel.tsx",
   "apps/desktop/src/app/FirstRunWalkthrough.tsx",
 ];
 

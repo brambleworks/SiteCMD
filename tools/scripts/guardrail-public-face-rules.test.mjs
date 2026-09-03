@@ -10,12 +10,16 @@ const CONNECTED_SPECS = "docs/engineering/connected-service";
 const PRODUCT_DOCS = "docs/product";
 const LOCALHOST_FIXTURES = "apps/desktop/src-tauri/src/core/localhost.rs";
 const PROTOCOL_SPEC = `${CONNECTED_SPECS}/connected-protocol-spec.md`;
+const README = "README.md";
+const PRODUCT_FACTS = "product-facts.json";
 
 function realFiles() {
   const files = {
     [DOCS_INDEX]: realRead(DOCS_INDEX),
     [CONTRIBUTING]: realRead(CONTRIBUTING),
     [LOCALHOST_FIXTURES]: realRead(LOCALHOST_FIXTURES),
+    [README]: realRead(README),
+    [PRODUCT_FACTS]: realRead(PRODUCT_FACTS),
   };
   for (const name of fs.readdirSync(path.join(ROOT, CONNECTED_SPECS))) {
     if (name.endsWith(".md"))
@@ -89,6 +93,36 @@ describe("publicFaceFailures", () => {
         files[LOCALHOST_FIXTURES] += '("https://upstage.ai", "production"),\n';
       }),
     ).toContain("real third-party domain");
+  });
+
+  it("rejects a README check count that drifted from the generated facts", () => {
+    expect(
+      run((files) => {
+        files[README] = files[README].replace(
+          /^\| Web Scan(\s+)\|(\s+)157 \|/m,
+          "| Web Scan$1|$2 99 |",
+        );
+      }),
+    ).toContain("Run pnpm facts:generate");
+  });
+
+  it("rejects a README that dropped a check-count row entirely", () => {
+    expect(
+      run((files) => {
+        files[README] = files[README].replace(/^\| Code Scan .*\n/m, "");
+      }),
+    ).toContain('must keep a "Code Scan" row');
+  });
+
+  it("rejects a dependency-ecosystem count the generated facts do not support", () => {
+    expect(
+      run((files) => {
+        files[README] = files[README].replace(
+          "across 8 package ecosystems",
+          "across 40 package ecosystems",
+        );
+      }),
+    ).toContain("package ecosystems");
   });
 
   it("rejects a real tunnelling host the message already claimed to cover", () => {

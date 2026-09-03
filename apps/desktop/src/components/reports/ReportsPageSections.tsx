@@ -258,7 +258,7 @@ export function ReportsHistorySection({
                     SiteCMD Score {summary.site_score}/100 · {summary.site_critical} critical ·{" "}
                     {summary.site_high} high
                     {savedSections.code_scan && summary.has_code_scan
-                      ? ` · linked code ${summary.code_critical ?? 0} critical · ${summary.code_high ?? 0} high`
+                      ? ` · code ${summary.code_critical ?? 0} critical · ${summary.code_high ?? 0} high`
                       : ""}
                     {savedSections.code_scan && summary.code_top_domain
                       ? ` · ${summary.code_top_domain}`

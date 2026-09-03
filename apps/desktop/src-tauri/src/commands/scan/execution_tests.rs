@@ -78,3 +78,23 @@ fn issue_changes_reconcile_the_open_total_across_an_execution() {
         changes.open_issues
     );
 }
+
+// `validate_plan` runs on the async runtime, so every database read inside it
+// must go through the async interface; the blocking sibling parks a runtime
+// worker on the SQLite thread for the whole read.
+#[test]
+fn plan_validation_resolves_the_project_folder_off_the_async_worker() {
+    const SOURCE: &str = include_str!("execution.rs");
+    // The part of the module that ships, with its test declaration stripped.
+    let production = SOURCE
+        .split_once("\n#[cfg(test)]")
+        .map_or(SOURCE, |(production, _)| production);
+    assert!(
+        production.contains("resolve_registered_project_dir_async("),
+        "validate_plan must resolve the registered project folder through the async interface"
+    );
+    assert!(
+        !production.contains("crate::project_paths::resolve_registered_project_dir("),
+        "the blocking project-folder resolver must not run on the async worker"
+    );
+}

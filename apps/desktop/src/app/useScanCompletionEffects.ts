@@ -7,14 +7,12 @@ import type { ScanSummary } from "@/hooks/useHistory";
 import type { AppTarget } from "@/lib/app-targets";
 import { completeJob, failJob } from "@/lib/jobs";
 import { getScanProgressSnapshot } from "@/lib/scan-progress-store";
-import {
-  handleCodeScanCompletion,
-  handleFullMultiScanCompletion,
-  handleFullScanCompletion,
-  handleMultiScanCompletion,
-  handleWebScanCompletion,
-} from "@/lib/scan-completion-effects";
 import { markFirstScanCompleted } from "@/lib/onboarding-flags";
+
+// The completion handlers pull in the code-scan comparison and insight
+// modules, none of which first paint needs: a scan has to finish before any of
+// this runs, so the chunk loads then instead of at startup.
+const loadScanCompletionEffects = () => import("@/lib/scan-completion-effects");
 import { formatScanError, parseScanError } from "@/lib/scan-error";
 import type { PostScanFollowUpBanner } from "@/lib/scan-follow-up";
 import type {
@@ -140,108 +138,118 @@ export function useScanCompletionEffects({
     }
 
     if (state === "complete" && isFullSingleCompletion && result && codeResult) {
-      void handleFullScanCompletion({
-        result,
-        codeResult,
-        activeEnvUrl,
-        activeProjectId,
-        currentProjectName: activeProjectName,
-        scanBackgrounded: scanBackgroundedRef.current,
-        scanContext: scanJobContextRef.current,
-        completeJob,
-        loadHistory,
-        loadLatestWebScanId,
-        activeScanScope,
-        desktopNotificationsEnabled,
-        openAppTarget,
-        refreshProjects,
-        setScanFollowUpBanner,
-        toast,
-      });
+      void loadScanCompletionEffects().then(({ handleFullScanCompletion }) =>
+        handleFullScanCompletion({
+          result,
+          codeResult,
+          activeEnvUrl,
+          activeProjectId,
+          currentProjectName: activeProjectName,
+          scanBackgrounded: scanBackgroundedRef.current,
+          scanContext: scanJobContextRef.current,
+          completeJob,
+          loadHistory,
+          loadLatestWebScanId,
+          activeScanScope,
+          desktopNotificationsEnabled,
+          openAppTarget,
+          refreshProjects,
+          setScanFollowUpBanner,
+          toast,
+        }),
+      );
       return;
     }
 
     if (state === "complete" && isFullMultiCompletion && multiResult && codeResult) {
-      void handleFullMultiScanCompletion({
-        multiResult,
-        codeResult,
-        activeEnvUrl,
-        activeProjectId,
-        currentProjectName: activeProjectName,
-        scanBackgrounded: scanBackgroundedRef.current,
-        scanContext: scanJobContextRef.current,
-        completeJob,
-        loadHistory,
-        loadLatestSessionSummary,
-        activeScanScope,
-        desktopNotificationsEnabled,
-        openAppTarget,
-        refreshProjects,
-        setScanFollowUpBanner,
-        toast,
-      });
+      void loadScanCompletionEffects().then(({ handleFullMultiScanCompletion }) =>
+        handleFullMultiScanCompletion({
+          multiResult,
+          codeResult,
+          activeEnvUrl,
+          activeProjectId,
+          currentProjectName: activeProjectName,
+          scanBackgrounded: scanBackgroundedRef.current,
+          scanContext: scanJobContextRef.current,
+          completeJob,
+          loadHistory,
+          loadLatestSessionSummary,
+          activeScanScope,
+          desktopNotificationsEnabled,
+          openAppTarget,
+          refreshProjects,
+          setScanFollowUpBanner,
+          toast,
+        }),
+      );
       return;
     }
 
     if (state === "complete" && codeResult) {
-      void handleCodeScanCompletion({
-        codeHistory,
-        codeResult,
-        activeEnvUrl,
-        activeProjectId,
-        currentProjectName: activeProjectName,
-        scanBackgrounded: scanBackgroundedRef.current,
-        scanContext: scanJobContextRef.current,
-        completeJob,
-        loadHistory,
-        activeScanScope,
-        desktopNotificationsEnabled,
-        openAppTarget,
-        refreshProjects,
-        setScanFollowUpBanner,
-        toast,
-      });
+      void loadScanCompletionEffects().then(({ handleCodeScanCompletion }) =>
+        handleCodeScanCompletion({
+          codeHistory,
+          codeResult,
+          activeEnvUrl,
+          activeProjectId,
+          currentProjectName: activeProjectName,
+          scanBackgrounded: scanBackgroundedRef.current,
+          scanContext: scanJobContextRef.current,
+          completeJob,
+          loadHistory,
+          activeScanScope,
+          desktopNotificationsEnabled,
+          openAppTarget,
+          refreshProjects,
+          setScanFollowUpBanner,
+          toast,
+        }),
+      );
       return;
     }
 
     if (state === "complete" && result) {
-      void handleWebScanCompletion({
-        result,
-        history,
-        activeEnvUrl,
-        activeProjectId,
-        scanBackgrounded: scanBackgroundedRef.current,
-        scanContext: scanJobContextRef.current,
-        completeJob,
-        loadHistory,
-        loadLatestWebScanId,
-        activeScanScope,
-        desktopNotificationsEnabled,
-        openAppTarget,
-        refreshProjects,
-        setScanFollowUpBanner,
-        toast,
-      });
+      void loadScanCompletionEffects().then(({ handleWebScanCompletion }) =>
+        handleWebScanCompletion({
+          result,
+          history,
+          activeEnvUrl,
+          activeProjectId,
+          scanBackgrounded: scanBackgroundedRef.current,
+          scanContext: scanJobContextRef.current,
+          completeJob,
+          loadHistory,
+          loadLatestWebScanId,
+          activeScanScope,
+          desktopNotificationsEnabled,
+          openAppTarget,
+          refreshProjects,
+          setScanFollowUpBanner,
+          toast,
+        }),
+      );
       return;
     }
 
     if (state === "complete" && multiResult) {
-      void handleMultiScanCompletion({
-        multiResult,
-        activeEnvUrl,
-        activeProjectId,
-        scanBackgrounded: scanBackgroundedRef.current,
-        scanContext: scanJobContextRef.current,
-        completeJob,
-        loadHistory,
-        loadLatestSessionSummary,
-        activeScanScope,
-        desktopNotificationsEnabled,
-        openAppTarget,
-        refreshProjects,
-        setScanFollowUpBanner,
-        toast,
-      });
+      void loadScanCompletionEffects().then(({ handleMultiScanCompletion }) =>
+        handleMultiScanCompletion({
+          multiResult,
+          activeEnvUrl,
+          activeProjectId,
+          scanBackgrounded: scanBackgroundedRef.current,
+          scanContext: scanJobContextRef.current,
+          completeJob,
+          loadHistory,
+          loadLatestSessionSummary,
+          activeScanScope,
+          desktopNotificationsEnabled,
+          openAppTarget,
+          refreshProjects,
+          setScanFollowUpBanner,
+          toast,
+        }),
+      );
       return;
     }
 

@@ -218,7 +218,9 @@
     transform: rotate(-90deg);
   }
   .scan-overlay-ring-progress {
-    transition: all 500ms ease-out;
+    /* The percent is already smoothed in JS every 50 ms; this only bridges
+       ticks. A long eased transition here fights that and stutters. */
+    transition: stroke-dashoffset 120ms linear;
   }
   .scan-overlay-ring-label {
     position: relative;
@@ -246,9 +248,6 @@
     font-size: var(--text-md);
     line-height: 1.43;
     font-weight: 600;
-  }
-  .scan-overlay-subcaption {
-    margin-top: var(--space-tight);
   }
   .scan-overlay-page-count {
     margin-bottom: var(--space-tight);
@@ -337,7 +336,7 @@
     gap: 0.375rem;
   }
   .scan-overlay-bar-fill {
-    transition-timing-function: ease-out;
+    transition: width 120ms linear;
   }
   .scan-overlay-bar-track {
     margin-bottom: var(--space-card);

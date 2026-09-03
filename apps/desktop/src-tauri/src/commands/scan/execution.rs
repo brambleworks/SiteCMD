@@ -186,11 +186,13 @@ async fn validate_plan(
     let project_path = if code_requested {
         match request.project_id {
             Some(project_id) => {
-                match crate::project_paths::resolve_registered_project_dir(
+                match crate::project_paths::resolve_registered_project_dir_async(
                     db,
                     project_id,
                     request.project_path.as_deref(),
-                ) {
+                )
+                .await
+                {
                     Ok(path) => Some(
                         crate::core::code_scan::validate_project_path(&path)
                             .map_err(crate::commands::sanitize_error)?

@@ -91,7 +91,7 @@ impl CwvRating {
 /// Fetch PageSpeed Insights report for a URL.
 ///
 /// `strategy`: "mobile" or "desktop". Defaults to "mobile" if empty.
-#[tracing::instrument(skip(url), fields(strategy = %strategy))]
+#[tracing::instrument(skip(url, api_key), fields(strategy = %strategy))]
 pub async fn fetch_pagespeed_report(
     url: &str,
     strategy: &str,

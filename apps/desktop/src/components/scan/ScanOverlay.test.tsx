@@ -1,6 +1,25 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { MultiScanProgressEvent, ScanProgressEvent } from "@/hooks/useScan";
+import {
+  beginScanRun,
+  publishMultiScanProgress,
+  publishScanProgress,
+  resetScanProgress,
+} from "@/lib/scan-progress-store";
 import { ScanOverlay } from "./ScanOverlay";
+
+// The percent comes from the progress store's run model, not from props, so
+// tests that read it feed the store the same event they render.
+function progressOf(event: ScanProgressEvent): ScanProgressEvent {
+  publishScanProgress(event);
+  return event;
+}
+
+function pagesOf(event: MultiScanProgressEvent): MultiScanProgressEvent {
+  publishMultiScanProgress(event);
+  return event;
+}
 
 const CODE_SCAN_STAGE_LABELS = [
   "Project Files",
@@ -25,18 +44,19 @@ function stageState(label: string) {
 describe("ScanOverlay", () => {
   afterEach(() => {
     vi.useRealTimers();
+    resetScanProgress();
   });
 
   it("renders code scans as a full phased scan instead of a generic spinner", () => {
     render(<ScanOverlay progress={null} scanType="code" url="https://example.com" />);
 
     expect(screen.getByText("Code Scan")).toBeInTheDocument();
-    expect(screen.getByText("Scanning linked project code")).toBeInTheDocument();
+    expect(screen.getByText("Scanning code for example.com")).toBeInTheDocument();
     expect(screen.getByText("Checking")).toBeInTheDocument();
     expect(
       screen.getByText("Finding source files and project config that belong in the audit."),
     ).toBeInTheDocument();
-    expect(screen.getByText("5% complete · Project Files")).toBeInTheDocument();
+    expect(screen.getByText("0% complete · Project Files")).toBeInTheDocument();
 
     for (const label of CODE_SCAN_STAGE_LABELS) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
@@ -56,14 +76,14 @@ describe("ScanOverlay", () => {
   it("uses backend code scan progress instead of timer-based fake progress", () => {
     render(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "code-scan.analyze-source",
           category: "config",
           status: "running",
           results_count: 12,
           checks_done: 44,
           checks_total: 100,
-        }}
+        })}
         scanType="code"
         url="https://example.com"
       />,
@@ -76,22 +96,23 @@ describe("ScanOverlay", () => {
 
   it("smooths sudden backend progress jumps after the overlay has started", () => {
     vi.useFakeTimers();
+    beginScanRun({ web: null, code: true });
     const { rerender } = render(
       <ScanOverlay progress={null} scanType="code" url="https://example.com" />,
     );
 
-    expect(visiblePercent()).toBe(5);
+    expect(visiblePercent()).toBe(0);
 
     rerender(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "code-scan.analyze-source",
           category: "config",
           status: "running",
           results_count: 3,
           checks_done: 80,
           checks_total: 100,
-        }}
+        })}
         scanType="code"
         url="https://example.com"
       />,
@@ -171,23 +192,24 @@ describe("ScanOverlay", () => {
 
   it("keeps multi-page progress monotonic without replaying the category stage grid", () => {
     vi.useFakeTimers();
+    beginScanRun({ web: "health", code: false, pageCount: 2 });
     const { rerender } = render(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "browser-analysis",
           category: "performance",
           status: "complete",
           results_count: 2,
-          checks_done: 10,
-          checks_total: 10,
-        }}
-        multiProgress={{
+          checks_done: 0,
+          checks_total: 0,
+        })}
+        multiProgress={pagesOf({
           page_index: 0,
           page_count: 2,
           current_url: "https://example.com",
           page_status: "complete",
           session_id: 9,
-        }}
+        })}
         scanType="health"
         url="https://example.com"
       />,
@@ -199,27 +221,29 @@ describe("ScanOverlay", () => {
 
     rerender(
       <ScanOverlay
-        progress={{
-          check_id: "fetch",
-          category: "security",
-          status: "running",
-          results_count: 0,
-          checks_done: 0,
-          checks_total: 10,
-        }}
-        multiProgress={{
+        multiProgress={pagesOf({
           page_index: 1,
           page_count: 2,
           current_url: "https://example.com/about",
           page_status: "scanning",
           session_id: 9,
-        }}
+        })}
+        progress={progressOf({
+          check_id: "fetch",
+          category: "security",
+          status: "running",
+          results_count: 0,
+          checks_done: 0,
+          checks_total: 0,
+        })}
         scanType="health"
         url="https://example.com"
       />,
     );
 
-    expect(visiblePercent()).toBe(firstPagePercent);
+    // The second page starts from the first page's half, never below it.
+    expect(visiblePercent()).toBeGreaterThanOrEqual(firstPagePercent);
+    expect(visiblePercent()).toBeLessThanOrEqual(52);
     expect(screen.queryByTestId("scan-stages")).not.toBeInTheDocument();
   });
 
@@ -278,24 +302,25 @@ describe("ScanOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Scanning linked project code")).toBeInTheDocument();
+    expect(screen.getByText("Scanning code for example.com")).toBeInTheDocument();
     expect(screen.getByTestId("scan-run-context")).toHaveTextContent(
       /^Full Scan · Step 2 of 2 · Code Scan$/,
     );
   });
 
-  it("starts code progress from the beginning when a full scan moves from web to code", () => {
+  it("fills the web ring, then starts a fresh ring for the code step of a full scan", () => {
     vi.useFakeTimers();
+    beginScanRun({ web: "health", code: true });
     const { rerender } = render(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "browser-analysis",
           category: "performance",
           status: "running",
           results_count: 0,
-          checks_done: 8,
-          checks_total: 8,
-        }}
+          checks_done: 0,
+          checks_total: 0,
+        })}
         scanType="full"
         url="https://example.com"
         scanRunStep={{
@@ -307,20 +332,25 @@ describe("ScanOverlay", () => {
       />,
     );
 
+    // The browser pass owns the last third of the web ring and drifts toward its end.
+    expect(visiblePercent()).toBe(68);
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
+    const beforeHandoff = visiblePercent();
+    expect(beforeHandoff).toBeGreaterThan(95);
+    expect(beforeHandoff).toBeLessThanOrEqual(100);
 
     rerender(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "code-scan.collect-files",
           category: "config",
           status: "running",
           results_count: 0,
           checks_done: 5,
           checks_total: 100,
-        }}
+        })}
         scanType="full"
         url="https://example.com"
         scanRunStep={{
@@ -332,7 +362,19 @@ describe("ScanOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Scanning linked project code")).toBeInTheDocument();
+    // The code step is its own ring: it snaps to the code scan's start
+    // instead of gliding down from the web ring's 100.
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(visiblePercent()).toBeGreaterThanOrEqual(5);
+    expect(visiblePercent()).toBeLessThan(15);
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(visiblePercent()).toBeGreaterThan(5);
+    expect(visiblePercent()).toBeLessThan(15);
+    expect(screen.getByText("Scanning code for example.com")).toBeInTheDocument();
     expect(screen.getByTestId("scan-run-context")).toHaveTextContent(
       /^Full Scan · Step 2 of 2 · Code Scan$/,
     );
@@ -351,7 +393,7 @@ describe("ScanOverlay", () => {
       />,
     );
 
-    expect(screen.getByText("Scanning linked project code")).toBeInTheDocument();
+    expect(screen.getByText("Scanning code for example.com")).toBeInTheDocument();
     expect(screen.queryByText("Scanning example.com")).not.toBeInTheDocument();
   });
 
@@ -387,14 +429,14 @@ describe("ScanOverlay", () => {
   it("shows web scan phase progress instead of resetting to zero for uncounted phases", () => {
     render(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "polish-css",
           category: "polish",
           status: "running",
           results_count: 0,
           checks_done: 0,
           checks_total: 0,
-        }}
+        })}
         scanType="health"
         url="https://example.com"
       />,
@@ -402,7 +444,7 @@ describe("ScanOverlay", () => {
 
     expect(screen.getAllByText("Polish").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Fetching styles").length).toBeGreaterThan(0);
-    expect(screen.getByText("70")).toBeInTheDocument();
+    expect(screen.getByText("60")).toBeInTheDocument();
   });
 
   it("paces visible web scan phase changes instead of skipping straight to the latest event", () => {
@@ -546,42 +588,50 @@ describe("ScanOverlay", () => {
     expect(screen.getByText("scan")).toBeInTheDocument();
   });
 
-  it("reserves the final quarter of progress for browser analysis", () => {
+  it("gives browser analysis the last third and keeps it moving until it lands", () => {
     vi.useFakeTimers();
+    beginScanRun({ web: "health", code: false });
     const { rerender } = render(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "browser-analysis",
           category: "performance",
           status: "running",
           results_count: 0,
           checks_done: 0,
           checks_total: 0,
-        }}
+        })}
         scanType="health"
         url="https://example.com"
       />,
     );
 
-    expect(visiblePercent()).toBe(75);
-    act(() => {
-      vi.advanceTimersByTime(10_000);
-    });
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-    expect(visiblePercent()).toBeGreaterThanOrEqual(95);
+    expect(visiblePercent()).toBe(68);
+    const seen: number[] = [];
+    for (let tick = 0; tick < 22; tick += 1) {
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      seen.push(visiblePercent());
+    }
+    // Eleven seconds without an event: still climbing, never at 100.
+    for (let index = 1; index < seen.length; index += 1) {
+      expect(seen[index]).toBeGreaterThanOrEqual(seen[index - 1]);
+    }
+    expect(seen[seen.length - 1]).toBeGreaterThanOrEqual(95);
+    expect(seen[seen.length - 1]).toBeLessThan(100);
+    expect(new Set(seen).size).toBeGreaterThan(8);
 
     rerender(
       <ScanOverlay
-        progress={{
+        progress={progressOf({
           check_id: "browser-analysis",
           category: "performance",
           status: "complete",
           results_count: 0,
           checks_done: 0,
           checks_total: 0,
-        }}
+        })}
         scanType="health"
         url="https://example.com"
       />,
@@ -590,6 +640,39 @@ describe("ScanOverlay", () => {
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
-    expect(visiblePercent()).toBe(99);
+    expect(visiblePercent()).toBe(100);
+  });
+
+  it("keeps the number moving through the origin-check wait instead of freezing", () => {
+    vi.useFakeTimers();
+    beginScanRun({ web: "health", code: false });
+    render(
+      <ScanOverlay
+        progress={progressOf({
+          check_id: "config.www_redirect",
+          category: "config",
+          status: "running",
+          results_count: 0,
+          checks_done: 90,
+          checks_total: 127,
+        })}
+        scanType="health"
+        url="https://example.com"
+      />,
+    );
+
+    const seen: number[] = [];
+    for (let tick = 0; tick < 12; tick += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      seen.push(visiblePercent());
+    }
+    for (let index = 1; index < seen.length; index += 1) {
+      expect(seen[index]).toBeGreaterThanOrEqual(seen[index - 1]);
+    }
+    expect(seen[0]).toBeGreaterThan(45);
+    expect(seen[seen.length - 1]).toBeGreaterThan(seen[0]);
+    expect(seen[seen.length - 1]).toBeLessThan(60);
   });
 });

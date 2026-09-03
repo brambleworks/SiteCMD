@@ -191,7 +191,7 @@ function buildFullScanEvent(webScan: SiteEvent, codeScan: SiteEvent): ActivityFe
     severity: mergeSeverity(webScan.severity, codeScan.severity),
     occurredAtMs: newerEvent.occurredAtMs,
     title: SCAN_LABELS.full,
-    summary: summary || "Live site and linked code checked",
+    summary: summary || "Live site and code checked",
     source: newerEvent.source,
     sourceId: newerEvent.sourceId,
     detail: newerEvent.detail,

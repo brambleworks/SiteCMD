@@ -10,7 +10,7 @@ import {
 import { ChevronDown, Loader2, Play, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getHostname } from "@/lib/utils";
-import { SearchTrigger } from "./CommandPalette";
+import { SearchTrigger } from "./SearchTrigger";
 import type { ProjectRecord, EnvironmentRecord } from "@/hooks/useProject";
 
 function focusMenuItem(itemRefs: RefObject<Array<HTMLButtonElement | null>>, index: number) {
