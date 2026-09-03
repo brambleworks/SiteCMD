@@ -139,12 +139,12 @@ impl AxeReport {
     }
 }
 
-/// Parse one payload result. The payload reports its own failures as
-/// `{"error": "..."}`, which is a failed run and not an empty one - treating
-/// it as an empty report would claim every rule proved absence.
-pub fn parse_axe_report(json: &str) -> Result<AxeReport, String> {
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|error| format!("axe payload was not valid JSON: {error}"))?;
+/// Parse one payload result the adapter has already decoded. Every adapter
+/// decodes first so it can read the payload's document identity from the same
+/// value. The payload reports its own failures as `{"error": "..."}`, which is
+/// a failed run and not an empty one - treating it as an empty report would
+/// claim every rule proved absence.
+pub fn axe_report_from_value(value: serde_json::Value) -> Result<AxeReport, String> {
     if let Some(error) = value.get("error").and_then(serde_json::Value::as_str) {
         return Err(error.to_string());
     }

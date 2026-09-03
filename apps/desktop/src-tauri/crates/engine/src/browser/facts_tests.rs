@@ -1,5 +1,14 @@
 use super::*;
 
+/// Adapters decode the payload before parsing it so they can read its
+/// document identity from the same value; these fixtures are written as the
+/// raw payload text, so they decode the same way.
+fn report_from_json(json: &str) -> Result<AxeReport, String> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| format!("axe payload was not valid JSON: {error}"))?;
+    axe_report_from_value(value)
+}
+
 fn violation(id: &str) -> AxeViolation {
     AxeViolation {
         id: id.into(),
@@ -85,13 +94,13 @@ fn executed_rules_spans_every_bucket_once() {
 
 #[test]
 fn a_payload_error_is_a_failed_run_not_an_empty_one() {
-    let error = parse_axe_report(r#"{"error":"axe-core not loaded"}"#).unwrap_err();
+    let error = report_from_json(r#"{"error":"axe-core not loaded"}"#).unwrap_err();
     assert_eq!(error, "axe-core not loaded");
 }
 
 #[test]
 fn a_parsed_report_carries_every_bucket_and_sanitizes_evidence() {
-    let report = parse_axe_report(
+    let report = report_from_json(
         r##"{
             "violations": [{
                 "id": "image-alt",
@@ -125,7 +134,7 @@ fn a_parsed_report_carries_every_bucket_and_sanitizes_evidence() {
 
 #[test]
 fn a_report_without_bucket_arrays_still_parses_as_uncovered() {
-    let report = parse_axe_report(r#"{"violations":[]}"#).expect("legacy report parses");
+    let report = report_from_json(r#"{"violations":[]}"#).expect("legacy report parses");
     assert!(report.executed_rules().is_empty());
     assert_eq!(report.rule_outcome("image-alt"), RuleOutcome::NotRun);
 }

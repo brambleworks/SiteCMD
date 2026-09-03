@@ -14,6 +14,44 @@ pub const FCP_CHECK_ID: &str = "performance.fcp";
 pub const LONG_TASK_BLOCKING_CHECK_ID: &str = "performance.long_task_blocking";
 pub const JS_ERRORS_CHECK_ID: &str = "polish.js-errors";
 
+/// Markers of errors the analyzer's own runtime raises inside the page: a
+/// Tauri plugin init script runs in every webview of the app and its command
+/// is refused in the analyzer, so its rejection names SiteCMD, never the
+/// page. `cwv_observer.js` skips these messages as they happen and this
+/// verdict drops them from a sample that still carries them.
+pub const ANALYZER_RUNTIME_ERROR_MARKERS: [&str; 2] = ["not allowed on window", "__TAURI"];
+
+/// A Tauri command is always `plugin:<name>|<command>`. The pipe is what
+/// makes the name the analyzer's: a bare `plugin:` is the page's own, since a
+/// Vite or Rollup overlay error reads `[plugin:vite:import-analysis] ...` and
+/// the recorded message can carry the failing script's URL as well.
+const TAURI_COMMAND_PREFIX: &str = "plugin:";
+
+/// Whether a recorded error message describes the analyzer runtime rather
+/// than the page under test. Dropping a page error here would turn
+/// `polish.js-errors` into a pass the run never observed, so the Tauri
+/// command shape has to match, not just its prefix.
+pub fn is_analyzer_runtime_error(message: &str) -> bool {
+    ANALYZER_RUNTIME_ERROR_MARKERS
+        .iter()
+        .any(|marker| message.contains(marker))
+        || names_a_tauri_command(message)
+}
+
+fn names_a_tauri_command(message: &str) -> bool {
+    message
+        .match_indices(TAURI_COMMAND_PREFIX)
+        .any(|(index, prefix)| {
+            let rest = &message[index + prefix.len()..];
+            let name_len = rest
+                .find(|character: char| {
+                    !character.is_ascii_alphanumeric() && !"_-.".contains(character)
+                })
+                .unwrap_or(rest.len());
+            name_len > 0 && rest[name_len..].starts_with('|')
+        })
+}
+
 /// Grade one sample. Metrics the browser engine did not report are absent
 /// rather than zero, so an unsupported metric produces no row instead of a
 /// perfect score.
@@ -59,7 +97,19 @@ pub fn evaluate_core_web_vitals(cwv: &CoreWebVitals) -> Vec<CheckResult> {
         results.push(long_task_blocking_result(observed_blocking));
     }
     if let Some(error_count) = cwv.js_error_count {
-        results.push(js_errors_result(error_count, &cwv.js_errors));
+        let page_sample: Vec<String> = cwv
+            .js_errors
+            .iter()
+            .filter(|message| !is_analyzer_runtime_error(message))
+            .cloned()
+            .collect();
+        // The sample is capped, so only the runtime errors it actually holds
+        // can be subtracted; the count never goes below the page's own errors.
+        let dropped = u32::try_from(cwv.js_errors.len() - page_sample.len()).unwrap_or(u32::MAX);
+        results.push(js_errors_result(
+            error_count.saturating_sub(dropped),
+            &page_sample,
+        ));
     }
 
     results

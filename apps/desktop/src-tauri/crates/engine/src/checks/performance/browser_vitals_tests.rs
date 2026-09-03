@@ -232,3 +232,116 @@ fn no_javascript_errors_passes_without_remediation() {
     assert!(errors.manual_fix.is_none());
     assert!(errors.why_it_matters.is_none());
 }
+
+const ANALYZER_RUNTIME_REJECTION: &str = "Unhandled promise rejection: notification.is_permission_granted not allowed on window \"analyzer-1788391062761\", webview \"analyzer-1788391062761\", URL: https://example.com/";
+
+#[test]
+fn the_analyzer_runtime_rejection_is_not_a_page_error() {
+    // The notification plugin's init script runs in every webview of the app
+    // and its command is refused in the analyzer; the page did nothing wrong.
+    let rows = evaluate_core_web_vitals(&CoreWebVitals {
+        js_error_count: Some(1),
+        js_errors: vec![ANALYZER_RUNTIME_REJECTION.into()],
+        ..sample()
+    });
+    let errors = row(&rows, "polish.js-errors");
+    assert_eq!(errors.status, CheckStatus::Pass);
+    assert_eq!(
+        errors.raw_data.as_ref().expect("raw data")["error_count"],
+        0
+    );
+}
+
+#[test]
+fn a_page_error_beside_the_runtime_rejection_still_counts() {
+    let rows = evaluate_core_web_vitals(&CoreWebVitals {
+        js_error_count: Some(2),
+        js_errors: vec![
+            ANALYZER_RUNTIME_REJECTION.into(),
+            "TypeError: undefined is not an object (evaluating 'window.dataLayer.push') (https://example.com/app.js:12)".into(),
+        ],
+        ..sample()
+    });
+    let errors = row(&rows, "polish.js-errors");
+    assert_eq!(errors.status, CheckStatus::Warn);
+    assert_eq!(errors.title, "JavaScript error during page load");
+    let raw = errors.raw_data.as_ref().expect("raw data");
+    assert_eq!(raw["error_count"], 1);
+    assert_eq!(raw["errors"].as_array().map(Vec::len), Some(1));
+    assert!(!errors.description.contains("not allowed on window"));
+}
+
+#[test]
+fn every_runtime_marker_names_the_analyzer_not_the_page() {
+    for message in [
+        "Unhandled promise rejection: notification.is_permission_granted not allowed on window \"analyzer-1\"",
+        "TypeError: window.__TAURI_INTERNALS__.invoke is not a function",
+        "Unhandled promise rejection: plugin:notification|is_permission_granted failed",
+    ] {
+        assert!(is_analyzer_runtime_error(message), "{message}");
+    }
+    assert!(!is_analyzer_runtime_error(
+        "TypeError: Cannot read properties of null (reading 'push')"
+    ));
+}
+
+#[test]
+fn a_bare_plugin_prefix_is_the_pages_own_error() {
+    // A Vite or Rollup overlay error reads "[plugin:vite:import-analysis]",
+    // and the observer appends the failing script URL to the message it
+    // records. Dropping either would report a pass the run never observed.
+    for message in [
+        "[plugin:vite:import-analysis] Failed to resolve import \"./missing\" from \"src/main.ts\"",
+        "Uncaught Error: rollup plugin: terser failed (https://example.com/app.js:12)",
+        "TypeError: undefined is not an object (https://example.com/plugins/plugin:loader.js:3)",
+    ] {
+        assert!(!is_analyzer_runtime_error(message), "{message}");
+    }
+    // The pipe is what makes the name a Tauri command.
+    assert!(is_analyzer_runtime_error(
+        "plugin:window-state|restore_state failed"
+    ));
+    assert!(!is_analyzer_runtime_error("plugin:|restore_state failed"));
+}
+
+#[test]
+fn a_vite_overlay_error_still_grades_as_a_page_error() {
+    let rows = evaluate_core_web_vitals(&CoreWebVitals {
+        js_error_count: Some(1),
+        js_errors: vec![
+            "[plugin:vite:import-analysis] Failed to resolve import \"./missing\"".into(),
+        ],
+        ..sample()
+    });
+    let errors = row(&rows, "polish.js-errors");
+    assert_eq!(errors.status, CheckStatus::Warn);
+    assert_eq!(
+        errors.raw_data.as_ref().expect("raw data")["error_count"],
+        1
+    );
+}
+
+#[test]
+fn the_observer_skips_the_same_runtime_markers_the_verdict_drops() {
+    // The in-page observer and this verdict must agree, or a payload from a
+    // runtime without the observer filter would grade differently.
+    // Pinning the whole array literal proves the two lists are identical:
+    // an extra marker in the page (a bare `plugin:`, say) would drop errors
+    // this verdict counts, and a missing one would count errors it drops.
+    let markers = format!(
+        "var shkRuntimeMarkers = [{}];",
+        ANALYZER_RUNTIME_ERROR_MARKERS
+            .iter()
+            .map(|marker| format!("\"{marker}\""))
+            .collect::<Vec<String>>()
+            .join(", ")
+    );
+    assert!(
+        crate::browser::CWV_OBSERVER_SCRIPT.contains(&markers),
+        "cwv_observer.js must skip exactly these markers: {markers}"
+    );
+    assert!(
+        crate::browser::CWV_OBSERVER_SCRIPT.contains(r"/plugin:[A-Za-z0-9_.-]+\|/"),
+        "cwv_observer.js must require the pipe that makes `plugin:` a Tauri command"
+    );
+}

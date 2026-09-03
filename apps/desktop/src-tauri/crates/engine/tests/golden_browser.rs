@@ -3,7 +3,7 @@
 //! Regenerate with `cargo test -p sitecmd-engine --test golden_browser -- --ignored regenerate`.
 
 use serde::Deserialize;
-use sitecmd_engine::browser::{AxeReport, CoreWebVitals};
+use sitecmd_engine::browser::{axe_report_from_value, AdmittedDocuments, AxeReport, CoreWebVitals};
 use sitecmd_engine::checks::accessibility::axe;
 use sitecmd_engine::checks::performance::browser_vitals;
 use sitecmd_engine::{CheckResult, CheckStatus, Severity};
@@ -31,6 +31,39 @@ struct RuleCoverageInput {
     report: AxeReport,
 }
 
+/// The raw payloads one navigation returned, with the documents the runtime
+/// admitted on the way; `document_url` rides inside each payload.
+#[derive(Deserialize)]
+struct DocumentIdentityInput {
+    target: String,
+    #[serde(default)]
+    admitted_hops: Vec<String>,
+    axe_payload: serde_json::Value,
+    cwv_payload: serde_json::Value,
+}
+
+/// What an adapter does with a navigation's payloads: nothing at all unless
+/// both name a document it admitted, then the axe and vitals verdicts.
+fn grade_admitted_payloads(input: DocumentIdentityInput) -> Vec<CheckResult> {
+    let parse = |raw: &str| url::Url::parse(raw).expect("document identity url parses");
+    let mut admitted = AdmittedDocuments::new(&parse(&input.target));
+    for hop in &input.admitted_hops {
+        admitted.admit(&parse(hop));
+    }
+    for payload in [&input.axe_payload, &input.cwv_payload] {
+        if admitted.verify_payload(payload).is_err() {
+            return Vec::new();
+        }
+    }
+    let report = axe_report_from_value(input.axe_payload).expect("axe payload parses");
+    let sample: CoreWebVitals =
+        serde_json::from_value(input.cwv_payload).expect("core web vitals payload parses");
+    axe::evaluate_axe_report(&report)
+        .into_iter()
+        .chain(browser_vitals::evaluate_core_web_vitals(&sample))
+        .collect()
+}
+
 fn corpus() -> Corpus {
     serde_json::from_str(CORPUS).expect("golden_browser.json parses")
 }
@@ -55,6 +88,9 @@ fn run_case(case: &Case) -> Vec<CheckResult> {
                 serde_json::from_value(case.input.clone()).expect("core web vitals input parses");
             browser_vitals::evaluate_core_web_vitals(&sample)
         }
+        "browser.document_identity" => grade_admitted_payloads(
+            serde_json::from_value(case.input.clone()).expect("document identity input parses"),
+        ),
         other => panic!("no browser-check driver registered for corpus id '{other}'"),
     }
 }
@@ -199,6 +235,57 @@ fn headline_verdicts_match_the_documented_behavior() {
         row(&rows_of("no_javascript_errors_passes"), "polish.js-errors").status,
         CheckStatus::Pass
     );
+
+    // The analyzer's own runtime rejection is not the page's error; a real
+    // page error beside it still counts, on its own.
+    assert_eq!(
+        row(
+            &rows_of("analyzer_runtime_rejection_is_not_a_page_error"),
+            "polish.js-errors"
+        )
+        .status,
+        CheckStatus::Pass
+    );
+    let beside = row(
+        &rows_of("a_page_error_beside_the_runtime_rejection_still_counts"),
+        "polish.js-errors",
+    );
+    assert_eq!(beside.status, CheckStatus::Warn);
+    assert_eq!(
+        beside
+            .raw_data
+            .as_ref()
+            .and_then(|data| data.get("error_count"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+
+    // A payload that names another document grades nothing, so the page
+    // reads as browser-unavailable rather than wrong; one that names the
+    // target, an admitted hop, or a same-host upgrade grades in full.
+    assert!(rows_of("payloads_from_another_document_grade_nothing").is_empty());
+    assert!(rows_of("payloads_without_document_identity_grade_nothing").is_empty());
+    for name in [
+        "payloads_from_the_analyzed_document_grade",
+        "payloads_from_an_admitted_redirect_hop_grade",
+        "payloads_after_a_same_host_https_upgrade_grade",
+    ] {
+        let rows = rows_of(name);
+        assert_eq!(
+            row(&rows, "accessibility.axe.html-has-lang").status,
+            CheckStatus::Pass,
+            "{name}"
+        );
+        assert_eq!(
+            row(&rows, "performance.ttfb")
+                .raw_data
+                .as_ref()
+                .and_then(|data| data.get("measurement_source"))
+                .and_then(serde_json::Value::as_str),
+            Some("browser_navigation"),
+            "{name}"
+        );
+    }
 }
 
 // Rewrite the expected blocks from current behavior. Ignored by default.

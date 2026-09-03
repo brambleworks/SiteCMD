@@ -101,13 +101,35 @@
     // Unsupported performance entry types leave this optional metric unset.
   }
 
+  // Errors the analyzer's own runtime raises inside the page (a Tauri plugin
+  // init script invoking a command this webview may not call) describe
+  // SiteCMD, not the page. The engine's verdict drops the same markers.
+  var shkRuntimeMarkers = ["not allowed on window", "__TAURI"];
+  // A Tauri command is always plugin:<name>|<command>, and the pipe is what
+  // makes the name ours. A bare "plugin:" belongs to the page: a Vite or
+  // Rollup overlay error reads "[plugin:vite:import-analysis] ...", and this
+  // sink also sees the script URL appended to the message.
+  var shkTauriCommand = /plugin:[A-Za-z0-9_.-]+\|/;
+  function shkIsRuntimeError(message) {
+    for (var m = 0; m < shkRuntimeMarkers.length; m++) {
+      if (message.indexOf(shkRuntimeMarkers[m]) !== -1) {
+        return true;
+      }
+    }
+    return shkTauriCommand.test(message);
+  }
+
   // Initialization-time listeners count all load errors but store at most ten messages.
   function shkRecordError(message) {
     try {
+      message = String(message);
+      if (shkIsRuntimeError(message)) {
+        return;
+      }
       var c = window.__SHK_CWV__;
       c.js_error_count += 1;
       if (c.js_errors.length < 10) {
-        c.js_errors.push(String(message).slice(0, 200));
+        c.js_errors.push(message.slice(0, 200));
       }
     } catch (e) {
       // Error collection must never interfere with the page being measured.
