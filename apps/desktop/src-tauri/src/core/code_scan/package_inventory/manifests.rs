@@ -25,6 +25,7 @@ pub(in crate::core::code_scan) fn collect_package_manifests(
                 .filter(|value| !value.is_empty());
 
             let mut dependencies = HashSet::new();
+            let mut installed_dependencies = HashSet::new();
             let mut local_dependencies = HashSet::new();
             let mut dependency_specs = HashMap::new();
             for field in [
@@ -36,9 +37,13 @@ pub(in crate::core::code_scan) fn collect_package_manifests(
                 let Some(table) = json.get(field).and_then(Value::as_object) else {
                     continue;
                 };
+                let installs = matches!(field, "dependencies" | "devDependencies");
                 for (key, value) in table {
                     let normalized = key.to_ascii_lowercase();
                     dependencies.insert(normalized.clone());
+                    if installs {
+                        installed_dependencies.insert(normalized.clone());
+                    }
                     if let Some(spec) = value.as_str() {
                         dependency_specs.insert(normalized.clone(), spec.trim().to_string());
                     }
@@ -54,6 +59,7 @@ pub(in crate::core::code_scan) fn collect_package_manifests(
                 content,
                 package_name,
                 dependencies,
+                installed_dependencies,
                 local_dependencies,
                 dependency_specs,
             })

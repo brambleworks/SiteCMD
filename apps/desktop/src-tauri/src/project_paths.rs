@@ -26,8 +26,29 @@ pub fn resolve_registered_project_dir(
     project_id: i64,
     renderer_path_hint: Option<&str>,
 ) -> Result<PathBuf, String> {
-    let stored_path = db
-        .get_project_path(project_id)
+    reconcile_project_dir(db.get_project_path(project_id), renderer_path_hint)
+}
+
+/// Async sibling of [`resolve_registered_project_dir`] for command paths that
+/// must not park an async runtime worker on the database thread.
+pub async fn resolve_registered_project_dir_async(
+    db: &Database,
+    project_id: i64,
+    renderer_path_hint: Option<&str>,
+) -> Result<PathBuf, String> {
+    reconcile_project_dir(
+        db.get_project_path_async(project_id).await,
+        renderer_path_hint,
+    )
+}
+
+/// Canonicalize the stored project folder and require any renderer hint to
+/// name the same directory.
+fn reconcile_project_dir(
+    stored_path: Option<String>,
+    renderer_path_hint: Option<&str>,
+) -> Result<PathBuf, String> {
+    let stored_path = stored_path
         .ok_or_else(|| "Link a local project folder before running this action.".to_string())?;
     let registered = canonicalize_project_dir(&stored_path)?;
 

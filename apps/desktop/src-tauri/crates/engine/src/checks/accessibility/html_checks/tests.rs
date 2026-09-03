@@ -328,6 +328,123 @@ fn skip_nav_href_fragment_counts() {
 }
 
 #[test]
+fn skip_nav_prose_that_says_skip_to_does_not_satisfy_the_check() {
+    // The accessibility fixture page has no skip link and carries the sentence
+    // below; the old substring test passed it while the page bypassed nothing.
+    let html = r#"<html><body><nav>links</nav>
+        <p>You can skip to any chapter using the list below.</p>
+        <div id="content">Content</div></body></html>"#;
+    let results = SkipNavCheck.run(&ctx(html));
+    assert_eq!(results[0].status, CheckStatus::Warn);
+}
+
+#[test]
+fn skip_nav_accepts_a_fragment_anchor_that_reads_as_a_skip_link() {
+    let with_text = r##"<html><body><a href="#top-of-article">Skip to content</a>
+        <p>Body</p></body></html>"##;
+    assert_eq!(
+        SkipNavCheck.run(&ctx(with_text))[0].status,
+        CheckStatus::Pass
+    );
+
+    let with_label = r##"<html><body><a href="#story" aria-label="Skip to the story"></a>
+        <p>Body</p></body></html>"##;
+    assert_eq!(
+        SkipNavCheck.run(&ctx(with_label))[0].status,
+        CheckStatus::Pass
+    );
+
+    // The same wording outside an anchor still bypasses nothing.
+    let off_page = r##"<html><body><a href="/help">Skip to content</a>
+        <p>Body</p></body></html>"##;
+    assert_eq!(
+        SkipNavCheck.run(&ctx(off_page))[0].status,
+        CheckStatus::Warn
+    );
+}
+
+#[test]
+fn skip_nav_accepts_a_fragment_written_after_a_path_or_query() {
+    // Server-rendered sites often emit the current path before the fragment.
+    // It is the same document, so the link works.
+    for href in [
+        "/article#main",
+        "/article?page=2#main",
+        "article#main",
+        "#main",
+    ] {
+        let html =
+            format!(r#"<html><body><a href="{href}">Skip to content</a><p>Body</p></body></html>"#);
+        assert_eq!(
+            SkipNavCheck.run(&ctx(&html))[0].status,
+            CheckStatus::Pass,
+            "{href} is an in-page fragment"
+        );
+    }
+
+    // A fragment on another document navigates away and bypasses nothing.
+    for href in [
+        "https://elsewhere.example/article#main",
+        "//elsewhere.example/article#main",
+        "/article",
+        "/article#",
+    ] {
+        let html = format!(
+            r#"<html><body><a href="{href}">Skip to the story</a><p>Body</p></body></html>"#
+        );
+        assert_eq!(
+            SkipNavCheck.run(&ctx(&html))[0].status,
+            CheckStatus::Warn,
+            "{href} is not an in-page fragment"
+        );
+    }
+}
+
+#[test]
+fn image_alt_does_not_count_a_template_bound_alt_as_missing() {
+    // Alpine.js template element found on visityourteam.com: no literal src or
+    // alt, both bound at runtime.
+    let html = r#"<html><body>
+        <img x-show="product.image" :src="product.image" :alt="product.title">
+        <img src="/hero.png" alt="A team on the pitch">
+    </body></html>"#;
+    let results = ImageAltAccessibilityCheck.run(&ctx(html));
+    assert_eq!(results[0].status, CheckStatus::Pass);
+    let evidence = results[0].raw_data.as_ref().expect("alt evidence");
+    assert_eq!(evidence["eligible_images"], 1);
+    assert_eq!(evidence["missing_alt_attribute"], 0);
+    assert_eq!(evidence["template_bound_alt"], 1);
+    assert!(
+        results[0].description.contains("client-side template"),
+        "{}",
+        results[0].description
+    );
+}
+
+#[test]
+fn image_alt_recognizes_every_framework_binding_spelling() {
+    for binding in [":alt", "v-bind:alt", "x-bind:alt", "[alt]", "@alt"] {
+        let html = format!(r#"<html><body><img src="/a.png" {binding}="title"></body></html>"#);
+        let results = ImageAltAccessibilityCheck.run(&ctx(&html));
+        let evidence = results[0].raw_data.as_ref().expect("alt evidence");
+        assert_eq!(
+            evidence["template_bound_alt"], 1,
+            "{binding} must read as a template binding"
+        );
+        assert_eq!(results[0].status, CheckStatus::Pass, "{binding}");
+    }
+
+    // A literal alt still wins, and an unrelated attribute is not a binding.
+    let literal = r#"<html><body><img src="/a.png" :data-alt="x"></body></html>"#;
+    let results = ImageAltAccessibilityCheck.run(&ctx(literal));
+    assert_eq!(results[0].status, CheckStatus::Fail);
+    assert_eq!(
+        results[0].raw_data.as_ref().expect("alt evidence")["missing_alt_attribute"],
+        1
+    );
+}
+
+#[test]
 fn test_form_labels_all_labeled_pass() {
     let html = r#"<html><body>
         <label for="name">Name</label><input id="name" type="text">

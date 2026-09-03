@@ -930,3 +930,155 @@ fn one_unconditional_update_clause_is_not_called_every_row_access() {
         .to_ascii_lowercase()
         .contains("other policy clause"));
 }
+
+#[test]
+fn static_text_route_and_read_only_server_action_are_not_public_risk_endpoints() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "package.json",
+        r#"{ "name": "site", "dependencies": { "next": "^16.0.0" } }"#,
+    );
+    write_file(
+        temp.path(),
+        "app/llms.txt/route.ts",
+        r#"import { renderLlmsIndex, MARKDOWN_HEADERS } from "@/lib/llms";
+
+export const dynamic = "force-static";
+
+export function GET() {
+  return new Response(renderLlmsIndex(), { headers: MARKDOWN_HEADERS });
+}
+"#,
+    );
+    write_file(
+        temp.path(),
+        "lib/actions/calculator.ts",
+        r#""use server";
+
+import { getTeamData, getLeagueData } from "@/lib/data";
+
+export async function getTeamDataForCalculator(slug: string, league: string) {
+  return { teamData: getTeamData(slug, league), leagueData: getLeagueData(league) };
+}
+"#,
+    );
+    // Negative control: an unauthenticated server action that persists input
+    // still needs a limiter.
+    write_file(
+        temp.path(),
+        "lib/actions/tips.ts",
+        r#""use server";
+
+import { createClient } from "@/lib/supabase/server";
+
+export async function submitTip(formData: FormData) {
+  const supabase = await createClient();
+  await supabase.from("tips").insert({ text: formData.get("text") });
+  return { success: true };
+}
+"#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let ids = report.issues.iter().map(|i| &i.id).collect::<Vec<_>>();
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "public-endpoint-rate-limit:app/llms.txt/route.ts"),
+        "ES module keywords are not route names, got {:?}",
+        ids
+    );
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "public-endpoint-rate-limit:lib/actions/calculator.ts"),
+        "a server action that only reads bundled data has nothing to limit, got {:?}",
+        ids
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "public-endpoint-rate-limit:lib/actions/tips.ts"),
+        "negative control: an unauthenticated writing action keeps the finding, got {:?}",
+        ids
+    );
+}
+
+#[test]
+fn import_and_export_route_names_still_count_as_public_risk_endpoints() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "app/api/import/route.ts",
+        r#"
+                export async function POST(request: Request) {
+                  const body = await request.json();
+                  return Response.json({ rows: body.rows.length });
+                }
+            "#,
+    );
+    write_file(
+        temp.path(),
+        "src/server.ts",
+        r#"
+                import express from "express";
+                const app = express();
+                app.post("/reports/export", async (req, res) => {
+                  res.json({ ok: Boolean(req.body.range) });
+                });
+            "#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let ids = report.issues.iter().map(|i| &i.id).collect::<Vec<_>>();
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "public-endpoint-rate-limit:app/api/import/route.ts"),
+        "an import route path keeps its finding, got {:?}",
+        ids
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "public-endpoint-rate-limit:src/server.ts"),
+        "an export route string keeps its finding, got {:?}",
+        ids
+    );
+}
+
+#[test]
+fn dev_platform_injected_env_keys_do_not_demand_an_example_env_file() {
+    let composer = r#"{ "name": "acme/site", "require": { "drupal/core-recommended": "^11.0" } }"#;
+
+    let platform_only = TempDir::new().unwrap();
+    write_file(platform_only.path(), "composer.json", composer);
+    write_file(
+        platform_only.path(),
+        "web/sites/default/settings.php",
+        "<?php\n$settings['hash_salt'] = 'x';\nif (getenv('IS_DDEV_PROJECT') == 'true') {\n  include __DIR__ . '/settings.ddev.php';\n}\nif (getenv('PLATFORM_APPLICATION')) {\n  include __DIR__ . '/settings.upsun.php';\n}\n",
+    );
+    let report = audit_project(platform_only.path()).unwrap();
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("env-example-missing:")),
+        "DDEV and Platform.sh inject their own variables, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+
+    // Negative control: a developer-supplied secret still needs the template.
+    let developer_key = TempDir::new().unwrap();
+    write_file(developer_key.path(), "composer.json", composer);
+    write_file(
+        developer_key.path(),
+        "web/sites/default/settings.php",
+        "<?php\n$settings['hash_salt'] = 'x';\n$config['smtp.settings']['smtp_password'] = getenv('SMTP_PASSWORD');\n",
+    );
+    let report = audit_project(developer_key.path()).unwrap();
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("env-example-missing:")),
+        "negative control lost the finding, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}

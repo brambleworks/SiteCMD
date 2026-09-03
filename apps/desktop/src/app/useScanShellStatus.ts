@@ -3,11 +3,18 @@ import { updateTrayScanStatus } from "@/lib/commands";
 import { addJob, removeRunningJob } from "@/lib/jobs";
 import type { ScanState } from "@/hooks/useScan";
 import type { ScanRunStep } from "@/lib/scan-run-status";
-import { getWebScanProgressDetail, getWebScanProgressPercent } from "@/lib/scan-progress-display";
-import { getScanProgressSnapshot, subscribeScanProgress } from "@/lib/scan-progress-store";
+import { getWebScanProgressDetail } from "@/lib/scan-progress-display";
+import {
+  getScanProgressSnapshot,
+  readScanRunPercent,
+  subscribeScanProgress,
+} from "@/lib/scan-progress-store";
 import { SCAN_LABELS } from "@/lib/scan-labels";
 import type { ScheduledScanType } from "@/lib/types";
 import { formatUrlDisplay } from "@/lib/utils";
+
+/** The run model drifts between events, so the tray and job row re-read it on a clock too. */
+const SHELL_PROGRESS_TICK_MS = 1_000;
 
 export interface ScanJobContext {
   projectId: number | null;
@@ -81,19 +88,19 @@ export function useScanShellStatus({
             }
           : scanRunStep;
 
-      const trayPct = isCodeFamilyScan ? 0 : getWebScanProgressPercent(progress);
-      if (Math.abs(trayPct - lastTrayPctRef.current) >= 5 || lastTrayPctRef.current === -1) {
-        lastTrayPctRef.current = trayPct;
+      // One number for the ring, the job row, and the tray: the store's run model.
+      const pct = Math.round(readScanRunPercent());
+      if (Math.abs(pct - lastTrayPctRef.current) >= 5 || lastTrayPctRef.current === -1) {
+        lastTrayPctRef.current = pct;
         updateTrayScanStatus({
           scanning: true,
           url: activeEnvUrl,
-          pct: trayPct,
+          pct,
         }).catch(() => {});
       }
 
-      const pct = isCodeFamilyScan ? undefined : getWebScanProgressPercent(progress);
       const detail = isCodeFamilyScan
-        ? "Auditing linked project code…"
+        ? "Scanning project code…"
         : getWebScanProgressDetail(progress);
       const stepDetail =
         activeRunStep && activeRunStep.stepCount > 1
@@ -123,8 +130,14 @@ export function useScanShellStatus({
       });
     };
 
-    // Push the initial job/tray state immediately, then follow every tick.
+    // Push the initial job/tray state immediately, then follow every event
+    // and re-read the drifting model once a second in between.
     sync();
-    return subscribeScanProgress(sync);
+    const unsubscribe = subscribeScanProgress(sync);
+    const interval = window.setInterval(sync, SHELL_PROGRESS_TICK_MS);
+    return () => {
+      unsubscribe();
+      window.clearInterval(interval);
+    };
   }, [state, scanJobContextRef]);
 }

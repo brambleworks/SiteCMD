@@ -70,11 +70,19 @@ pub(super) const SENSITIVE_CONNECTOR_COMMANDS: &[&str] = &[
 ];
 
 pub(super) const SENSITIVE_FILESYSTEM_ACCESS_COMMANDS: &[&str] = &[
+    // Repointing a project decides which folder every non-sensitive read
+    // (run_code_scan_audit, resolve_project_files, get_git_status,
+    // read_recent_logs) exposes, so it needs the same native intent as
+    // opening a path. See the broker threat model's scope table.
+    "update_project_path",
     "open_path_in_editor",
     "reveal_path",
     "register_agent_tool",
     "unregister_agent_tool",
-    "launch_agent_handoff",
+    // `launch_agent_handoff` is deliberately absent: it opens the agent's own
+    // app through a deep link with a prompt staged in its composer, and the
+    // agent never runs that prompt on its own, so a system dialog would only
+    // stand between the person and the button they just pressed.
 ];
 
 /// One row per broker: its command name, human label, command allowlist, and
@@ -215,6 +223,12 @@ pub(super) fn privileged_action_sentence(command: &str, args: &Value) -> Option<
                 None => format!("Send this finding and its fix details to {provider}?"),
             }
         }
+        "update_project_path" => match sanitized_arg(args, "path", "path") {
+            Some(path) if !path.trim().is_empty() => format!(
+                "Change this project's linked folder to {path}? SiteCMD will read code, logs, and git history from it."
+            ),
+            _ => "Unlink this project's folder so SiteCMD stops reading code from it?".to_string(),
+        },
         "save_integration" => integration_save_sentence(args),
         "save_webhook_config" => match sanitized_arg(args, "url", "url") {
             Some(url) => format!("Save webhook settings that send scan results to {url}?"),
@@ -294,15 +308,6 @@ pub(super) fn privileged_action_sentence(command: &str, args: &Value) -> Option<
             ),
             None => "Remove a coding agent tool from SiteCMD?".to_string(),
         },
-        "launch_agent_handoff" => {
-            let tool = sanitized_arg(args, "tool", "tool")
-                .map(|value| crate::core::agent_tools::agent_tool_display_name(&value).to_string())
-                .unwrap_or_else(|| "a coding agent".to_string());
-            match sanitized_arg(args, "projectPath", "project_path") {
-                Some(path) => format!("Open {tool} with a fix prompt staged for {path}?"),
-                None => format!("Open {tool} with a SiteCMD fix prompt staged for review?"),
-            }
-        }
         _ => return None,
     };
     Some(sentence)

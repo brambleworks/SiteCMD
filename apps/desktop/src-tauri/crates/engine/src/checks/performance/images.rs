@@ -1,7 +1,8 @@
 //! Static image checks for lazy-loading, intrinsic dimensions, and legacy URLs.
 //! Runtime layout, selected sources, and inserted images remain out of scope.
 
-use crate::checks::html_attrs::{attr_value, tag_slices};
+use crate::checks::accessibility::html_checks::has_framework_binding;
+use crate::checks::html_attrs::{attr_value, slice_offset, tag_slices, url_attr_value};
 use crate::checks::{Check, CheckResult, CheckStatus, PageContext, ScanCategory, Severity};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -24,6 +25,89 @@ struct ImgTag {
     has_usable_width: bool,
     has_usable_height: bool,
     has_lazy: bool,
+    /// A supporting browser can receive AVIF or WebP for this element, so the
+    /// legacy-looking `src` is a fallback rather than the delivered response.
+    offers_modern_format: bool,
+    /// False when `width` or `height` is supplied by a client-side template
+    /// binding: the element is a real image, but the served markup does not
+    /// show what geometry it will carry.
+    grades_dimensions: bool,
+    /// False when `loading` is supplied by a client-side template binding.
+    grades_lazy: bool,
+}
+
+/// Why an `<img>` element carries no measurable page image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImgSkip {
+    /// The source is bound by a client-side template (`:src`, `v-bind:src`,
+    /// `x-bind:src`, `@src`, `[src]`). The served markup holds a binding
+    /// expression, not a URL, so nothing about the rendered image is
+    /// observable here.
+    TemplateBinding,
+    /// A 0- or 1-pixel spacer, or a request to a known measurement-beacon
+    /// provider. Neither is content the lazy-loading, dimension, or format
+    /// heuristics can say anything useful about.
+    BeaconOrSpacer,
+}
+
+/// Every `<img>` on the page, split into gradeable elements and the ones that
+/// carry no measurable image.
+struct ImgInventory {
+    gradeable: Vec<ImgTag>,
+    template_bindings: usize,
+    beacons_or_spacers: usize,
+}
+
+impl ImgInventory {
+    fn total(&self) -> usize {
+        self.gradeable.len() + self.template_bindings + self.beacons_or_spacers
+    }
+
+    fn excluded(&self) -> usize {
+        self.template_bindings + self.beacons_or_spacers
+    }
+
+    /// One clause naming what was set aside, so a count the reader can see in
+    /// the markup never silently disagrees with the count in the verdict.
+    fn exclusion_note(&self) -> String {
+        let mut parts = Vec::new();
+        if self.template_bindings > 0 {
+            parts.push(format!(
+                "{} client-side template binding{}",
+                self.template_bindings,
+                if self.template_bindings == 1 { "" } else { "s" }
+            ));
+        }
+        if self.beacons_or_spacers > 0 {
+            parts.push(format!(
+                "{} tracking beacon{} or spacer{}",
+                self.beacons_or_spacers,
+                if self.beacons_or_spacers == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                if self.beacons_or_spacers == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ));
+        }
+        if parts.is_empty() {
+            return String::new();
+        }
+        format!(
+            " {} `<img>` element{} not graded ({}).",
+            self.excluded(),
+            if self.excluded() == 1 {
+                " was"
+            } else {
+                "s were"
+            },
+            parts.join(", ")
+        )
+    }
 }
 
 fn is_positive_integer_attr(tag: &str, name: &str) -> bool {
@@ -31,17 +115,160 @@ fn is_positive_integer_attr(tag: &str, name: &str) -> bool {
         .is_some_and(|value| value.trim().parse::<u32>().is_ok_and(|number| number > 0))
 }
 
-fn collect_img_tags(body: &str, lower: &str) -> Vec<ImgTag> {
-    tag_slices(body, lower, "img")
-        .into_iter()
-        .map(|tag| ImgTag {
-            src: attr_value(tag, "src").filter(|src| !src.trim().is_empty()),
-            has_usable_width: is_positive_integer_attr(tag, "width"),
-            has_usable_height: is_positive_integer_attr(tag, "height"),
-            has_lazy: attr_value(tag, "loading")
-                .is_some_and(|value| value.eq_ignore_ascii_case("lazy")),
+/// A width or height content attribute of 0 or 1: a tracking pixel or a
+/// legacy spacer GIF, never a content image.
+fn is_pixel_sized(tag: &str) -> bool {
+    ["width", "height"].iter().any(|name| {
+        attr_value(tag, name)
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .is_some_and(|value| value <= 1)
+    })
+}
+
+/// Whether an image URL requests a known analytics or advertising provider,
+/// using the shared tracker signature list. Only host-shaped markers are
+/// considered, and only against the URL's own host, so a path or query never
+/// manufactures a match.
+fn requests_a_tracking_beacon(src: &str) -> bool {
+    let without_scheme = src
+        .split_once("//")
+        .map(|(_, rest)| rest)
+        .unwrap_or_default();
+    let host = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .rsplit('@')
+        .next()
+        .unwrap_or_default()
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    crate::checks::compliance::trackers::TRACKER_SIGNATURES
+        .iter()
+        .any(|signature| {
+            let marker = signature.marker;
+            marker.contains('.')
+                && !marker.contains('/')
+                && (host == marker || host.ends_with(&format!(".{marker}")))
         })
-        .collect()
+}
+
+fn collect_img_tags(body: &str, lower: &str) -> ImgInventory {
+    let modern_pictures = modern_format_picture_ranges(body, lower);
+    let mut inventory = ImgInventory {
+        gradeable: Vec::new(),
+        template_bindings: 0,
+        beacons_or_spacers: 0,
+    };
+
+    for tag in tag_slices(body, lower, "img") {
+        let src = url_attr_value(tag, "src");
+        match classify_img(tag, src.as_deref()) {
+            Some(ImgSkip::TemplateBinding) => inventory.template_bindings += 1,
+            Some(ImgSkip::BeaconOrSpacer) => inventory.beacons_or_spacers += 1,
+            None => {
+                let srcset = url_attr_value(tag, "srcset");
+                let in_modern_picture = {
+                    let offset = slice_offset(body, tag);
+                    modern_pictures
+                        .iter()
+                        .any(|(start, end)| offset >= *start && offset < *end)
+                };
+                inventory.gradeable.push(ImgTag {
+                    offers_modern_format: in_modern_picture
+                        || src
+                            .as_deref()
+                            .is_some_and(|src| uses_format_negotiation(&src.to_ascii_lowercase()))
+                        || srcset.as_deref().is_some_and(srcset_offers_modern_format),
+                    src,
+                    has_usable_width: is_positive_integer_attr(tag, "width"),
+                    has_usable_height: is_positive_integer_attr(tag, "height"),
+                    has_lazy: attr_value(tag, "loading")
+                        .is_some_and(|value| value.trim().eq_ignore_ascii_case("lazy")),
+                    grades_dimensions: !["width", "height"]
+                        .iter()
+                        .any(|name| has_framework_binding(tag, name)),
+                    grades_lazy: !has_framework_binding(tag, "loading"),
+                });
+            }
+        }
+    }
+    inventory
+}
+
+/// Whether an `<img>` element carries a measurable page image at all.
+fn classify_img(tag: &str, src: Option<&str>) -> Option<ImgSkip> {
+    if src.is_none() && has_framework_binding(tag, "src") {
+        return Some(ImgSkip::TemplateBinding);
+    }
+    if is_pixel_sized(tag) || src.is_some_and(requests_a_tracking_beacon) {
+        return Some(ImgSkip::BeaconOrSpacer);
+    }
+    // A literal src with runtime-bound geometry or loading behavior is still a
+    // real image whose URL this check can grade; only the bound attributes are
+    // unmeasurable, and they are excluded per sub-check rather than dropping
+    // the element.
+    None
+}
+
+/// Whether any responsive candidate is served as AVIF or WebP.
+fn srcset_offers_modern_format(srcset: &str) -> bool {
+    srcset.split(',').any(|candidate| {
+        let url = candidate.split_whitespace().next().unwrap_or_default();
+        let path = url.split(['?', '#']).next().unwrap_or(url);
+        matches!(
+            path.rsplit('.')
+                .next()
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("webp" | "avif")
+        )
+    })
+}
+
+/// Byte ranges of `<picture>` elements that offer AVIF or WebP through a
+/// `<source type="image/...">` child. The `<img>` inside such a picture is the
+/// fallback a supporting browser never downloads, so its legacy-looking `src`
+/// is not evidence about the delivered response.
+fn modern_format_picture_ranges(body: &str, lower: &str) -> Vec<(usize, usize)> {
+    let owned_lower = (body.len() != lower.len()).then(|| body.to_ascii_lowercase());
+    let lower = owned_lower.as_deref().unwrap_or(lower);
+    let mut ranges = Vec::new();
+    let mut cursor = 0;
+    while let Some(relative) = lower[cursor..].find("<picture") {
+        let start = cursor + relative;
+        let after_name = start + "<picture".len();
+        if !matches!(
+            lower[after_name..].chars().next(),
+            Some(' ' | '\t' | '\n' | '\r' | '/' | '>')
+        ) {
+            cursor = after_name;
+            continue;
+        }
+        let end = lower[after_name..]
+            .find("</picture")
+            .map(|offset| after_name + offset)
+            .unwrap_or(body.len());
+        let offers_modern_format = tag_slices(&body[start..end], &lower[start..end], "source")
+            .into_iter()
+            .any(|tag| {
+                attr_value(tag, "type").is_some_and(|value| {
+                    let value = value.trim().to_ascii_lowercase();
+                    value == "image/webp" || value == "image/avif"
+                })
+            });
+        if offers_modern_format {
+            ranges.push((start, end));
+        }
+        cursor = end.max(after_name);
+    }
+    ranges
 }
 
 /// Whether an image URL goes through a format-negotiating optimizer or
@@ -87,14 +314,22 @@ impl Check for ImageOptimizationCheck {
         let mut results = Vec::new();
 
         // Retain bounded image locations so fix prompts can identify offenders.
-        let images = collect_img_tags(&ctx.body, lower);
+        let inventory = collect_img_tags(&ctx.body, lower);
+        let exclusion_note = inventory.exclusion_note();
+        let template_bindings = inventory.template_bindings;
+        let beacons_or_spacers = inventory.beacons_or_spacers;
+        let total_img_elements = inventory.total();
+        let images = inventory.gradeable;
         let img_count = images.len();
         if img_count == 0 {
             return vec![CheckResult {
                 check_id: "performance.images".into(),
                 category: ScanCategory::Performance,
                 title: "Image optimization".into(),
-                description: "No `<img>` element was found in the fetched HTML. CSS backgrounds, `<source>` elements, runtime-inserted images, and other image delivery paths are outside this markup check.".into(),
+                description: format!(
+                    "No gradeable `<img>` element was found in the fetched HTML. CSS backgrounds, `<source>` elements, runtime-inserted images, and other image delivery paths are outside this markup check.{}",
+                    exclusion_note
+                ),
                 status: CheckStatus::Pass,
                 severity: Severity::Low,
                 fix_prompt: None,
@@ -106,8 +341,33 @@ impl Check for ImageOptimizationCheck {
             }];
         }
 
+        // Elements whose geometry or loading mode is decided by a client-side
+        // binding: the image is real, but those attributes are not in the
+        // served markup, so the two sub-checks that read them say so instead
+        // of counting a missing attribute.
+        let dimension_bindings = images.iter().filter(|img| !img.grades_dimensions).count();
+        let lazy_bindings = images.iter().filter(|img| !img.grades_lazy).count();
+        let bound_note = |count: usize, attributes: &str| {
+            if count == 0 {
+                String::new()
+            } else {
+                format!(
+                    " {} further element{} bind{} {} at runtime, so this check could not read {} from the served markup.",
+                    count,
+                    if count == 1 { "" } else { "s" },
+                    if count == 1 { "s" } else { "" },
+                    attributes,
+                    if count == 1 { "it" } else { "them" },
+                )
+            }
+        };
+
         // Lazy loading: skip the first image (above-the-fold convention).
-        let unlazy: Vec<&ImgTag> = images.iter().skip(1).filter(|img| !img.has_lazy).collect();
+        let unlazy: Vec<&ImgTag> = images
+            .iter()
+            .skip(1)
+            .filter(|img| img.grades_lazy && !img.has_lazy)
+            .collect();
         let missing_lazy = unlazy.len();
         let lazy_count = images.iter().filter(|img| img.has_lazy).count();
 
@@ -126,7 +386,7 @@ impl Check for ImageOptimizationCheck {
                     if missing_lazy == 1 { "" } else { "s" },
                     if missing_lazy == 1 { "has" } else { "have" },
                     if surfaced.is_empty() { String::new() } else { format!(" Examples: {}", surfaced.join(", ")) }
-                ),
+                ) + &exclusion_note + &bound_note(lazy_bindings, "`loading`"),
                 status: CheckStatus::Warn, severity: Severity::Medium,
                 fix_prompt: None,
                 manual_fix: Some("Inspect each candidate at representative breakpoints. Keep the measured LCP image and images near the initial viewport eager; add native `loading=\"lazy\"` only to images that begin sufficiently off-screen, then verify LCP, fast scrolling, no-JavaScript behavior, and back/forward navigation.".into()),
@@ -135,6 +395,10 @@ impl Check for ImageOptimizationCheck {
                     "lazy": lazy_count,
                     "missing_lazy": missing_lazy,
                     "missing_lazy_examples": surfaced,
+                    "runtime_bound_loading_elements": lazy_bindings,
+                    "img_elements_found": total_img_elements,
+                    "template_binding_elements": template_bindings,
+                    "beacon_or_spacer_elements": beacons_or_spacers,
                 })),
                 // Fold position is inferred from source order, not layout;
                 // pages with several above-the-fold images are legitimate.
@@ -147,7 +411,7 @@ impl Check for ImageOptimizationCheck {
         // Dimensions
         let no_dims: Vec<&ImgTag> = images
             .iter()
-            .filter(|img| !(img.has_usable_width && img.has_usable_height))
+            .filter(|img| img.grades_dimensions && !(img.has_usable_width && img.has_usable_height))
             .collect();
         let missing_dimensions = no_dims.len();
 
@@ -165,13 +429,17 @@ impl Check for ImageOptimizationCheck {
                     missing_dimensions,
                     if missing_dimensions == 1 { " is" } else { "s are" },
                     if surfaced.is_empty() { String::new() } else { format!(" Examples: {}", surfaced.join(", ")) }
-                ),
+                ) + &exclusion_note + &bound_note(dimension_bindings, "`width` or `height`"),
                 status: CheckStatus::Warn, severity: Severity::Medium,
                 fix_prompt: None,
                 manual_fix: Some("Inspect the rendered layout first. Supply accurate positive numeric width and height attributes when intrinsic dimensions are known, or reserve the correct ratio with a stable CSS/container strategy when they are not. Verify with the image cache disabled and a layout-shift trace rather than assuming a framework component reserves the right box.".into()),
                 raw_data: Some(serde_json::json!({
                     "missing_or_invalid_dimensions": missing_dimensions,
                     "missing_dimensions_examples": surfaced,
+                    "runtime_bound_dimension_elements": dimension_bindings,
+                    "img_elements_found": total_img_elements,
+                    "template_binding_elements": template_bindings,
+                    "beacon_or_spacer_elements": beacons_or_spacers,
                 })),
                 confidence: crate::checks::IssueConfidence::Confirmed,
                 confidence_reason: Some("The missing or invalid content attributes are directly observed, but CSS, aspect-ratio, containers, and runtime layout were not inspected, so the scan cannot establish that space is unreserved or that CLS occurs.".into()),
@@ -185,33 +453,42 @@ impl Check for ImageOptimizationCheck {
         let legacy_candidates: Vec<&ImgTag> = images
             .iter()
             .filter(|img| {
-                img.src.as_ref().is_some_and(|src| {
-                    let lower_src = src.to_ascii_lowercase();
-                    let path = lower_src
-                        .split(['?', '#'])
-                        .next()
-                        .unwrap_or(lower_src.as_str());
-                    matches!(path.rsplit('.').next(), Some("jpg" | "jpeg" | "png"))
-                        && !uses_format_negotiation(&lower_src)
-                })
+                !img.offers_modern_format
+                    && img.src.as_ref().is_some_and(|src| {
+                        let lower_src = src.to_ascii_lowercase();
+                        let path = lower_src
+                            .split(['?', '#'])
+                            .next()
+                            .unwrap_or(lower_src.as_str());
+                        matches!(path.rsplit('.').next(), Some("jpg" | "jpeg" | "png"))
+                    })
             })
             .collect();
-        let legacy_looking_srcs: Vec<String> = legacy_candidates
-            .iter()
-            .take(5)
-            .filter_map(|img| img.src.as_deref().map(evidence_src))
-            .collect();
+        // One URL repeated across elements is one file to re-encode, so the
+        // example list names each distinct source once.
+        let mut legacy_looking_srcs: Vec<String> = Vec::new();
+        for img in &legacy_candidates {
+            let Some(surfaced) = img.src.as_deref().map(evidence_src) else {
+                continue;
+            };
+            if !legacy_looking_srcs.contains(&surfaced) {
+                legacy_looking_srcs.push(surfaced);
+            }
+            if legacy_looking_srcs.len() == 5 {
+                break;
+            }
+        }
 
         if !legacy_candidates.is_empty() {
             results.push(CheckResult {
                 check_id: "performance.images.format".into(), category: ScanCategory::Performance,
                 title: "Legacy-looking image source URLs need review".into(),
                 description: format!(
-                    "The URL heuristic found {} `<img src>` value{} ending in .jpg, .jpeg, or .png without a recognized format-negotiation pattern. This source check did not fetch those responses, inspect Content-Type, compare bytes or visual quality, or determine which `<picture>`/`srcset` candidate a browser selects.{}",
+                    "The URL heuristic found {} `<img src>` value{} ending in .jpg, .jpeg, or .png with no recognized format-negotiation pattern and no AVIF/WebP alternative offered by an enclosing `<picture>` or the element's own srcset. This source check did not fetch those responses, inspect Content-Type, compare bytes or visual quality, or determine which candidate a browser selects.{}",
                     legacy_candidates.len(),
                     if legacy_candidates.len() == 1 { "" } else { "s" },
                     if legacy_looking_srcs.is_empty() { String::new() } else { format!(" Examples: {}", legacy_looking_srcs.join(", ")) }
-                ),
+                ) + &exclusion_note,
                 status: CheckStatus::Warn, severity: Severity::Medium,
                 fix_prompt: None,
                 manual_fix: Some("Inspect the selected production response at representative viewports and compare its Content-Type, transferred bytes, decode behavior, and visual quality with well-encoded alternatives. Keep JPEG or PNG when it is the best measured choice; otherwise add supported AVIF/WebP variants through a maintained image pipeline with correct fallbacks, cache variation, and responsive sizing.".into()),
@@ -220,6 +497,10 @@ impl Check for ImageOptimizationCheck {
                     "legacy_looking_srcs": legacy_looking_srcs,
                     "response_content_types_inspected": false,
                     "responsive_candidate_selection_measured": false,
+                    "modern_format_offered_elsewhere": images.iter().filter(|img| img.offers_modern_format).count(),
+                    "img_elements_found": total_img_elements,
+                    "template_binding_elements": template_bindings,
+                    "beacon_or_spacer_elements": beacons_or_spacers,
                 })),
                 confidence: crate::checks::IssueConfidence::NeedsReview,
                 confidence_reason: Some("The source URL suffixes are directly observed, but URL shape does not establish the served Content-Type, selected responsive candidate, compression efficiency, visual requirements, or actual transfer cost.".into()),
@@ -232,12 +513,17 @@ impl Check for ImageOptimizationCheck {
                 check_id: "performance.images".into(),
                 category: ScanCategory::Performance,
                 title: "Image markup heuristics".into(),
-                description: format!("{} `<img>` element{} inspected. None matched this check's three source heuristics: later markup without `loading=\"lazy\"`, missing usable numeric width/height attributes, or a legacy-looking src URL without a recognized negotiation pattern. This does not prove image delivery is optimized.", img_count, if img_count == 1 { " was" } else { "s were" }),
+                description: format!("{} `<img>` element{} inspected. None matched this check's three source heuristics: later markup without `loading=\"lazy\"`, missing usable numeric width/height attributes, or a legacy-looking src URL with no AVIF/WebP alternative offered. This does not prove image delivery is optimized.{}", img_count, if img_count == 1 { " was" } else { "s were" }, exclusion_note),
                 status: CheckStatus::Pass,
                 severity: Severity::Low,
                 fix_prompt: None,
                 manual_fix: None,
-                raw_data: Some(serde_json::json!({ "img_elements_inspected": img_count })),
+                raw_data: Some(serde_json::json!({
+                    "img_elements_inspected": img_count,
+                    "img_elements_found": total_img_elements,
+                    "template_binding_elements": template_bindings,
+                    "beacon_or_spacer_elements": beacons_or_spacers,
+                })),
                 confidence: crate::checks::IssueConfidence::High,
                 confidence_reason: None,
                 why_it_matters: None,

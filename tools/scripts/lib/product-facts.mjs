@@ -13,6 +13,8 @@ const CONSTANTS = "apps/desktop/src-tauri/src/constants.rs";
 const CSS_FETCH = "apps/desktop/src-tauri/src/checks/polish/css_fetch.rs";
 
 const SUBRESOURCE_DISCLAIMER = "Tauri does not expose external subresource interception";
+const WEBRTC_LOCKDOWN = "apps/desktop/src-tauri/src/webview/webrtc_lockdown.js";
+const RESOLVED_PRIVATE_DISCLAIMER = "public hostname that resolves to a private address";
 
 function extract(source, pattern, label, file) {
   const match = source.match(pattern);
@@ -128,6 +130,8 @@ export function deriveCheckCounts(read, _listFiles) {
 function analyzerProtections(read) {
   const source = read(ANALYZER);
   const prose = source.replace(/^\s*\/\/+/gm, " ").replace(/\s+/g, " ");
+  const rules = read(PRIVATE_NETWORK_RULES);
+  const rulesProse = rules.replace(/^\s*\/\/+/gm, " ").replace(/\s+/g, " ");
   return {
     validatesScanTarget: source.includes("network_policy::validate_url("),
     revalidatesNavigations: source.includes("on_navigation"),
@@ -136,8 +140,32 @@ function analyzerProtections(read) {
     deniesNewWindows: source.includes("NewWindowResponse::Deny"),
     refusesDownloads: source.includes("on_download(|_, _| false)"),
     disclaimsSubresourceInterception: prose.includes(SUBRESOURCE_DISCLAIMER),
-    privateNetworkSubresourceRulePlatforms: analyzerRulePlatforms(read(PRIVATE_NETWORK_RULES)),
+    privateNetworkSubresourceRulePlatforms: analyzerRulePlatforms(rules),
+    // Every other platform arm must refuse rather than scan with the LAN
+    // reachable, and analyze_url must only navigate on an explicit true.
+    failsClosedWithoutRules:
+      source.includes("Ok(Ok(true)) => {}") && fallbackRulesArmFailsClosed(rules),
+    // The lockdown runs in every frame, not only the top document.
+    locksWebRtcInAllFrames:
+      source.includes("initialization_script_for_all_frames(") &&
+      source.includes("WEBRTC_LOCKDOWN_SCRIPT") &&
+      ["RTCPeerConnection", "webkitRTCPeerConnection", "WebTransport"].every((name) =>
+        read(WEBRTC_LOCKDOWN).includes(`"${name}"`),
+      ),
+    // The gap the rules cannot close stays written down at the source.
+    disclaimsResolvedPrivateAddresses: rulesProse.includes(RESOLVED_PRIVATE_DISCLAIMER),
   };
+}
+
+/** The installer arm for platforms without a filter must signal false and never true. */
+function fallbackRulesArmFailsClosed(rulesSource) {
+  const marker =
+    '#[cfg(not(any(target_os = "macos", windows)))]\npub(crate) fn install_private_network_rules';
+  const start = rulesSource.indexOf(marker);
+  if (start < 0) return false;
+  const rest = rulesSource.slice(start);
+  const arm = rest.slice(0, rest.indexOf("\n}\n"));
+  return arm.includes("ready.signal(false)") && !arm.includes("ready.signal(true)");
 }
 
 /** Platforms with a real installer for the analyzer's private-network rules. */

@@ -169,3 +169,75 @@ fn invalid_cookie_name_is_redacted_and_not_used_as_an_issue_id() {
         .to_string()
         .contains("secret-value"));
 }
+
+#[test]
+fn a_localhost_pass_row_does_not_claim_the_absent_secure_flag() {
+    let mut h = HeaderMap::new();
+    h.insert(
+        "set-cookie",
+        HeaderValue::from_static("sess=fixture; Path=/; HttpOnly; SameSite=Lax"),
+    );
+    let mut ctx = ctx_with_headers("", h);
+    ctx.is_localhost = true;
+    let results = CookieSecurityCheck.run(&ctx);
+    assert_eq!(results[0].status, CheckStatus::Pass);
+    assert!(
+        !results[0].description.contains("includes Secure"),
+        "{}",
+        results[0].description
+    );
+    assert!(
+        results[0]
+            .description
+            .contains("The Secure flag is absent; that is accepted on a localhost preview"),
+        "{}",
+        results[0].description
+    );
+    assert_eq!(
+        results[0].raw_data.as_ref().expect("evidence")["has_secure"],
+        false
+    );
+}
+
+#[test]
+fn script_readable_cookies_are_not_reported_as_missing_httponly() {
+    for header in [
+        "XSRF-TOKEN=abc; Secure; SameSite=Lax; Path=/",
+        "csrftoken=abc; Secure; SameSite=Lax; Path=/",
+        "_octo=abc; Secure; SameSite=Lax; Path=/",
+        "ajs_anonymous_id=abc; Secure; SameSite=Lax; Path=/",
+    ] {
+        let mut h = HeaderMap::new();
+        h.insert("set-cookie", HeaderValue::from_str(header).unwrap());
+        let results = CookieSecurityCheck.run(&ctx_with_headers("", h));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{header}: {}",
+            results[0].description
+        );
+        assert!(
+            results[0]
+                .description
+                .contains("client-side code reads this cookie by design"),
+            "{header}: {}",
+            results[0].description
+        );
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["httponly_waived_script_readable"],
+            true
+        );
+    }
+}
+
+#[test]
+fn an_ordinary_session_cookie_still_needs_httponly() {
+    let mut h = HeaderMap::new();
+    h.insert(
+        "set-cookie",
+        HeaderValue::from_static("session=abc; Secure; SameSite=Lax; Path=/"),
+    );
+    let results = CookieSecurityCheck.run(&ctx_with_headers("", h));
+    assert_eq!(results[0].status, CheckStatus::Warn);
+    assert!(results[0].description.contains("the HttpOnly flag"));
+}

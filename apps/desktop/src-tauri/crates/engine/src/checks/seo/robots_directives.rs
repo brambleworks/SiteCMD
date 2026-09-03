@@ -21,6 +21,7 @@ pub fn evaluate_sitemap_in_robots(outcome: &RobotsTxtFetch) -> Vec<CheckResult> 
         HasSitemap,
         NoSitemap,
         Status(u16),
+        HtmlShell,
         NetworkError,
     }
     let fetch = match outcome {
@@ -32,6 +33,7 @@ pub fn evaluate_sitemap_in_robots(outcome: &RobotsTxtFetch) -> Vec<CheckResult> 
             }
         }
         RobotsTxtFetch::Status(code) => RobotsFetch::Status(*code),
+        RobotsTxtFetch::HtmlShell => RobotsFetch::HtmlShell,
         RobotsTxtFetch::Error(_) => RobotsFetch::NetworkError,
     };
 
@@ -75,6 +77,16 @@ pub fn evaluate_sitemap_in_robots(outcome: &RobotsTxtFetch) -> Vec<CheckResult> 
             crate::checks::IssueConfidence::NeedsReview,
             Some("A non-success response other than a confirmed 404 or 410 leaves the endpoint state and body unavailable to this check.".to_string()),
             Some(serde_json::json!({"robots_status_code": code, "confirmed_missing": false, "probe_conclusive": false, "directive_optional": true})),
+        ),
+        RobotsFetch::HtmlShell => (
+            CheckStatus::Skipped,
+            "Sitemap directive not evaluated",
+            "robots.txt answered with an HTML page (catch-all rewrite), so no directives could be read. The endpoint responded, so this is not a network failure; the optional directive is not scored as missing.".to_string(),
+            None,
+            None,
+            crate::checks::IssueConfidence::High,
+            Some("The response body is an HTML document, so the endpoint served a page rather than a robots.txt.".to_string()),
+            Some(serde_json::json!({"robots_present": false, "html_catch_all": true, "probe_conclusive": false, "directive_optional": true})),
         ),
         RobotsFetch::NetworkError => (
             CheckStatus::Skipped,
@@ -150,6 +162,31 @@ mod tests {
         assert_eq!(
             unavailable[0].confidence,
             crate::checks::IssueConfidence::NeedsReview
+        );
+    }
+
+    #[test]
+    fn an_html_catch_all_is_not_described_as_a_failed_request() {
+        let rows = evaluate_sitemap_in_robots(&RobotsTxtFetch::HtmlShell);
+        assert_eq!(rows[0].status, CheckStatus::Skipped);
+        assert!(
+            !rows[0].description.contains("request failed"),
+            "{}",
+            rows[0].description
+        );
+        assert!(
+            rows[0].description.contains("catch-all rewrite"),
+            "{}",
+            rows[0].description
+        );
+        assert_eq!(rows[0].raw_data.as_ref().unwrap()["html_catch_all"], true);
+
+        // A genuine transport failure keeps the network wording.
+        let failed = evaluate_sitemap_in_robots(&RobotsTxtFetch::Error("timed out".into()));
+        assert!(
+            failed[0].description.contains("request failed"),
+            "{}",
+            failed[0].description
         );
     }
 }

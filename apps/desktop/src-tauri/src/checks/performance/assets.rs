@@ -43,7 +43,7 @@ impl AsyncCheck for AssetSamplerCheck {
         ));
         let mut futures = Vec::new();
         for asset in &collection.sampled {
-            let client = ctx.client.clone();
+            let client = measurement_client(allow_local_dev).clone();
             let asset = asset.clone();
             let sem = semaphore.clone();
             futures.push(tokio::spawn(async move {
@@ -65,6 +65,14 @@ impl AsyncCheck for AssetSamplerCheck {
 
         assets::evaluate_asset_sample(ctx.body.len() as u64, &collection, &measured)
     }
+}
+
+/// The sampler reports transfer size, so it fetches through the client that
+/// does not auto-decompress. The shared client negotiates gzip and brotli;
+/// decoding drops `Content-Length` and leaves the decoded byte count, which
+/// would be reported as the asset's weight on the wire.
+fn measurement_client(is_strict_local: bool) -> &'static reqwest::Client {
+    crate::http_client::no_decompress_client(is_strict_local)
 }
 
 #[cfg(test)]
@@ -158,5 +166,22 @@ mod tests {
         let public = collect("https://example.com/", false);
         assert!(public.sampled.is_empty());
         assert_eq!(public.skipped_unsupported, 1);
+    }
+
+    #[test]
+    fn the_sampler_never_measures_through_a_decompressing_client() {
+        for is_strict_local in [false, true] {
+            let sampler = measurement_client(is_strict_local) as *const reqwest::Client;
+            assert_eq!(
+                sampler,
+                crate::http_client::no_decompress_client(is_strict_local) as *const reqwest::Client,
+                "transfer size must be measured on the raw wire response"
+            );
+            assert_ne!(
+                sampler,
+                crate::http_client::for_url(is_strict_local) as *const reqwest::Client,
+                "the shared client negotiates gzip and brotli; measuring through it would report decoded bytes as transfer weight"
+            );
+        }
     }
 }

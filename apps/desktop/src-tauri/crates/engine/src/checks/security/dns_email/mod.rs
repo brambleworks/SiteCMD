@@ -32,8 +32,31 @@ pub fn registrable_domain_for_url(url: &url::Url) -> DomainTarget {
     if host.ends_with(".local") || host.ends_with(".internal") || !host.contains('.') {
         return DomainTarget::LocalOrIp;
     }
-    match psl::domain_str(&host) {
+    // A leading `www.` label is never the registrable name, and under a
+    // multi-label public suffix (`gov.uk`, `co.uk`, `com.au`) the PSL alone
+    // cannot tell: `psl::domain_str("www.gov.uk")` returns `www.gov.uk`,
+    // because that is "suffix plus one label". SPF, DMARC, DNSKEY, and RDAP
+    // were then asked about a CNAME instead of the zone that holds the
+    // records. Dropping the label first is safe for ordinary hosts, since
+    // `example.com` and `www.example.com` share a registrable domain.
+    let candidate = host.strip_prefix("www.").unwrap_or(&host);
+    match psl::domain_str(candidate) {
         Some(domain) => DomainTarget::Registrable(domain.to_string()),
+        // The candidate is itself a public suffix, so nothing is registrable
+        // above it. It is still a real delegated zone - the scanned site is
+        // served from it - and it is the name that holds the apex records.
+        //
+        // Accepted trade-off: scanning a hosting suffix itself (`pages.dev`,
+        // `s3.amazonaws.com`) or its `www` alias now reads mail and DNSSEC
+        // posture from the platform's zone rather than skipping. Those rows are
+        // true about the name they consult and each one says which name that
+        // is, so the reader can see the zone is the platform's; skipping
+        // instead would have to be driven by a hosting-platform list, which is
+        // a bigger and staler thing to maintain than a correctly named row.
+        // The same applies to the `www.` strip: a genuinely registered `www`
+        // label under a suffix is indistinguishable from an alias here, and
+        // resolving to the parent zone is the right answer far more often.
+        None if candidate.contains('.') => DomainTarget::Registrable(candidate.to_string()),
         None => DomainTarget::LocalOrIp,
     }
 }
@@ -170,6 +193,81 @@ mod tests {
         match target_for("https://sub.example.co.uk/") {
             DomainTarget::Registrable(domain) => assert_eq!(domain, "example.co.uk"),
             DomainTarget::LocalOrIp => panic!("example.co.uk should be registrable"),
+        }
+    }
+
+    #[test]
+    fn a_www_host_under_a_multi_label_suffix_resolves_to_the_zone_that_holds_the_records() {
+        // `psl::domain_str("www.gov.uk")` answers `www.gov.uk`, because
+        // `gov.uk` is a public suffix. Asking SPF, DMARC, DNSKEY, and RDAP
+        // about that name asks about a CNAME, not the zone.
+        match target_for("https://www.gov.uk/") {
+            DomainTarget::Registrable(domain) => assert_eq!(domain, "gov.uk"),
+            DomainTarget::LocalOrIp => panic!("www.gov.uk must resolve to the gov.uk zone"),
+        }
+        match target_for("https://www.nhs.uk/") {
+            DomainTarget::Registrable(domain) => assert_eq!(domain, "nhs.uk"),
+            DomainTarget::LocalOrIp => panic!("nhs.uk is an ordinary registrable domain"),
+        }
+    }
+
+    #[test]
+    fn a_public_suffix_served_as_a_site_is_its_own_zone() {
+        match target_for("https://gov.uk/") {
+            DomainTarget::Registrable(domain) => assert_eq!(domain, "gov.uk"),
+            DomainTarget::LocalOrIp => panic!("gov.uk is a delegated zone with apex records"),
+        }
+    }
+
+    #[test]
+    fn a_site_served_from_a_hosting_suffix_reports_the_platform_zone_it_consults() {
+        // Pinning the accepted trade-off documented on the fallback arm.
+        // Scanning a hosting suffix itself (or its `www` alias) has no zone of
+        // its own above it, so the DNS checks now read the platform's zone
+        // where they used to skip. Every such row names the domain it
+        // consulted, which is how the reader can tell whose zone it is.
+        for (url, zone) in [
+            ("https://pages.dev/", "pages.dev"),
+            ("https://www.pages.dev/", "pages.dev"),
+            ("https://s3.amazonaws.com/", "s3.amazonaws.com"),
+        ] {
+            match target_for(url) {
+                DomainTarget::Registrable(domain) => assert_eq!(domain, zone, "{url}"),
+                DomainTarget::LocalOrIp => panic!("{url} resolves to a real zone"),
+            }
+        }
+
+        // The ordinary case is untouched: a deployment one label below the
+        // suffix keeps its own registrable name and is graded on that.
+        for (url, expected) in [
+            ("https://preview.pages.dev/", "preview.pages.dev"),
+            ("https://my-app.vercel.app/", "my-app.vercel.app"),
+            (
+                "https://bucket.s3.amazonaws.com/",
+                "bucket.s3.amazonaws.com",
+            ),
+        ] {
+            match target_for(url) {
+                DomainTarget::Registrable(domain) => assert_eq!(domain, expected, "{url}"),
+                DomainTarget::LocalOrIp => panic!("{url} has a registrable name"),
+            }
+        }
+    }
+
+    #[test]
+    fn stripping_www_does_not_change_an_ordinary_host() {
+        for url in [
+            "https://www.example.co.uk/",
+            "https://example.co.uk/",
+            "https://deep.www.example.com/",
+        ] {
+            match target_for(url) {
+                DomainTarget::Registrable(domain) => assert!(
+                    domain == "example.co.uk" || domain == "example.com",
+                    "{url} resolved to {domain}"
+                ),
+                DomainTarget::LocalOrIp => panic!("{url} should be registrable"),
+            }
         }
     }
 

@@ -82,6 +82,49 @@ fn fixture_and_example_manifests_do_not_flag() {
 }
 
 #[test]
+fn root_level_test_and_e2e_manifests_do_not_flag() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "package.json",
+        r#"{ "name": "demo-app", "dependencies": { "react": "*" } }"#,
+    );
+    // A harness directory at the project root has no separator in front of it,
+    // which the test-path predicate now accounts for.
+    write_file(
+        temp.path(),
+        "test/package.json",
+        r#"{ "name": "harness", "dependencies": { "astro": "*" } }"#,
+    );
+    write_file(
+        temp.path(),
+        "e2e/package.json",
+        r#"{ "name": "e2e", "dependencies": { "vite": "latest" } }"#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let ids = report.issues.iter().map(|i| &i.id).collect::<Vec<_>>();
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "unbounded-dependency-range:test/package.json"),
+        "a root-level harness manifest is not a shipped dependency set, got {:?}",
+        ids
+    );
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "unbounded-dependency-range:e2e/package.json"),
+        "a root-level end-to-end manifest is not a shipped dependency set, got {:?}",
+        ids
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "unbounded-dependency-range:package.json"),
+        "negative control: the project's own manifest keeps the finding, got {:?}",
+        ids
+    );
+}
+
+#[test]
 fn bounded_dependency_ranges_do_not_flag() {
     let temp = TempDir::new().unwrap();
     write_file(

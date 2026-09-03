@@ -111,7 +111,7 @@ fn invalid_lastmod_description(
     let mut problems = Vec::new();
     if invalid_count > 0 {
         problems.push(format!(
-            "{} of {} direct <lastmod> values do not use a supported W3C date shape (YYYY-MM-DD or an RFC 3339 date-time)",
+            "{} of {} direct <lastmod> values do not use a W3C Datetime shape (YYYY, YYYY-MM, YYYY-MM-DD, or a date with a Thh:mm, Thh:mm:ss, or Thh:mm:ss.s time and a Z or +hh:mm zone designator)",
             invalid_count, direct_value_count
         ));
     }
@@ -210,9 +210,69 @@ fn sitemap_lastmod_summary(xml: &str) -> SitemapLastmodSummary {
     summary
 }
 
+/// The sitemap protocol references the W3C Datetime note, whose complete
+/// profile is `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, and `YYYY-MM-DDThh:mm`,
+/// `YYYY-MM-DDThh:mm:ss`, or `YYYY-MM-DDThh:mm:ss.s` followed by a zone
+/// designator (`Z`, `+hh:mm`, or `-hh:mm`). A time without a zone is invalid.
 fn valid_sitemap_lastmod(value: &str) -> bool {
-    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-        || chrono::DateTime::parse_from_rfc3339(value).is_ok()
+    match value.split_once(['T', 't']) {
+        None => valid_w3c_date(value, false),
+        Some((date, time)) => valid_w3c_date(date, true) && valid_w3c_time_with_zone(time),
+    }
+}
+
+fn valid_w3c_date(date: &str, require_day: bool) -> bool {
+    if !date
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || byte == b'-')
+    {
+        return false;
+    }
+    match date.len() {
+        4 if !require_day => date.bytes().all(|byte| byte.is_ascii_digit()),
+        7 if !require_day => {
+            chrono::NaiveDate::parse_from_str(&format!("{date}-01"), "%Y-%m-%d").is_ok()
+        }
+        10 => chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok(),
+        _ => false,
+    }
+}
+
+fn valid_w3c_time_with_zone(time: &str) -> bool {
+    let local = match time.strip_suffix(['Z', 'z']) {
+        Some(local) => local,
+        None => match time.rfind(['+', '-']) {
+            Some(index) if valid_w3c_zone_offset(&time[index + 1..]) => &time[..index],
+            _ => return false,
+        },
+    };
+    let (clock, fraction) = match local.split_once('.') {
+        Some((clock, fraction)) => (clock, Some(fraction)),
+        None => (local, None),
+    };
+    if fraction.is_some_and(|digits| {
+        digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit())
+    }) {
+        return false;
+    }
+    let format = match (clock.len(), fraction) {
+        (5, None) => "%H:%M",
+        (8, _) => "%H:%M:%S",
+        _ => return false,
+    };
+    chrono::NaiveTime::parse_from_str(clock, format).is_ok()
+}
+
+/// `hh:mm` after the sign: hours 00-23, minutes 00-59.
+fn valid_w3c_zone_offset(offset: &str) -> bool {
+    let Some((hours, minutes)) = offset.split_once(':') else {
+        return false;
+    };
+    let two_digits = |part: &str| part.len() == 2 && part.bytes().all(|byte| byte.is_ascii_digit());
+    two_digits(hours)
+        && two_digits(minutes)
+        && hours.parse::<u8>().is_ok_and(|hours| hours <= 23)
+        && minutes.parse::<u8>().is_ok_and(|minutes| minutes <= 59)
 }
 
 #[cfg(test)]
@@ -336,5 +396,68 @@ mod tests {
     #[test]
     fn empty_sitemap_document_yields_no_freshness_result() {
         assert!(evaluate_sitemap_freshness(&fetch("<urlset></urlset>")).is_empty());
+    }
+
+    #[test]
+    fn every_w3c_datetime_profile_shape_is_a_valid_lastmod() {
+        for value in [
+            "2026",
+            "2026-09",
+            "2026-09-02",
+            "2026-09-02T03:00Z",
+            "2026-09-02T03:00+02:00",
+            "2026-09-02T03:00:00Z",
+            "2026-09-02T03:00:00-05:00",
+            "2026-09-02T03:00:00.5Z",
+            "2026-09-02T03:00:00.123456+00:00",
+            "2026-09-02t03:00:00z",
+        ] {
+            assert!(
+                valid_sitemap_lastmod(value),
+                "{value} is in the W3C profile"
+            );
+        }
+    }
+
+    #[test]
+    fn shapes_outside_the_w3c_profile_are_invalid_lastmod_values() {
+        for value in [
+            "2026-09-02 03:00",
+            "2026-13-01",
+            "2026-09-02T03:00",
+            "2026-09-02T03:00:00",
+            "2026-09-02T25:00Z",
+            "2026-09-02T03:00:00+24:00",
+            "2026-09-02T03:00:00.Z",
+            "2026-9-2",
+            "20260902",
+            "2026-02-30",
+            "yesterday",
+            "",
+        ] {
+            assert!(
+                !valid_sitemap_lastmod(value),
+                "{value} is outside the profile"
+            );
+        }
+    }
+
+    #[test]
+    fn minute_precision_zoned_lastmod_values_pass_freshness() {
+        let xml = r#"<urlset>
+            <url><loc>https://example.com/</loc><lastmod>2026-09-02T03:00Z</lastmod></url>
+            <url><loc>https://example.com/blog</loc><lastmod>2026-08-20T21:25Z</lastmod></url>
+        </urlset>"#;
+        let results = evaluate_sitemap_freshness(&fetch(xml));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+        assert_eq!(
+            results[0].raw_data.as_ref().unwrap()["invalid_lastmod_count"],
+            0
+        );
     }
 }

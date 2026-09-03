@@ -20,6 +20,8 @@ impl Check for ThirdPartyScriptsCheck {
 
         let mut external_sites: HashSet<String> = HashSet::new();
         let mut external_origins: HashSet<String> = HashSet::new();
+        let mut related_name_sites: HashSet<String> = HashSet::new();
+        let mut related_name_count = 0;
         let mut external_count = 0;
         // Parser-blocking candidates have none of async/defer/type=module.
         // This source observation does not prove the request succeeds or the
@@ -40,8 +42,14 @@ impl Check for ThirdPartyScriptsCheck {
             let Some(host) = resolved.host_str().map(str::to_ascii_lowercase) else {
                 continue;
             };
-            if is_same_site(&host, &page_host) {
-                continue;
+            match site_relation(&host, &page_host) {
+                SiteRelation::SameSite => continue,
+                SiteRelation::RelatedName => {
+                    related_name_sites.insert(registrable_site(&host));
+                    related_name_count += 1;
+                    continue;
+                }
+                SiteRelation::CrossSite => {}
             }
 
             external_sites.insert(registrable_site(&host));
@@ -71,6 +79,18 @@ impl Check for ThirdPartyScriptsCheck {
         sites.sort();
         let mut origins: Vec<String> = external_origins.into_iter().collect();
         origins.sort();
+        let mut related_sites: Vec<String> = related_name_sites.into_iter().collect();
+        related_sites.sort();
+        let related_note = if related_name_count == 0 {
+            String::new()
+        } else {
+            format!(
+                " {} script tag{} load from {}, whose registrable name extends this site's own under the same public suffix. Sites commonly deliver their own assets from such a domain, and the fetched markup does not establish ownership, so these are listed rather than counted as cross-site. Name similarity is not proof of common ownership, so security checks such as `security.sri` ignore this relation and require an exact registrable-domain match.",
+                related_name_count,
+                if related_name_count == 1 { "" } else { "s" },
+                related_sites.join(", "),
+            )
+        };
 
         vec![CheckResult {
             check_id: "performance.third_party".into(),
@@ -81,7 +101,7 @@ impl Check for ThirdPartyScriptsCheck {
                 "Cross-site script tags".into()
             },
             description: if external_count == 0 {
-                "No cross-site `<script src>` tag was found in the fetched HTML. Runtime injection, workers, modules imported by scripts, subresources, and same-site third-party services are outside this source check.".into()
+                "No cross-site `<script src>` tag was found in the fetched HTML. Runtime injection, workers, modules imported by scripts, subresources, and same-site third-party services are outside this source check.".to_string() + &related_note
             } else {
                 format!(
                     "{} cross-site script tag{} from {} registrable site{} and {} origin{} appear{} in the fetched source markup: {}. Separate origins can require connection setup, though DNS caching, connection reuse/coalescing, and protocol behavior affect the cost.{}",
@@ -103,7 +123,7 @@ impl Check for ThirdPartyScriptsCheck {
                     } else {
                         " Every surfaced tag declares async, defer, or type=module, so none is parser-blocking under normal HTML script semantics.".to_string()
                     }
-                )
+                ) + &related_note
             },
             status,
             severity,
@@ -119,6 +139,8 @@ impl Check for ThirdPartyScriptsCheck {
                 "registrable_sites": sites,
                 "origins": origins,
                 "external_script_srcs": external_script_srcs,
+                "related_name_script_count": related_name_count,
+                "related_name_sites": related_sites,
             })),
             confidence: if status == CheckStatus::Pass {
                 crate::checks::IssueConfidence::High
@@ -140,18 +162,81 @@ impl Check for ThirdPartyScriptsCheck {
     }
 }
 
-fn registrable_site(host: &str) -> String {
-    psl::domain_str(host).unwrap_or(host).to_ascii_lowercase()
+/// The registrable site (PSL eTLD+1) a host belongs to, normalized the same
+/// way `security::dns_email::registrable_domain_for_url` normalizes a scan
+/// target: a leading `www.` is dropped first, because under a multi-label
+/// public suffix (`gov.uk`, `co.uk`) the PSL alone answers `www.gov.uk` for
+/// `www.gov.uk`. Hosts with no public suffix (localhost, IP literals) are
+/// their own site.
+pub fn registrable_site(host: &str) -> String {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let candidate = host.strip_prefix("www.").unwrap_or(&host);
+    psl::domain_str(candidate)
+        .unwrap_or(candidate)
+        .to_ascii_lowercase()
 }
 
-fn is_same_site(host1: &str, host2: &str) -> bool {
-    registrable_site(host1) == registrable_site(host2)
+/// How a resource host relates to the site being scanned. Shared so
+/// `performance.third_party` and `security.sri` answer "is this someone
+/// else's code?" the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiteRelation {
+    /// The page's own registrable site, including any subdomain of it.
+    SameSite,
+    /// A different registrable site whose name extends the page's under the
+    /// same public suffix: `github.com` to `github`assets`.com`,
+    /// `bbc.co.uk` to `bbc`i`.co.uk`. Sites commonly deliver their own assets
+    /// from such a domain, and the name is the only evidence fetched markup
+    /// carries. It does not prove common ownership - the same rule relates
+    /// `pay.com` to `paypal.com` - so it is used only to keep an advisory
+    /// count honest, and a verdict names these hosts in its evidence instead
+    /// of dropping them silently. Security checks require `SameSite`.
+    RelatedName,
+    /// An unrelated registrable site.
+    CrossSite,
+}
+
+impl SiteRelation {
+    /// Whether the resource comes from someone else's site as far as the
+    /// fetched markup can tell.
+    pub fn is_third_party(self) -> bool {
+        matches!(self, Self::CrossSite)
+    }
+}
+
+/// Shortest brand label that may take part in the name-extension rule. Two
+/// characters would relate `x.com` to `xy.com`, which says nothing.
+const MIN_RELATED_LABEL_LEN: usize = 3;
+
+pub fn site_relation(resource_host: &str, page_host: &str) -> SiteRelation {
+    let resource_site = registrable_site(resource_host);
+    let page_site = registrable_site(page_host);
+    if resource_site == page_site {
+        return SiteRelation::SameSite;
+    }
+    let split = |site: &str| {
+        site.split_once('.')
+            .map(|(label, suffix)| (label.to_string(), suffix.to_string()))
+    };
+    let (Some((resource_label, resource_suffix)), Some((page_label, page_suffix))) =
+        (split(&resource_site), split(&page_site))
+    else {
+        return SiteRelation::CrossSite;
+    };
+    let extends = resource_suffix == page_suffix
+        && resource_label.len() >= MIN_RELATED_LABEL_LEN
+        && page_label.len() >= MIN_RELATED_LABEL_LEN
+        && (resource_label.starts_with(&page_label) || page_label.starts_with(&resource_label));
+    if extends {
+        SiteRelation::RelatedName
+    } else {
+        SiteRelation::CrossSite
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_same_site;
-    use super::ThirdPartyScriptsCheck;
+    use super::{site_relation, SiteRelation, ThirdPartyScriptsCheck};
     use crate::checks::{Check, CheckStatus, PageContext};
 
     fn ctx(body: &str) -> PageContext {
@@ -274,9 +359,92 @@ mod tests {
 
     #[test]
     fn same_site_uses_the_public_suffix_list_instead_of_last_two_labels() {
-        assert!(is_same_site("www.example.co.uk", "static.example.co.uk"));
-        assert!(!is_same_site("www.example.co.uk", "evil.co.uk"));
-        assert!(!is_same_site("github.com", "githubassets.com"));
+        assert_eq!(
+            site_relation("static.example.co.uk", "www.example.co.uk"),
+            SiteRelation::SameSite
+        );
+        assert_eq!(
+            site_relation("evil.co.uk", "www.example.co.uk"),
+            SiteRelation::CrossSite
+        );
+        assert_ne!(
+            site_relation("githubassets.com", "github.com"),
+            SiteRelation::SameSite,
+            "a separate registration is never the same site"
+        );
+    }
+
+    #[test]
+    fn a_site_delivery_domain_is_related_by_name_not_cross_site() {
+        // The two live cases: github.com serves 9 tags from
+        // github.githubassets.com, bbc.co.uk serves 55 from
+        // static.files.bbci.co.uk.
+        assert_eq!(
+            site_relation("github.githubassets.com", "github.com"),
+            SiteRelation::RelatedName
+        );
+        assert_eq!(
+            site_relation("static.files.bbci.co.uk", "www.bbc.co.uk"),
+            SiteRelation::RelatedName
+        );
+        assert_eq!(
+            site_relation("static.example.com", "www.example.com"),
+            SiteRelation::SameSite
+        );
+        assert!(!SiteRelation::RelatedName.is_third_party());
+        assert!(SiteRelation::CrossSite.is_third_party());
+    }
+
+    #[test]
+    fn an_unrelated_vendor_is_never_related_by_name() {
+        for (resource, page) in [
+            ("cdn.vendor.net", "example.com"),
+            // A different public suffix is a different registration entirely.
+            ("facebook.net", "face.com"),
+            // Two-character labels relate nothing.
+            ("xy.com", "x.com"),
+            // Neither name extends the other.
+            ("assetsgithub.com", "gitlab.com"),
+        ] {
+            assert_eq!(
+                site_relation(resource, page),
+                SiteRelation::CrossSite,
+                "{resource} on {page}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_related_delivery_domain_is_listed_instead_of_counted() {
+        let scripts: String = (0..12)
+            .map(|i| {
+                format!(
+                    r#"<script defer src="https://static.files.bbci.co.uk/core/a{i}.js"></script>"#
+                )
+            })
+            .collect();
+        let page = PageContext {
+            url: url::Url::parse("https://www.bbc.co.uk/").unwrap(),
+            ..ctx(&scripts)
+        };
+        let result = ThirdPartyScriptsCheck.run(&page).remove(0);
+
+        assert_eq!(
+            result.status,
+            CheckStatus::Pass,
+            "12 tags from one name-related delivery domain are not a failure: {}",
+            result.description
+        );
+        let raw = result.raw_data.as_ref().unwrap();
+        assert_eq!(raw["external_script_count"], 0);
+        assert_eq!(raw["related_name_script_count"], 12);
+        assert_eq!(raw["related_name_sites"][0], "bbci.co.uk");
+        assert!(
+            result.description.contains("bbci.co.uk")
+                && result.description.contains("does not establish ownership"),
+            "{}",
+            result.description
+        );
     }
 
     #[test]

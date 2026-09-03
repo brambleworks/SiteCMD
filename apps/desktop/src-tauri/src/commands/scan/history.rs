@@ -32,7 +32,10 @@ pub async fn get_scan_executions(
     .map_err(sanitize_error)
 }
 
-/// Get one execution with all canonical collector runs and immutable findings.
+/// Get one execution with its canonical collector runs and immutable findings.
+/// `execution_id` returns every run; `run_id` narrows the runs and the findings
+/// read out of SQLite to that one run, so a scan detail never pays for its
+/// siblings' findings.
 #[tauri::command]
 #[tracing::instrument(skip(db), fields(execution_id))]
 pub async fn get_scan_execution_detail(
@@ -41,19 +44,17 @@ pub async fn get_scan_execution_detail(
     run_id: Option<i64>,
 ) -> Result<Option<ScanExecutionDetail>, String> {
     let db = (*db).clone();
-    run_blocking(move || {
-        let execution_id = match (execution_id, run_id) {
-            (Some(execution_id), None) => execution_id,
-            (None, Some(run_id)) => db
+    run_blocking(move || match (execution_id, run_id) {
+        (Some(execution_id), None) => db.get_scan_execution_detail(execution_id),
+        (None, Some(run_id)) => {
+            let execution_id = db
                 .get_scan_run_execution_id(run_id)?
-                .ok_or_else(|| crate::db::DbError::Other("scan run was not found".into()))?,
-            _ => {
-                return Err(crate::db::DbError::Other(
-                    "provide exactly one of execution_id or run_id".into(),
-                ));
-            }
-        };
-        db.get_scan_execution_detail(execution_id)
+                .ok_or_else(|| crate::db::DbError::Other("scan run was not found".into()))?;
+            db.get_scan_execution_detail_for_run(execution_id, run_id)
+        }
+        _ => Err(crate::db::DbError::Other(
+            "provide exactly one of execution_id or run_id".into(),
+        )),
     })
     .await?
     .map_err(sanitize_error)

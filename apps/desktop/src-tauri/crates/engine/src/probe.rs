@@ -5,6 +5,17 @@
 
 use serde::{Deserialize, Serialize};
 
+/// What a browser asks for when a person navigates to a URL.
+///
+/// Probes that grade a document a visitor would see must ask for it the way a
+/// visitor's browser does, because origins content-negotiate on this header:
+/// GitHub answers a missing path with a nine-byte `text/plain` body under
+/// reqwest's default `*/*` and with its full 260 KB branded error page under
+/// this one. Grading the former would be grading a response no browser
+/// receives. The `*/*;q=0.8` tail keeps XML and plain-text documents
+/// acceptable, so file-shaped targets still answer normally.
+pub const BROWSER_PAGE_ACCEPT: &str = "text/html,application/xhtml+xml,*/*;q=0.8";
+
 /// What a probe plan wants fetched and how. Adapters execute this and
 /// nothing else, so a check can never smuggle runtime-specific transport
 /// behavior past the parity corpus.
@@ -147,6 +158,10 @@ pub struct ProbeFailure {
 pub enum ProbeFailureClass {
     Timeout,
     BodyCapExceeded,
+    /// Name resolution returned no address for the host. Separate from
+    /// `Transport` because it is an answer, not a missing one: a verdict can
+    /// tell "this host does not exist" from "this host did not reply".
+    DnsUnresolved,
     Transport,
 }
 

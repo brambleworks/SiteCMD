@@ -6,12 +6,12 @@ use crate::checks::{
 };
 use crate::core::localhost;
 use crate::scoring::calculator;
-use futures_util::{future::try_join_all, FutureExt};
 use std::future::Future;
 
-use crate::constants::{BODY_READ_TIMEOUT, CHECK_TIMEOUT, MAX_BODY_SIZE};
+use crate::constants::{BODY_READ_TIMEOUT, MAX_BODY_SIZE};
 
 mod finalize;
+mod phases;
 mod site_facts;
 mod types;
 pub(crate) mod verify;
@@ -19,6 +19,7 @@ pub(crate) mod verify;
 mod webview_results;
 
 pub(crate) use finalize::finalize_check_results;
+use phases::{run_async_checks, run_sync_checks};
 pub use types::{
     MultiScanProgress, MultiScanResult, PageScanSummary, ProgressFn, ScanError, ScanProgress,
     ScanResult, ScanType, ScheduledScanType, VerifyChecksResult,
@@ -74,7 +75,7 @@ where
 }
 
 /// Run all applicable checks against a URL, emitting progress events.
-#[tracing::instrument(skip(progress, enabled_categories, cancel_check, url_str), fields(timeout_secs, scan_type = %scan_type))]
+#[tracing::instrument(skip(progress, enabled_categories, cancel_check, url_str, stylesheet_cache), fields(timeout_secs, scan_type = %scan_type))]
 pub async fn run_scan<C>(
     url_str: &str,
     progress: Option<&ProgressFn>,
@@ -84,6 +85,8 @@ pub async fn run_scan<C>(
     // Multi-page scans skip origin-wide checks after the entry page.
     skip_origin_checks: bool,
     cancel_check: Option<&C>,
+    // Stylesheets already read by earlier pages of the same scan execution.
+    stylesheet_cache: Option<&crate::checks::polish::StylesheetCache>,
 ) -> Result<ScanResult, ScanError>
 where
     C: Fn() -> bool + ?Sized,
@@ -165,7 +168,14 @@ where
 
     // Polish signals - fetch CSS and run quality heuristics (skip for security/accessibility scans)
     if !matches!(scan_type, ScanType::Security | ScanType::Accessibility) {
-        run_polish_phase(&mut ctx, progress, &mut all_results, cancel_check).await?;
+        run_polish_phase(
+            &mut ctx,
+            progress,
+            &mut all_results,
+            cancel_check,
+            stylesheet_cache,
+        )
+        .await?;
     }
     ensure_not_cancelled(cancel_check)?;
 
@@ -223,7 +233,7 @@ where
         cancel_check,
     )
     .await?
-    .map_err(|e| ScanError::NetworkError(format!("Failed to fetch {}: {}", url, e)))?;
+    .map_err(|e| ScanError::NetworkError(crate::http_client::fetch_failure(url, &e)))?;
 
     let effective_url = response.url().clone();
     let effective_is_local = localhost::is_localhost(&effective_url);
@@ -342,203 +352,16 @@ pub(crate) fn collect_checks(
     (sync_checks, async_checks)
 }
 
-/// Run all synchronous checks with progress events
-fn run_sync_checks<C>(
-    checks: &[Box<dyn Check>],
-    ctx: &CheckContext,
-    is_local: bool,
-    progress: Option<&ProgressFn>,
-    total: usize,
-    checks_done: &mut usize,
-    results: &mut Vec<CheckResult>,
-    cancel_check: Option<&C>,
-) -> Result<(), ScanError>
-where
-    C: Fn() -> bool + ?Sized,
-{
-    let mut completed_count = *checks_done;
-    let mut completed_results = Vec::new();
-
-    for check in checks {
-        let _check_span = tracing::debug_span!(
-            "sync_check",
-            check_id = check.id(),
-            category = ?check.category(),
-        )
-        .entered();
-        ensure_not_cancelled(cancel_check)?;
-        if is_local && check.skip_in_predeploy() {
-            completed_count += 1;
-            emit_progress(
-                progress,
-                check.id(),
-                check.category(),
-                "skipped",
-                0,
-                completed_count,
-                total,
-            );
-            continue;
-        }
-
-        emit_progress(
-            progress,
-            check.id(),
-            check.category(),
-            "running",
-            0,
-            completed_count,
-            total,
-        );
-
-        let check_results =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(ctx))).map_err(
-                |_| {
-                    tracing::error!(
-                        "Sync check {} panicked; aborting incomplete scan",
-                        check.id()
-                    );
-                    detector_crash_error(check.id())
-                },
-            )?;
-        ensure_not_cancelled(cancel_check)?;
-
-        let count = check_results.len();
-        completed_results.extend(check_results);
-        completed_count += 1;
-
-        emit_progress(
-            progress,
-            check.id(),
-            check.category(),
-            "complete",
-            count,
-            completed_count,
-            total,
-        );
-    }
-
-    results.extend(completed_results);
-    *checks_done = completed_count;
-    Ok(())
-}
-
-/// Run all async checks concurrently with per-check timeouts and progress events
-async fn run_async_checks<C>(
-    checks: &[Box<dyn AsyncCheck>],
-    ctx: &CheckContext,
-    is_local: bool,
-    progress: Option<&ProgressFn>,
-    total: usize,
-    checks_done: &mut usize,
-    results: &mut Vec<CheckResult>,
-    cancel_check: Option<&C>,
-) -> Result<(), ScanError>
-where
-    C: Fn() -> bool + ?Sized,
-{
-    ensure_not_cancelled(cancel_check)?;
-
-    let mut completed_count = *checks_done;
-    let mut runnable: Vec<&Box<dyn AsyncCheck>> = Vec::new();
-    for check in checks {
-        if is_local && check.skip_in_predeploy() {
-            completed_count += 1;
-            emit_progress(
-                progress,
-                check.id(),
-                check.category(),
-                "skipped",
-                0,
-                completed_count,
-                total,
-            );
-            tracing::info!("Skipping {} in pre-deploy mode", check.id());
-        } else {
-            emit_progress(
-                progress,
-                check.id(),
-                check.category(),
-                "running",
-                0,
-                completed_count,
-                total,
-            );
-            runnable.push(check);
-        }
-    }
-
-    let futures: Vec<_> = runnable
-        .iter()
-        .map(|check| {
-            let id = check.id().to_string();
-            let cat = check.category();
-            let span = tracing::debug_span!("async_check", check_id = %id, category = ?cat);
-            use tracing::Instrument;
-            async move {
-                let result = std::panic::AssertUnwindSafe(tokio::time::timeout(
-                    CHECK_TIMEOUT,
-                    check.run(ctx),
-                ))
-                .catch_unwind()
-                .await;
-                let result = match result {
-                    Ok(Ok(results)) => results,
-                    Ok(Err(_)) => {
-                        tracing::warn!("Async check {} timed out after {:?}", id, CHECK_TIMEOUT);
-                        vec![CheckResult {
-                            check_id: id.clone(),
-                            category: check.category(),
-                            title: format!("{} (timed out)", id),
-                            description: "This check timed out and was skipped.".into(),
-                            status: CheckStatus::Skipped,
-                            severity: Severity::Low,
-                            fix_prompt: None,
-                            manual_fix: None,
-                            raw_data: None,
-                            confidence: crate::checks::IssueConfidence::High,
-                            confidence_reason: None,
-                            why_it_matters: None,
-                        }]
-                    }
-                    Err(_) => {
-                        tracing::error!("Async check {} panicked; aborting incomplete scan", id);
-                        return Err(detector_crash_error(&id));
-                    }
-                };
-                Ok((id, cat, result))
-            }
-            .instrument(span)
-        })
-        .collect();
-
-    let completed = await_or_cancel(try_join_all(futures), cancel_check).await??;
-
-    for (id, cat, check_results) in completed {
-        let count = check_results.len();
-        results.extend(check_results);
-        completed_count += 1;
-        emit_progress(
-            progress,
-            &id,
-            cat,
-            "complete",
-            count,
-            completed_count,
-            total,
-        );
-    }
-    *checks_done = completed_count;
-    Ok(())
-}
-
 /// Run Polish quality heuristics using the already-fetched page body.
 /// Fetches linked CSS stylesheets, then runs all polish signals and converts to CheckResults.
+/// `stylesheet_cache` holds the stylesheets earlier pages of this scan
+/// execution already read; it is `None` for a single-page scan.
 async fn run_polish_phase<C>(
     ctx: &mut CheckContext,
     progress: Option<&ProgressFn>,
     results: &mut Vec<CheckResult>,
     cancel_check: Option<&C>,
+    stylesheet_cache: Option<&crate::checks::polish::StylesheetCache>,
 ) -> Result<(), ScanError>
 where
     C: Fn() -> bool + ?Sized,
@@ -559,7 +382,13 @@ where
     // Fetch linked CSS for polish analysis. Coverage travels with the content:
     // a failed fetch must not turn an unobserved CSS pattern into a Pass.
     let css_fetch = await_or_cancel(
-        css_fetch::fetch_stylesheets(&ctx.body, &ctx.url, &ctx.client, ctx.is_strict_localhost),
+        css_fetch::fetch_stylesheets(
+            &ctx.body,
+            &ctx.url,
+            &ctx.client,
+            ctx.is_strict_localhost,
+            stylesheet_cache,
+        ),
         cancel_check,
     )
     .await?;

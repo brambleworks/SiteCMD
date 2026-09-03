@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling",
         "title": "SiteCMD",
         "width": 1200,
         "height": 800,
@@ -28,7 +29,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ipc: tauri:; font-src 'self' data:"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ipc: tauri:; font-src 'self' data:"
     }
   },
   "bundle": {

@@ -3,6 +3,7 @@
 [![Code Scan](https://github.com/brambleworks/SiteCMD/actions/workflows/app-guardrails.yml/badge.svg?branch=main)](https://github.com/brambleworks/SiteCMD/actions/workflows/app-guardrails.yml)
 [![CodeQL](https://github.com/brambleworks/SiteCMD/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/brambleworks/SiteCMD/actions/workflows/codeql.yml)
 [![Latest release](https://img.shields.io/github/v/release/brambleworks/SiteCMD)](https://github.com/brambleworks/SiteCMD/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Desktop website health scanner and command center. SiteCMD scans websites and
 linked codebases for security, performance, SEO, accessibility, compliance, and
@@ -13,42 +14,77 @@ or coding agent you already work in.
 
 ## What ships
 
-| Surface           | Purpose                                                                                                  | Account required    |
-| ----------------- | -------------------------------------------------------------------------------------------------------- | ------------------- |
-| Desktop app       | Local website and source scanning, project history, correlations, reports, and fix guidance              | No                  |
-| `sitecmd` CLI     | Local Code Scan audits, machine-readable reports, and connected CI gates                                 | No for local audits |
-| MCP server        | Gives supported AI coding tools local findings and fix briefs, then hands attempts back for verification | No                  |
-| Connected service | Hosted scheduled scans, deploy verification, alerts, shared reports, and baseline-aware CI decisions     | Yes                 |
+| Surface           | Purpose                                                                                                  | Account required   |
+| ----------------- | -------------------------------------------------------------------------------------------------------- | ------------------ |
+| Desktop app       | Local website and source scanning, project history, correlations, reports, and fix guidance              | No                 |
+| `sitecmd` CLI     | Local Web Scan and Code Scan, machine-readable reports, git hooks, and connected CI gates                | No for local scans |
+| MCP server        | Gives supported AI coding tools local findings and fix briefs, then hands attempts back for verification | No                 |
+| Connected service | Hosted scheduled scans, deploy verification, alerts, shared reports, and baseline-aware CI decisions     | Yes                |
 
 The desktop app, CLI, and MCP server in this repository are the complete local
 product. The connected service is a separate hosted product; local scan detail
 is not withheld to create the paid tier.
 
+## What it checks
+
+One scan runs the engines below and merges everything they find into a single
+ranked list, whether a finding came from the live site or the checkout behind
+it.
+
+| Engine        | Checks | Covers                                                                                                        |
+| ------------- | -----: | ------------------------------------------------------------------------------------------------------------- |
+| Web Scan      |    157 | Security headers and TLS, SEO, performance, accessibility, compliance, and configuration, against a live URL  |
+| Code Scan     |    170 | Security, operations, architecture, supply chain, AI safety, and data handling, across a source checkout      |
+| Accessibility |     55 | axe-core WCAG 2 Level A and AA rules, run against the rendered page                                           |
+| Polish        |     30 | CSS architecture, HTML quality, copy, visual defaults, and framework leftovers that mark a page as unfinished |
+
+Dependency findings resolve across 8 package ecosystems. Every count above is
+derived from the registries themselves by `pnpm facts:generate`, published in
+[product-facts.json](product-facts.json), and held to that file by a repository
+guardrail.
+
 ## Install and try it
 
-Download the desktop app from [sitecmd.com/download](https://sitecmd.com/download).
-Release builds support macOS 11 or later with Safari/WebKit 16.2 or later
-(Apple silicon and Intel through one universal app), Windows 10 or later on
-x86_64 with WebView2 111 or later, and Ubuntu 22.04 or a compatible x86_64
-Linux distribution with WebKitGTK 2.40 or later as an AppImage.
+### The desktop app
 
-The installed `sitecmd` CLI can run the source audit directly. The installer is
+Download it from [sitecmd.com/download](https://sitecmd.com/download). Release
+builds support macOS 11 or later with Safari/WebKit 16.2 or later (Apple
+silicon and Intel through one universal app), Windows 10 or later on x86_64
+with WebView2 111 or later, and Ubuntu 22.04 or a compatible x86_64 Linux
+distribution with WebKitGTK 2.40 or later as an AppImage.
+
+[Get value in five minutes](docs/product/get-value-in-5-minutes.md) is the
+shortest walkthrough, and [the MCP server README](apps/mcp-server/README.md)
+puts the same findings inside an AI coding tool.
+
+### The CLI
+
+`sitecmd` runs a Web Scan against a live URL and the complete Code Scan against
+a source checkout. Neither needs an account. npm is the quickest way to try
+one, and carries the platform binary for macOS, Linux, or Windows:
+
+```bash
+npx @sitecmd/cli audit .
+npx @sitecmd/cli scan --url https://example.com
+```
+
+Pin it as a dev dependency so CI and git hooks run the exact version your
+lockfile names:
+
+```bash
+npm install --save-dev @sitecmd/cli
+npx sitecmd audit . --format github --fail-on high
+```
+
+For a standalone binary on macOS or Linux, the installer is
 [maintained in this repository](install.sh), authenticates the archive with the
-public updater key, and verifies its SHA-256 checksum and reported version.
+public updater key, and verifies its SHA-256 checksum and reported version:
 
 ```bash
 curl -fsSL https://sitecmd.com/install.sh | sh
 ```
 
-The installer prints where it placed the binary. If that directory is not on
-your `PATH`, run the `export` command it prints before continuing:
-
-```bash
-sitecmd audit .
-sitecmd audit . --format github --fail-on high
-```
-
-To inspect the installer before running it:
+To inspect it before running it:
 
 ```bash
 curl -fsSLo sitecmd-install.sh https://sitecmd.com/install.sh
@@ -56,15 +92,14 @@ less sitecmd-install.sh
 sh sitecmd-install.sh
 ```
 
-The installer supports macOS and Linux, requires
-[Minisign](https://jedisct1.github.io/minisign/), verifies the release checksum
-and signature before installing, and accepts `SITECMD_VERSION` for a pinned
-release. Windows users can use the signed zip linked from the
+The installer requires [Minisign](https://jedisct1.github.io/minisign/) and
+accepts `SITECMD_VERSION` for a pinned release. It prints where it placed the
+binary; if that directory is not on your `PATH`, run the `export` command it
+prints. A signed Windows zip is linked from the
 [CLI documentation](https://sitecmd.com/docs/cli).
 
-See [Get value in five minutes](docs/product/get-value-in-5-minutes.md) for the
-shortest desktop walkthrough, or [the MCP server README](apps/mcp-server/README.md)
-to put the same findings inside an AI coding tool.
+`sitecmd --help` lists the rest: `init`, `audit`, `scan`, `fix`, `watch`,
+`check`, `connected`, `deploy`, and `gate`.
 
 ## Verify your download
 
@@ -122,25 +157,24 @@ repository is public:
   requests, what the code audit reads, and where either can send anything are
   all here to be read, and [sitecmd.com/trust](https://sitecmd.com/trust)
   names each fixed host and describes dynamic destinations by class.
-- The sync payload builder is in this source too. The app and CLI inspection
-  commands render a concrete snapshot with the same public wire schema and
-  serializer used for transmission, without sending it. The displayed bytes
-  are the exact serialization of that inspected snapshot. A later sync rebuilds
-  the payload from current local and connected state, so its values may have
-  changed.
+- The sync payload builder is in this source too. The app's inspection view and
+  `sitecmd connected --dry-run` render a concrete snapshot with the same public
+  wire schema and serializer used for transmission, without sending it. The
+  displayed bytes are the exact serialization of that inspected snapshot. A
+  later sync rebuilds the payload from current local and connected state, so its
+  values may have changed.
 - Site operators reading SiteCMD's identity out of an access log get the same
   treatment at [sitecmd.com/scanner](https://sitecmd.com/scanner): every kind
   of request, why some look hostile, and how to block them.
 
 ## What is sold, and what is not
 
-The client in this repository is the complete local product. The paid product
-is the connected service: hosted scans between deploys, deploy-anchored
-verification, baseline-aware regression alerting, and the CI merge gate's
-server side. The line is not how much of the local product you get; it is
-whether SiteCMD's servers have to exist for the capability to exist at all.
-Code that runs on your machine is here under Apache-2.0. Code that runs on
-SiteCMD infrastructure is not part of this repository.
+The paid product is the connected service: hosted scans between deploys,
+deploy-anchored verification, baseline-aware regression alerting, and the CI
+merge gate's server side. The line is not how much of the local product you
+get; it is whether SiteCMD's servers have to exist for the capability to exist
+at all. Code that runs on your machine is here under Apache-2.0. Code that runs
+on SiteCMD infrastructure is not part of this repository.
 
 ## Repo map
 
@@ -152,19 +186,21 @@ apps/
   desktop/            Tauri v2 desktop app: React frontend + Rust backend
   mcp-server/         MCP server package
 .github/actions/
-  setup-sitecmd/       GitHub Action: verify and install an exact CLI release
+  setup-sitecmd/      GitHub Action: verify and install an exact CLI release
   sitecmd-gate/       GitHub Action: fail a PR on findings new against the
                       connected baseline
 docs/                 Current engineering, product, QA, and operations docs
+packaging/npm/        The @sitecmd/cli npm package and its per-platform binaries
 tools/                Repository tooling and maintained benchmarks
+install.sh            The installer sitecmd.com/install.sh serves
 ```
 
 The marketing site, the public scanner page, and the Cloudflare Workers live in
 the separate SiteCMD-Web repository. `product-facts.json` publishes the values
 that side has to restate accurately: check counts, the commercial boundary and
 surface status, the Sentry ingest host, and the license-activation deep-link
-scheme.
-Regenerate it with `pnpm facts:generate` after changing any of their sources.
+scheme. Regenerate it with `pnpm facts:generate` after changing any of their
+sources.
 
 ## Prerequisites
 
@@ -233,7 +269,7 @@ pnpm --filter sitecmd-mcp run test
 The desktop app and the MCP server each document themselves through their own
 `AGENTS.md`. Start there before changing either.
 
-## Desktop app
+## Desktop app workspace
 
 The desktop app lives in `apps/desktop/`.
 
@@ -317,7 +353,9 @@ requests. Both need a site connected to the connected service.
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
 - [Security policy](SECURITY.md)
 - [Support](SUPPORT.md)
 - [Governance](GOVERNANCE.md)

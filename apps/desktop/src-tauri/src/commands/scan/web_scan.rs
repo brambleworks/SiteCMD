@@ -101,10 +101,14 @@ async fn run_and_persist_scan(
         crate::log_sanitizer::log_safe_url_target(&page_url)
     );
 
+    // One probe covers the network scanner and the browser layer, so a cancel
+    // stops both and the run is never persisted.
+    let cancel_fn: std::sync::Arc<crate::scan_runtime::CancelFn> =
+        std::sync::Arc::new(move || scan_control.is_cancelled(scan_request_id));
+
     let mut result = run_scan_with_progress(
         app,
-        scan_control,
-        scan_request_id,
+        cancel_fn.clone(),
         page_url.clone(),
         enabled_categories,
         timeout_secs,
@@ -112,8 +116,15 @@ async fn run_and_persist_scan(
     )
     .await?;
 
-    let browser_runtime =
-        apply_webview_layer(app, &mut result, &page_url, scan_type, axe_enabled).await?;
+    let browser_runtime = apply_webview_layer(
+        app,
+        &mut result,
+        &page_url,
+        scan_type,
+        axe_enabled,
+        cancel_fn.as_ref(),
+    )
+    .await?;
 
     let safe_url = crate::log_sanitizer::log_safe_url_target(&page_url);
     tracing::info!(
@@ -125,6 +136,11 @@ async fn run_and_persist_scan(
     );
 
     let incomplete_detail = browser_runtime.incomplete_detail();
+    // Last gate before anything is written: a cancel that landed during the
+    // browser layer must not leave a saved run reported as complete.
+    if cancel_fn() {
+        return Err(scanner::ScanError::Cancelled);
+    }
     let outcome = post_scan_persist(
         app,
         &db,
@@ -162,8 +178,7 @@ fn persist_failure_error(error: &str) -> scanner::ScanError {
 // Accessibility gating belongs to the webview layer, not the network scanner.
 async fn run_scan_with_progress(
     app: &AppHandle,
-    scan_control: ScanControlState,
-    scan_request_id: u64,
+    cancel_fn: std::sync::Arc<crate::scan_runtime::CancelFn>,
     url: String,
     enabled_categories: Option<Vec<String>>,
     timeout_secs: Option<u64>,
@@ -173,8 +188,6 @@ async fn run_scan_with_progress(
     let progress_fn: std::sync::Arc<scanner::ProgressFn> = std::sync::Arc::new(move |p| {
         let _ = progress_app.emit("scan-progress", p);
     });
-    let cancel_fn: std::sync::Arc<crate::scan_runtime::CancelFn> =
-        std::sync::Arc::new(move || scan_control.is_cancelled(scan_request_id));
     crate::scan_runtime::run_scan_low_priority(
         url,
         Some(progress_fn),
@@ -183,6 +196,8 @@ async fn run_scan_with_progress(
         scan_type,
         false,
         Some(cancel_fn),
+        // Single-page scan: no other page to share stylesheets with.
+        None,
     )
     .await
 }

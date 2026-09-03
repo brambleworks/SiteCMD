@@ -30,8 +30,37 @@ pub(in crate::core::code_scan) fn collect_script_referenced_packages(
             found.insert(dependency.clone());
         }
     }
+    for (bin, package) in SCRIPT_BIN_PACKAGES {
+        if !declared.iter().any(|dependency| dependency == package) {
+            continue;
+        }
+        if appears_as_script_token(&combined, bin) {
+            found.insert((*package).to_string());
+        }
+    }
     found
 }
+
+/// Executables package scripts invoke, mapped to the package that installs
+/// them. Most tools ship a bin named after the package, which the name scan
+/// above already covers; these are the ones whose bin and package names differ
+/// or that are easy to miss.
+static SCRIPT_BIN_PACKAGES: &[(&str, &str)] = &[
+    ("nest", "@nestjs/cli"),
+    ("tsc", "typescript"),
+    ("prisma", "prisma"),
+    ("vitest", "vitest"),
+    ("jest", "jest"),
+    ("eslint", "eslint"),
+    ("prettier", "prettier"),
+    ("next", "next"),
+    ("astro", "astro"),
+    ("vite", "vite"),
+    ("tsx", "tsx"),
+    ("ts-node", "ts-node"),
+    ("playwright", "playwright"),
+    ("playwright", "@playwright/test"),
+];
 
 /// Match package names as script tokens rather than substrings.
 pub(in crate::core::code_scan) fn appears_as_script_token(scripts: &str, package: &str) -> bool {

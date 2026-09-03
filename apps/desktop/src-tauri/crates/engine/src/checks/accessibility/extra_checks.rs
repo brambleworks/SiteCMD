@@ -152,18 +152,33 @@ impl Check for FocusIndicatorCheck {
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
         let lower = ctx.body_lower();
+        // Comments and scripts are not CSS: a comment that mentions ":focus"
+        // used to read as a focus rule. Style blocks stay, because the rules
+        // this check grades live in them.
+        //
+        // Dropping scripts also drops CSS-in-JS rules, and it drops them from
+        // both tests: a styled-components focus rule no longer answers an
+        // outline reset (Warn instead of Pass), and a styled-components
+        // outline reset is no longer seen at all (the "no reset detected"
+        // Pass instead of Warn). Both rows stay true because they say "in the
+        // inspected markup", and the NeedsReview confidence says the check
+        // does not compute runtime or injected styles; reading a script as a
+        // stylesheet would have been the worse error, because a comment or a
+        // string literal is not a rule at all.
+        let styles_only =
+            crate::checks::seo::headings::COMMENT_AND_SCRIPT_RE.replace_all(lower, " ");
 
-        let removes_outline = lower.contains("outline: none")
-            || lower.contains("outline:none")
-            || lower.contains("outline: 0")
-            || lower.contains("outline:0");
+        let removes_outline = styles_only.contains("outline: none")
+            || styles_only.contains("outline:none")
+            || styles_only.contains("outline: 0")
+            || styles_only.contains("outline:0");
 
-        let has_focus_styles = lower.contains(":focus")
-            || lower.contains(":focus-visible")
-            || lower.contains("focus-within");
+        let has_focus_styles = styles_only.contains(":focus")
+            || styles_only.contains(":focus-visible")
+            || styles_only.contains("focus-within");
 
         // External stylesheets may provide the focus indicator this check cannot inspect.
-        let has_external_css = EXTERNAL_STYLESHEET_RE.is_match(lower);
+        let has_external_css = EXTERNAL_STYLESHEET_RE.is_match(&styles_only);
 
         let is_issue = removes_outline && !has_focus_styles;
         let (status, desc) = if is_issue && has_external_css {
@@ -529,6 +544,45 @@ mod tests {
         let evidence = results[0].raw_data.as_ref().expect("focus evidence");
         assert_eq!(evidence["external_stylesheet_detected"], true);
         assert_eq!(evidence["outline_reset_detected"], true);
+    }
+
+    #[test]
+    fn a_comment_or_script_mentioning_focus_is_not_a_focus_rule() {
+        // The accessibility fixture page: an outline reset with no replacement,
+        // and a leading comment whose text contains ":focus".
+        let html = r#"<html><head>
+            <!-- Declared defect: the outline reset has no :focus replacement -->
+            <style>a:hover { outline: none; }</style>
+            <script>var selector = ":focus-visible";</script>
+        </head><body></body></html>"#;
+        let results = FocusIndicatorCheck.run(&ctx(html));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        let evidence = results[0].raw_data.as_ref().expect("focus evidence");
+        assert_eq!(evidence["outline_reset_detected"], true);
+        assert_eq!(evidence["inline_focus_rule_detected"], false);
+    }
+
+    #[test]
+    fn a_focus_rule_in_a_style_block_still_counts() {
+        let html = r#"<html><head><style>
+            a { outline: none; }
+            a:focus-visible { outline: 2px solid #000; }
+        </style></head><body></body></html>"#;
+        let results = FocusIndicatorCheck.run(&ctx(html));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        let evidence = results[0].raw_data.as_ref().expect("focus evidence");
+        assert_eq!(evidence["inline_focus_rule_detected"], true);
+    }
+
+    #[test]
+    fn an_outline_reset_inside_a_comment_is_not_a_reset() {
+        let html = r#"<html><head>
+            <!-- we used to ship button { outline: none; } here -->
+            </head><body></body></html>"#;
+        let results = FocusIndicatorCheck.run(&ctx(html));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        let evidence = results[0].raw_data.as_ref().expect("focus evidence");
+        assert_eq!(evidence["outline_reset_detected"], false);
     }
 
     #[test]

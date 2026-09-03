@@ -1,22 +1,24 @@
 //! Reads installed versions from npm ecosystem lockfiles.
 //! Priority: `package-lock.json`, `yarn.lock`, then `pnpm-lock.yaml`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Installed lockfile versions. `flat` covers hoisted trees; `by_importer`
-/// preserves pnpm workspace-specific versions.
+/// preserves workspace-member-specific versions; `linked` holds workspace
+/// links, which resolve to a local directory and so have no released version.
 #[derive(Default)]
 pub(super) struct LockVersions {
     pub(super) flat: HashMap<String, String>,
     pub(super) by_importer: HashMap<String, HashMap<String, String>>,
+    pub(super) linked: HashSet<String>,
 }
 
 impl LockVersions {
     fn from_flat(flat: HashMap<String, String>) -> Self {
         Self {
             flat,
-            by_importer: HashMap::new(),
+            ..Self::default()
         }
     }
 
@@ -28,13 +30,25 @@ impl LockVersions {
             .and_then(|scoped| scoped.get(name))
             .or_else(|| self.flat.get(name))
     }
+
+    /// Every package name the lockfile resolves for `importer`: hoisted
+    /// entries, that member's own installs, and workspace links. Version
+    /// comparison has no answer for a link, but "is it resolved" does.
+    pub(super) fn resolved_names(&self, importer: Option<&String>) -> HashSet<String> {
+        let mut names = self.flat.keys().cloned().collect::<HashSet<_>>();
+        names.extend(self.linked.iter().cloned());
+        if let Some(scoped) = importer.and_then(|key| self.by_importer.get(key)) {
+            names.extend(scoped.keys().cloned());
+        }
+        names
+    }
 }
 
 /// Read the highest-priority lockfile present in `dir`, with the filename it
 /// came from for `InstalledPackage::source`.
 pub(super) fn read(dir: &Path) -> Option<(LockVersions, &'static str)> {
     parse_package_lock(dir)
-        .map(|versions| (LockVersions::from_flat(versions), "package-lock.json"))
+        .map(|versions| (versions, "package-lock.json"))
         .or_else(|| {
             parse_yarn_lock(dir).map(|versions| (LockVersions::from_flat(versions), "yarn.lock"))
         })
@@ -43,7 +57,7 @@ pub(super) fn read(dir: &Path) -> Option<(LockVersions, &'static str)> {
 
 /// Parse package-lock.json to extract exact installed versions.
 /// Fallback: use version ranges from package.json (strip range prefixes).
-fn parse_package_lock(dir: &Path) -> Option<HashMap<String, String>> {
+fn parse_package_lock(dir: &Path) -> Option<LockVersions> {
     let content = super::read_dependency_file(&dir.join("package-lock.json"))?;
     let lock: serde_json::Value = serde_json::from_str(&content).ok()?;
 
@@ -57,7 +71,7 @@ fn parse_package_lock(dir: &Path) -> Option<HashMap<String, String>> {
         parse_package_lock_v2(&lock)
     } else {
         // v1: "dependencies" object with nested structure
-        parse_package_lock_v1(&lock)
+        parse_package_lock_v1(&lock).map(LockVersions::from_flat)
     }
 }
 
@@ -74,34 +88,85 @@ fn parse_package_lock_v1(lock: &serde_json::Value) -> Option<HashMap<String, Str
     Some(versions)
 }
 
-fn parse_package_lock_v2(lock: &serde_json::Value) -> Option<HashMap<String, String>> {
+fn parse_package_lock_v2(lock: &serde_json::Value) -> Option<LockVersions> {
     let packages = lock.get("packages")?.as_object()?;
-    let mut versions = HashMap::new();
+    let mut versions = LockVersions::default();
 
     for (key, info) in packages {
-        // Keys are "node_modules/package-name" or "" for root
-        let name = if key.starts_with("node_modules/") {
-            // Handle scoped packages: "node_modules/@scope/name"
-            key.strip_prefix("node_modules/").unwrap_or(key)
-        } else if key.is_empty() {
-            continue; // root package
-        } else {
-            continue; // unknown key format
+        // Keys are "node_modules/pkg" (hoisted), "<member>/node_modules/pkg"
+        // (installed inside one workspace member), "" for the root package, or
+        // "<member>" for a workspace member's own manifest.
+        let Some((importer, name)) = split_node_modules_key(key) else {
+            continue;
         };
-
-        // Skip nested dependencies (node_modules/a/node_modules/b)
-        let slash_count = name.matches('/').count();
-        let is_scoped = name.starts_with('@');
-        if (is_scoped && slash_count > 1) || (!is_scoped && slash_count > 0) {
+        // A nested copy ("node_modules/a/node_modules/b") belongs to another
+        // package rather than to any workspace member.
+        if importer.is_some_and(is_nested_package_dir) {
+            continue;
+        }
+        if !is_top_level_package_name(name) {
             continue;
         }
 
-        if let Some(ver) = info.get("version").and_then(|v| v.as_str()) {
-            versions.insert(name.to_string(), ver.to_string());
+        // A workspace link resolves to a local directory, so it has no
+        // published version to compare, but it is installed all the same.
+        if info.get("link").and_then(|v| v.as_bool()).unwrap_or(false) {
+            versions.linked.insert(name.to_string());
+            continue;
+        }
+
+        let Some(ver) = info.get("version").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        match importer {
+            Some(importer) => {
+                versions
+                    .by_importer
+                    .entry(importer.to_string())
+                    .or_default()
+                    .insert(name.to_string(), ver.to_string());
+            }
+            None => {
+                versions.flat.insert(name.to_string(), ver.to_string());
+            }
         }
     }
 
     Some(versions)
+}
+
+/// Split a v2/v3 `packages` key into the importer directory that owns the
+/// install (`None` when hoisted at the lockfile root) and the package name.
+fn split_node_modules_key(key: &str) -> Option<(Option<&str>, &str)> {
+    const MARKER: &str = "node_modules/";
+    let index = key.rfind(MARKER)?;
+    let name = &key[index + MARKER.len()..];
+    if name.is_empty() {
+        return None;
+    }
+    if index == 0 {
+        return Some((None, name));
+    }
+    let importer = key[..index].trim_end_matches('/');
+    (!importer.is_empty()).then_some((Some(importer), name))
+}
+
+/// Whether an importer path is itself inside a dependency tree.
+fn is_nested_package_dir(importer: &str) -> bool {
+    importer == "node_modules"
+        || importer.starts_with("node_modules/")
+        || importer.contains("/node_modules/")
+        || importer.ends_with("/node_modules")
+}
+
+/// Whether a package name is a whole package rather than a subpath.
+fn is_top_level_package_name(name: &str) -> bool {
+    let slash_count = name.matches('/').count();
+    if name.starts_with('@') {
+        slash_count == 1
+    } else {
+        slash_count == 0
+    }
 }
 
 fn parse_yarn_lock(dir: &Path) -> Option<HashMap<String, String>> {
@@ -257,8 +322,12 @@ fn parse_pnpm_lock(dir: &Path) -> Option<LockVersions> {
             let clean_ver = ver.split('(').next().unwrap_or(ver).trim();
             // Workspace-internal links ("link:../../packages/pricing") are
             // local packages, not registry releases - there is no published
-            // version to compare against.
-            if clean_ver.is_empty() || clean_ver.starts_with("link:") {
+            // version to compare against, though they are still installed.
+            if clean_ver.starts_with("link:") {
+                versions.linked.insert(name.clone());
+                continue;
+            }
+            if clean_ver.is_empty() {
                 continue;
             }
             versions.flat.insert(name.clone(), clean_ver.to_string());
@@ -270,6 +339,10 @@ fn parse_pnpm_lock(dir: &Path) -> Option<LockVersions> {
         }
     }
 
+    // A lockfile that resolved no versioned package is not one this parser
+    // understood. Keeping that judgement on `flat` alone leaves the Updates
+    // page's "no lockfile I can read" path exactly where it was; a workspace
+    // whose only entries are links has no drift to measure either.
     if versions.flat.is_empty() {
         None
     } else {
@@ -280,6 +353,72 @@ fn parse_pnpm_lock(dir: &Path) -> Option<LockVersions> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// npm v2/v3 records a workspace link with no version and a member-local
+    /// install under the member's own directory. Both are resolved packages,
+    /// so a manifest declaring them is not out of sync with the lockfile.
+    #[test]
+    fn v3_links_and_member_local_installs_resolve() {
+        let lock: serde_json::Value = serde_json::from_str(
+            r#"{
+              "lockfileVersion": 3,
+              "packages": {
+                "": { "name": "root" },
+                "packages/lib": { "name": "@acme/lib", "version": "0.0.0" },
+                "node_modules/@acme/lib": { "resolved": "packages/lib", "link": true },
+                "node_modules/react": { "version": "19.0.0" },
+                "apps/docs/node_modules/next": { "version": "15.1.0" },
+                "node_modules/react/node_modules/loose-envify": { "version": "1.4.0" }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let versions = parse_package_lock_v2(&lock).expect("v3 packages map parses");
+        assert!(versions.linked.contains("@acme/lib"));
+        assert_eq!(
+            versions.flat.get("react").map(String::as_str),
+            Some("19.0.0")
+        );
+        // A member-local install belongs to that member, not to the root.
+        assert!(!versions.flat.contains_key("next"));
+        assert_eq!(
+            versions.by_importer["apps/docs"]
+                .get("next")
+                .map(String::as_str),
+            Some("15.1.0")
+        );
+        // Nested transitive copies still belong to their parent package.
+        assert!(!versions.flat.contains_key("loose-envify"));
+        assert!(!versions.by_importer.contains_key("node_modules/react"));
+
+        let docs = "apps/docs".to_string();
+        let resolved = versions.resolved_names(Some(&docs));
+        assert!(resolved.contains("@acme/lib"), "{resolved:?}");
+        assert!(resolved.contains("next"), "{resolved:?}");
+        assert!(resolved.contains("react"), "{resolved:?}");
+        // Another member does not inherit apps/docs' own install.
+        let other = "apps/web".to_string();
+        assert!(!versions.resolved_names(Some(&other)).contains("next"));
+    }
+
+    #[test]
+    fn node_modules_keys_split_into_importer_and_package() {
+        assert_eq!(
+            split_node_modules_key("node_modules/@scope/name"),
+            Some((None, "@scope/name"))
+        );
+        assert_eq!(
+            split_node_modules_key("apps/docs/node_modules/next"),
+            Some((Some("apps/docs"), "next"))
+        );
+        assert_eq!(
+            split_node_modules_key("node_modules/a/node_modules/b"),
+            Some((Some("node_modules/a"), "b"))
+        );
+        assert_eq!(split_node_modules_key("packages/lib"), None);
+        assert_eq!(split_node_modules_key(""), None);
+    }
 
     #[test]
     fn scoped_and_unscoped_yarn_specs_yield_package_names() {

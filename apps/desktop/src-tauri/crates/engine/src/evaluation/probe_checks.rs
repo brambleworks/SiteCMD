@@ -33,7 +33,8 @@ use crate::checks::security::dns_email::{
     skipped_dns_failure, skipped_local_result, spf, DomainTarget,
 };
 use crate::checks::security::https_enforcement::{
-    evaluate_https_enforcement, http_origin_request, plan_https_enforcement, HttpsEnforcementStep,
+    evaluate_http_downgrade, evaluate_https_availability, origin_root_request,
+    plan_https_enforcement, HttpsEnforcementStep,
 };
 use crate::checks::security::open_redirect::{
     evaluate_open_redirect, open_redirect_probes, probe_origin, OpenRedirectSweep,
@@ -198,15 +199,20 @@ pub const PROBE_CHECKS: &[ProbeCheck] = &[
     },
     ProbeCheck {
         covers: &["security.https_enforcement"],
-        plan: |ctx| match plan_https_enforcement(&ctx.page.url) {
+        plan: |ctx| match plan_https_enforcement(&ctx.page.url, ctx.page.is_localhost) {
             HttpsEnforcementStep::Done(_) => Vec::new(),
-            HttpsEnforcementStep::Probe { url } => vec![http_origin_request(&url)],
+            HttpsEnforcementStep::ProbeHttpOrigin { url }
+            | HttpsEnforcementStep::ProbeHttpsOrigin { url } => vec![origin_root_request(&url)],
         },
-        grade: |ctx| match plan_https_enforcement(&ctx.page.url) {
+        grade: |ctx| match plan_https_enforcement(&ctx.page.url, ctx.page.is_localhost) {
             HttpsEnforcementStep::Done(results) => results,
-            HttpsEnforcementStep::Probe { url } => {
-                let request = http_origin_request(&url);
-                evaluate_https_enforcement(url.as_str(), ctx.outcomes.owned(&request))
+            HttpsEnforcementStep::ProbeHttpOrigin { url } => {
+                let request = origin_root_request(&url);
+                evaluate_http_downgrade(url.as_str(), ctx.outcomes.owned(&request))
+            }
+            HttpsEnforcementStep::ProbeHttpsOrigin { url } => {
+                let request = origin_root_request(&url);
+                evaluate_https_availability(url.as_str(), ctx.outcomes.owned(&request))
             }
         },
     },

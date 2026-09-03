@@ -86,9 +86,13 @@ pub fn evidence_safe_page_url(raw_url: &str) -> String {
     sanitize_page_url(raw_url, false)
 }
 
-/// Same policy, except long letter-and-digit segments are kept when the URL
-/// is on the scanned site's own origin: those are its asset names, which the
-/// fix needs, while a foreign host may be a CDN carrying signed path tokens.
+/// Same policy, with two allowances for a URL on the scanned site's own
+/// origin: long letter-and-digit path segments are kept (they are its asset
+/// names, which the fix needs, while a foreign host may be a CDN carrying
+/// signed path tokens), and the query survives as parameter names without
+/// their values. The site's own failing request is reproducible that way:
+/// `https://astro.build/_image` cannot be re-requested, and the sampler's 400
+/// came from the query that was dropped.
 pub fn evidence_safe_page_url_for_site(raw_url: &str, site_origin: Option<&str>) -> String {
     let same_origin = site_origin.is_some_and(|origin| {
         // Reparse `site_origin` too so a default port embedded in either side
@@ -107,7 +111,108 @@ pub fn evidence_safe_page_url_for_site(raw_url: &str, site_origin: Option<&str>)
     sanitize_page_url(raw_url, same_origin)
 }
 
-fn sanitize_page_url(raw_url: &str, keep_long_segments: bool) -> String {
+/// An npm-style `name@version` path segment, which `security.sri` and
+/// `security.vulnerable_libraries` promise to reproduce exactly. A scoped
+/// package (`@scope`) has no local part at all, so only the versioned form
+/// needs the check.
+fn package_coordinate(segment: &str) -> bool {
+    if segment.starts_with('@') {
+        return true;
+    }
+    segment.rsplit_once('@').is_some_and(|(name, version)| {
+        !name.is_empty()
+            && (PACKAGE_VERSION_RE.is_match(version)
+                || matches!(
+                    version,
+                    "latest" | "next" | "beta" | "alpha" | "canary" | "rc"
+                ))
+    })
+}
+
+/// `1`, `4.17`, `4.17.21`, `v2.0.0-beta.1`, `1.0.0+build.5`.
+static PACKAGE_VERSION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"^v?\d+(\.\d+){0,2}([-+][0-9A-Za-z.]+)?$").expect("static version regex")
+});
+
+/// Extensions whose filenames are build output, not credentials. A long
+/// letter-and-digit segment ending in one of these is a content hash in an
+/// asset name, and the fix needs it verbatim: SRI, image, third-party, and
+/// asset-weight evidence on gov.uk, github.com, and bbc.co.uk was reduced to
+/// `[redacted]` for every bundle it named.
+const STATIC_ASSET_EXTENSIONS: [&str; 15] = [
+    "js", "mjs", "cjs", "css", "map", "png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "woff2",
+    "woff", "json",
+];
+
+/// Whether a path segment names a static asset file rather than an opaque
+/// token. The extension is what carries the meaning: a bearer value in a URL
+/// path does not end in `.js` or `.woff2`.
+fn static_asset_filename(segment: &str) -> bool {
+    segment.rsplit_once('.').is_some_and(|(name, extension)| {
+        !name.is_empty()
+            && STATIC_ASSET_EXTENSIONS
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+    })
+}
+
+/// How many query parameter names one evidence URL keeps. A page can carry an
+/// arbitrarily long query; the names exist to make the request reproducible,
+/// not to reproduce the whole string.
+const MAX_EVIDENCE_QUERY_NAMES: usize = 8;
+
+/// Rebuild a query as parameter names only. Values are where credentials,
+/// identifiers, and personal data live, so none of them survives; the names
+/// stay because a URL stripped of its whole query is not the URL that failed
+/// (`https://astro.build/_image` cannot be re-requested, and the sampler's
+/// 400 came from the query it dropped).
+fn redacted_query(query: &str) -> String {
+    let mut names: Vec<String> = Vec::new();
+    let mut truncated = false;
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        if names.len() == MAX_EVIDENCE_QUERY_NAMES {
+            truncated = true;
+            break;
+        }
+        let name = pair.split(['=', ';']).next().unwrap_or_default().trim();
+        if name.is_empty() {
+            continue;
+        }
+        // A valueless parameter is the whole pair, so a bare token in the
+        // query would arrive here as a "name". Apply the same shape rule the
+        // path segments use rather than persisting it.
+        let name: String = if looks_like_opaque_token(name) {
+            "[redacted]".to_string()
+        } else {
+            name.chars().take(40).collect()
+        };
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    if names.is_empty() {
+        return String::new();
+    }
+    format!("?{}{}", names.join("&"), if truncated { "&…" } else { "" })
+}
+
+/// A long mixed letter-and-digit run with no file extension: the shape of a
+/// session id, signature, or bearer value rather than a name.
+fn looks_like_opaque_token(value: &str) -> bool {
+    value.len() >= 32
+        && value.bytes().any(|byte| byte.is_ascii_alphabetic())
+        && value.bytes().any(|byte| byte.is_ascii_digit())
+        && !static_asset_filename(value)
+}
+
+/// `same_origin` is true only for a URL on the scanned page's own origin. It
+/// widens two rules at once: long path segments survive, and query parameter
+/// names survive without their values. A foreign host keeps the strict policy,
+/// since its path and query can carry signed tokens this scan cannot read.
+fn sanitize_page_url(raw_url: &str, same_origin: bool) -> String {
     let Ok(parsed) = url::Url::parse(raw_url) else {
         return "[invalid-url]".to_string();
     };
@@ -148,10 +253,7 @@ fn sanitize_page_url(raw_url: &str, keep_long_segments: bool) -> String {
                     | "confirmation"
                     | "unsubscribe"
             );
-            let has_letters = segment.bytes().any(|byte| byte.is_ascii_alphabetic());
-            let has_digits = segment.bytes().any(|byte| byte.is_ascii_digit());
-            let token_like =
-                !keep_long_segments && segment.len() >= 32 && has_letters && has_digits;
+            let token_like = !same_origin && looks_like_opaque_token(segment);
             let retina_asset = segment
                 .rsplit_once('@')
                 .and_then(|(_, suffix)| suffix.split_once('.'))
@@ -164,7 +266,10 @@ fn sanitize_page_url(raw_url: &str, keep_long_segments: bool) -> String {
                     )
                 });
             let email_like = segment.split_once('@').is_some_and(|(local, domain)| {
-                !local.is_empty() && domain.contains('.') && !retina_asset
+                !local.is_empty()
+                    && domain.contains('.')
+                    && !retina_asset
+                    && !package_coordinate(segment)
             });
             if token_like || email_like || lower.contains("%40") {
                 "[redacted]".to_string()
@@ -174,12 +279,18 @@ fn sanitize_page_url(raw_url: &str, keep_long_segments: bool) -> String {
         })
         .collect::<Vec<_>>()
         .join("/");
+    let query = parsed
+        .query()
+        .filter(|_| same_origin)
+        .map(redacted_query)
+        .unwrap_or_default();
     bounded_evidence_url(&redact_secrets(&format!(
-        "{}://{}{}{}",
+        "{}://{}{}{}{}",
         parsed.scheme(),
         host,
         port,
-        safe_path
+        safe_path,
+        query
     )))
 }
 
@@ -332,6 +443,7 @@ mod tests {
         let safe = evidence_safe_page_url(
             "https://user:pass@example.com/docs/abc12345678901234567890123456789?token=secret#part",
         );
+        // A foreign host keeps the strict policy: no query at all.
         assert_eq!(safe, "https://example.com/docs/[redacted]");
         assert!(!safe.contains("user"));
         assert!(!safe.contains("pass"));
@@ -445,14 +557,19 @@ mod tests {
             "https://sitecmd.com/account/reset/[redacted]"
         );
 
+        // A filename ending in a static-asset extension is build output on
+        // any host: SRI, image, and asset-weight evidence named every bundle
+        // on github.githubassets.com and static.files.bbci.co.uk `[redacted]`
+        // until this exemption existed.
         let foreign = "https://cdn.example.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png";
+        assert_eq!(evidence_safe_page_url_for_site(foreign, site), foreign);
+        assert_eq!(evidence_safe_page_url_for_site(own_asset, None), own_asset);
+
+        // An extension-less long segment on a foreign host is still opaque.
+        let signed = "https://cdn.example.com/image/upload/s--abcdef0123456789abcdef0123456789--/v1/logo.png";
         assert_eq!(
-            evidence_safe_page_url_for_site(foreign, site),
-            "https://cdn.example.com/images/screenshots/problem/[redacted]"
-        );
-        assert_eq!(
-            evidence_safe_page_url_for_site(own_asset, None),
-            "https://sitecmd.com/images/screenshots/problem/[redacted]"
+            evidence_safe_page_url_for_site(signed, site),
+            "https://cdn.example.com/image/upload/[redacted]/v1/logo.png"
         );
     }
 
@@ -511,7 +628,7 @@ mod tests {
                 "https://user:pw@sitecmd.com/assets/app.js?token=abc#frag",
                 site,
             ),
-            "https://sitecmd.com/assets/app.js"
+            "https://sitecmd.com/assets/app.js?token"
         );
 
         // (d) Scheme and host compare case-insensitively (URL parsing
@@ -540,6 +657,88 @@ mod tests {
             evidence_safe_url_reference("assets/card-1.png?token=secret"),
             "assets/card-1.png",
             "relative evidence should remain grep-compatible with source markup"
+        );
+    }
+
+    #[test]
+    fn the_sites_own_failing_request_keeps_its_parameter_names_but_no_values() {
+        let site = Some("https://astro.build");
+        // The asset sampler reported `https://astro.build/_image` for a URL
+        // whose 400 came entirely from the query it dropped, so the failing
+        // request could not be reproduced from the evidence.
+        assert_eq!(
+            evidence_safe_page_url_for_site(
+                "https://astro.build/_image?href=%2F_astro%2Fhero.png&w=256&f=webp",
+                site
+            ),
+            "https://astro.build/_image?href&w&f"
+        );
+        // Values never survive, on the site's own origin or anywhere else.
+        assert_eq!(
+            evidence_safe_page_url_for_site(
+                "https://astro.build/checkout?session=secret-value&email=person@example.com",
+                site
+            ),
+            "https://astro.build/checkout?session&email"
+        );
+        // A foreign host keeps the strict policy, query and all.
+        assert_eq!(
+            evidence_safe_page_url_for_site("https://cdn.example.net/w.js?key=secret", site),
+            "https://cdn.example.net/w.js"
+        );
+    }
+
+    #[test]
+    fn a_bare_token_in_the_query_is_not_kept_as_a_parameter_name() {
+        assert_eq!(
+            evidence_safe_page_url_for_site(
+                "https://sitecmd.com/callback?abcdef0123456789abcdef0123456789abc",
+                Some("https://sitecmd.com")
+            ),
+            "https://sitecmd.com/callback?[redacted]"
+        );
+    }
+
+    #[test]
+    fn a_long_query_contributes_a_bounded_number_of_names() {
+        let query: String = (0..20)
+            .map(|index| format!("p{index}=value{index}&"))
+            .collect();
+        let safe = evidence_safe_page_url_for_site(
+            &format!("https://sitecmd.com/search?{query}"),
+            Some("https://sitecmd.com"),
+        );
+        assert_eq!(safe, "https://sitecmd.com/search?p0&p1&p2&p3&p4&p5&p6&p7&…");
+        assert!(!safe.contains("value"), "{safe}");
+    }
+
+    #[test]
+    fn package_coordinates_survive_the_email_redaction_rule() {
+        for url in [
+            "https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js",
+            "https://cdn.jsdelivr.net/npm/normalize.css@8.0.1/normalize.css",
+            "https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js",
+            "https://cdn.jsdelivr.net/npm/vue@3.4.0-beta.2/dist/vue.js",
+            "https://cdn.jsdelivr.net/npm/preact@latest/dist/preact.min.js",
+            "https://cdn.jsdelivr.net/npm/@scope/pkg@2.1.0/index.js",
+        ] {
+            assert_eq!(
+                evidence_safe_url_reference(url),
+                url,
+                "SRI and vulnerable-library evidence promise the exact URL"
+            );
+        }
+    }
+
+    #[test]
+    fn an_address_in_a_path_segment_is_still_redacted() {
+        assert_eq!(
+            evidence_safe_url_reference("https://example.com/u/jane@example.com"),
+            "https://example.com/u/[redacted]"
+        );
+        assert_eq!(
+            evidence_safe_url_reference("https://example.com/u/jane@example.com/profile"),
+            "https://example.com/u/[redacted]/profile"
         );
     }
 }

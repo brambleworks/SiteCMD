@@ -171,8 +171,13 @@ fn is_lint_script(script: &ProjectScript) -> bool {
         || contains_any_marker(&script.command, LINT_COMMAND_MARKERS)
 }
 
+/// `build`, plus Laravel Mix's documented `production` and `prod` entry points.
+fn is_build_script(script: &ProjectScript) -> bool {
+    matches!(script.name.as_str(), "build" | "production" | "prod")
+}
+
 fn is_quality_script(script: &ProjectScript) -> bool {
-    script.name == "build"
+    is_build_script(script)
         || script.name == "ci"
         || is_test_script(script)
         || is_lint_script(script)
@@ -186,7 +191,7 @@ impl ScriptInventory {
 
     pub(super) fn has_build_script(&self) -> bool {
         self.live()
-            .any(|script| script.runner == ScriptRunner::Npm && script.name == "build")
+            .any(|script| script.runner == ScriptRunner::Npm && is_build_script(script))
     }
 
     pub(super) fn has_test_script(&self) -> bool {

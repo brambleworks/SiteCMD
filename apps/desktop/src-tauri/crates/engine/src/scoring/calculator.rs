@@ -59,16 +59,32 @@ fn tier_deductions(counts: [f64; 4]) -> [f64; 4] {
     points
 }
 
-/// Computes a category score with the overall curve and floor, without caps.
+/// A perfect score means nothing is open, so any active issue keeps the score
+/// off 100 even when its confidence-weighted deduction rounds away.
+const OPEN_ISSUE_SCORE_CEILING: f64 = 99.0;
+
+/// True when any severity tier carries an active, confidence-weighted finding.
+fn has_active_issue(counts: [f64; 4]) -> bool {
+    counts.iter().any(|count| *count > 0.0)
+}
+
+/// Computes a category score with the overall curve and floor, and the
+/// open-issue ceiling; the exploitable cap stays an overall-score decision.
 fn category_subscore(counts: [f64; 4]) -> u32 {
     let deduction: f64 = tier_deductions(counts).iter().sum();
-    (100.0 - deduction).round().clamp(SCORE_FLOOR, 100.0) as u32
+    let score = (100.0 - deduction).round().clamp(SCORE_FLOOR, 100.0);
+    if has_active_issue(counts) {
+        score.min(OPEN_ISSUE_SCORE_CEILING) as u32
+    } else {
+        score as u32
+    }
 }
 
 /// Computes the canonical SiteCMD Score from confidence-weighted issue counts.
 ///
-/// Deduction is followed by the hard score floor, the no-critical floor, and
-/// finally the exploitable cap. The frontend consumes this result over IPC.
+/// Deduction is followed by the hard score floor, the no-critical floor, the
+/// exploitable cap, and the open-issue ceiling. The frontend consumes this
+/// result over IPC.
 pub fn health_score_from_severity(
     critical: f64,
     high: f64,
@@ -111,6 +127,15 @@ pub fn health_score_with_breakdown(
     if has_exploitable {
         score = score.min(EXPLOITABLE_SCORE_CAP);
     }
+    let mut ceiling_applied = false;
+    if has_active_issue(counts) {
+        let held = score.min(OPEN_ISSUE_SCORE_CEILING);
+        // Only report the ceiling when it moved the score. Most inputs already
+        // land at or below it, and saying "held at 99" about a 99 the curve
+        // produced on its own would explain a number with the wrong reason.
+        ceiling_applied = held < score;
+        score = held;
+    }
     let breakdown = ScoreBreakdown {
         base: 100.0,
         critical_points: points[0],
@@ -122,6 +147,7 @@ pub fn health_score_with_breakdown(
         eff_medium: medium,
         eff_low: low,
         floor_applied,
+        ceiling_applied,
     };
     (score as u32, breakdown)
 }
@@ -155,6 +181,14 @@ pub struct ScoreBreakdown {
     /// True when the zero-critical protective floor raised the final score
     /// (no full-weight critical, not exploitable, deduction otherwise below 35).
     pub floor_applied: bool,
+    /// True when the open-issue ceiling, not the deduction arithmetic, set the
+    /// final score. It only moves a score whose deductions round back to the
+    /// base, which needs a tier count below 0.5: the Web Scan path reaches that
+    /// (a Warn at NeedsReview confidence weighs 0.25), while `compute_score`'s
+    /// lightest group weighs 0.5 and already lands on 99 by arithmetic, so a
+    /// live snapshot never carries it. The UI reads this instead of inferring
+    /// the ceiling from the numbers.
+    pub ceiling_applied: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -442,3 +476,7 @@ pub fn compute_score(groups: &[ScoreInputGroup], now_ms: i64) -> ScoreSnapshot {
         computed_at: now_ms,
     }
 }
+
+#[cfg(test)]
+#[path = "calculator_tests.rs"]
+mod tests;

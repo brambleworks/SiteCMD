@@ -47,6 +47,7 @@ pub async fn run(args: WatchArgs) -> Result<(), String> {
             ScanType::Health,
             false,
             None, // cancel check
+            None, // each watch iteration re-reads the site
         )
         .await;
 

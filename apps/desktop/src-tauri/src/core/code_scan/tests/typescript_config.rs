@@ -104,6 +104,51 @@ fn playground_and_fixture_tsconfigs_do_not_flag() {
 }
 
 #[test]
+fn root_level_test_and_e2e_tsconfigs_do_not_flag() {
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "package.json", r#"{ "name": "demo-app" }"#);
+    // A harness directory at the project root has no separator in front of it,
+    // which the test-path predicate now accounts for.
+    write_file(
+        temp.path(),
+        "test/tsconfig.json",
+        r#"{ "compilerOptions": { "strict": false } }"#,
+    );
+    write_file(
+        temp.path(),
+        "e2e/tsconfig.json",
+        r#"{ "compilerOptions": { "strict": false } }"#,
+    );
+    // Negative control: the project's own config is still production config.
+    write_file(
+        temp.path(),
+        "tsconfig.json",
+        r#"{ "compilerOptions": { "strict": false } }"#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let ids = report.issues.iter().map(|i| &i.id).collect::<Vec<_>>();
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "tsconfig-strict-off:test/tsconfig.json"),
+        "a root-level harness tsconfig is not production configuration, got {:?}",
+        ids
+    );
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "tsconfig-strict-off:e2e/tsconfig.json"),
+        "a root-level end-to-end tsconfig is not production configuration, got {:?}",
+        ids
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "tsconfig-strict-off:tsconfig.json"),
+        "negative control: the project's own tsconfig keeps the finding, got {:?}",
+        ids
+    );
+}
+
+#[test]
 fn strict_tsconfig_does_not_flag() {
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "package.json", r#"{ "name": "clean-app" }"#);

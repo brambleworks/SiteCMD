@@ -11,8 +11,10 @@ const cleanBreakdown = {
   hasDeductions: false,
   exploitableCapped: false,
   floorApplied: false,
+  ceilingApplied: false,
   capNote: null,
   floorNote: null,
+  ceilingNote: null,
 };
 
 const baseProps = {
@@ -108,6 +110,32 @@ describe("AtAGlance", () => {
     // The number and its freshness are all the tile owes the reader.
     expect(siteScoreTile).toHaveTextContent("87");
     expect(siteScoreTile).toHaveTextContent("Updated 14m ago");
+  });
+
+  // The open-issue ceiling is explained on the Issues page, not on the tile.
+  it("keeps the open-issue ceiling note off the score tile", () => {
+    render(
+      <AtAGlance
+        {...baseProps}
+        siteScore={{
+          ...baseProps.siteScore,
+          value: 99,
+          breakdown: {
+            ...cleanBreakdown,
+            overall: 99,
+            deductions: [{ tier: "low", label: "Low", points: 0.4 }],
+            hasDeductions: true,
+            ceilingApplied: true,
+            ceilingNote:
+              "Open issues deducted 0.4 points, which rounds back to 100, so the score is held at 99 while any issue is open.",
+          },
+        }}
+      />,
+    );
+    const siteScoreTile = screen.getByText("SiteCMD Score").closest("button")!;
+    expect(siteScoreTile).toHaveTextContent("99");
+    expect(siteScoreTile).not.toHaveTextContent("held at 99");
+    expect(siteScoreTile).not.toHaveTextContent("Score capped");
   });
 
   it("still shows the capped note when the score is capped (D7)", () => {

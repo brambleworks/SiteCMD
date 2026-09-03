@@ -48,6 +48,39 @@ pub fn decode_url_character_references(value: &str) -> String {
         .into_owned()
 }
 
+/// Byte offset of a slice borrowed from `body`. `tag_slices` and
+/// `raw_text_elements` return borrows, so this is how a caller turns one back
+/// into a document position for line numbers or containment tests.
+///
+/// The slice must come from `body`. A foreign slice has no position in this
+/// document, and silently answering 0 would put it at the start of the page;
+/// debug builds assert instead so the misuse is loud in tests.
+pub fn slice_offset(body: &str, slice: &str) -> usize {
+    let start = body.as_ptr() as usize;
+    let offset = slice.as_ptr() as usize;
+    debug_assert!(
+        offset >= start && offset + slice.len() <= start + body.len(),
+        "slice_offset was given a slice that does not belong to body"
+    );
+    offset.saturating_sub(start)
+}
+
+/// Read an attribute whose value is a URL the browser will request: `src`,
+/// `srcset`, `href`, `action`, and a URL-valued `meta content`. The raw
+/// attribute text is HTML, so `&amp;` there is one `&` on the wire; a check
+/// that fetches or classifies the raw text asks for a URL the browser never
+/// requests (`/_image?href=x&amp;w=256` answered 400 on astro.build while the
+/// decoded form answered 200). Returns `None` for a missing attribute and for
+/// one whose value is empty or whitespace, since neither names a resource.
+pub fn url_attr_value(tag: &str, name: &str) -> Option<String> {
+    let value = attr_value(tag, name)?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(decode_url_character_references(trimmed))
+}
+
 /// Slice every `<{tag_name}...>` open tag out of `body`, matching the tag
 /// name case-insensitively and requiring a real tag boundary so `<img`
 /// never matches `<imgfoo`. Returned slices keep original casing and
@@ -332,7 +365,44 @@ impl<'a> Iterator for Attributes<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{attr_value, has_attr, raw_text_element_contents, tag_slices};
+    use super::{attr_value, has_attr, raw_text_element_contents, tag_slices, url_attr_value};
+
+    #[test]
+    fn url_attributes_are_decoded_to_what_the_browser_requests() {
+        assert_eq!(
+            url_attr_value(
+                r#"<img src="/_image?href=%2Fa.png&amp;w=256&amp;f=webp">"#,
+                "src"
+            )
+            .as_deref(),
+            Some("/_image?href=%2Fa.png&w=256&f=webp")
+        );
+        assert_eq!(
+            url_attr_value(r#"<a href="/search?q=1&#38;page=2">"#, "href").as_deref(),
+            Some("/search?q=1&page=2")
+        );
+        assert_eq!(
+            url_attr_value(r#"<img srcset="/a.png?w=1&amp;h=2 1x">"#, "srcset").as_deref(),
+            Some("/a.png?w=1&h=2 1x")
+        );
+    }
+
+    #[test]
+    fn a_missing_or_blank_url_attribute_names_no_resource() {
+        assert_eq!(url_attr_value("<img alt=x>", "src"), None);
+        assert_eq!(url_attr_value(r#"<img src="">"#, "src"), None);
+        assert_eq!(url_attr_value(r#"<img src="   ">"#, "src"), None);
+        assert_eq!(url_attr_value("<img src>", "src"), None);
+    }
+
+    #[test]
+    fn url_attribute_values_keep_percent_encoding_and_casing() {
+        // Percent-escapes belong to the URL, not to HTML, so they survive.
+        assert_eq!(
+            url_attr_value(r#"<img src="/Photos/IMG%202024.JPG">"#, "src").as_deref(),
+            Some("/Photos/IMG%202024.JPG")
+        );
+    }
 
     #[test]
     fn double_quoted_value_is_extracted() {

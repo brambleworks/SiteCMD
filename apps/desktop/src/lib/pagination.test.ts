@@ -1,5 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { buildPagerItems } from "@/lib/pagination";
+import { buildPagerItems, pageWindow } from "@/lib/pagination";
+
+describe("pageWindow", () => {
+  const rows = Array.from({ length: 3000 }, (_, index) => index + 1);
+
+  it("bounds a huge list to one page of rows", () => {
+    const bounded = pageWindow(rows, 1, 50);
+    expect(bounded.rows).toHaveLength(50);
+    expect(bounded.rows[0]).toBe(1);
+    expect(bounded.totalPages).toBe(60);
+  });
+
+  it("moves the window with the requested page", () => {
+    expect(pageWindow(rows, 3, 50).rows[0]).toBe(101);
+  });
+
+  it("returns a short final page rather than padding it", () => {
+    const bounded = pageWindow(rows.slice(0, 120), 3, 50);
+    expect(bounded.rows).toHaveLength(20);
+    expect(bounded.rows[0]).toBe(101);
+  });
+
+  it("clamps a page beyond the end back onto the last page", () => {
+    const bounded = pageWindow(rows.slice(0, 10), 9, 50);
+    expect(bounded.page).toBe(1);
+    expect(bounded.rows).toHaveLength(10);
+  });
+
+  it("keeps an empty list on a single page", () => {
+    expect(pageWindow([], 1, 50)).toEqual({ page: 1, totalPages: 1, rows: [] });
+  });
+});
 
 describe("buildPagerItems", () => {
   it("lists every page while the range stays short", () => {

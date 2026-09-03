@@ -51,13 +51,15 @@ async fn robots_fetch_through_the_seam_classifies_a_real_body_as_found() {
 }
 
 #[tokio::test]
-async fn robots_html_catch_all_classifies_as_error_not_empty_robots() {
+async fn robots_html_catch_all_classifies_as_a_catch_all_not_empty_robots() {
     let origin = serve(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 15\r\nConnection: close\r\n\r\n<!doctype html>",
         1,
     );
     let ctx = ctx_for(&format!("{origin}/page"));
-    assert!(matches!(ctx.robots_txt().await, RobotsTxtFetch::Error(_)));
+    // The endpoint answered, so this is its own outcome and not a transport
+    // failure; the verdicts describe it as a catch-all rewrite.
+    assert!(matches!(ctx.robots_txt().await, RobotsTxtFetch::HtmlShell));
 }
 
 #[tokio::test]

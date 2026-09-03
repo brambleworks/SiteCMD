@@ -112,11 +112,15 @@
     // Unsupported long-task timing leaves this optional metric unset.
   }
 
-  var json = JSON.stringify(c);
+  // The adapter grades this sample only when it names the document it was
+  // asked about.
   try {
-    document.title = "___SHK_CWV___" + json;
+    c.document_url = String(window.location.href);
   } catch (e) {
-    // The returned JSON remains available if the title transport is blocked.
+    c.document_url = null;
   }
-  return json;
+
+  // Runtimes that can read an eval value take the return; the Tauri webview
+  // reads window.__SHK_CWV__ through its chunked title bridge instead.
+  return JSON.stringify(c);
 })();

@@ -79,6 +79,35 @@ pub fn parse(dir: &Path) -> Vec<InstalledPackage> {
     resolve(&declared, &versions, source)
 }
 
+/// Package names the in-scope lockfile resolves for the manifest at `dir`,
+/// lowercased.
+///
+/// [`parse`] answers "what version is installed", so it drops entries with no
+/// released version. Manifest-versus-lockfile drift asks the different
+/// question "did the lockfile resolve this name at all", where a workspace
+/// link and a member-local install both count.
+pub fn resolved_lockfile_names(dir: &Path) -> HashSet<String> {
+    let Some(lock_dir) = find_lockfile_dir(dir) else {
+        return HashSet::new();
+    };
+    let Some((versions, _)) = super::npm_lockfiles::read(&lock_dir) else {
+        return HashSet::new();
+    };
+    versions
+        .resolved_names(importer_key(&lock_dir, dir).as_ref())
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect()
+}
+
+/// The directories the project at `workspace_root` declares as workspace
+/// members, so a member can be told apart from an unrelated nested project
+/// that merely sits below a lockfile.
+pub fn workspace_member_dirs(workspace_root: &Path) -> Vec<PathBuf> {
+    let root_pkg = read_package_json(workspace_root).unwrap_or(serde_json::Value::Null);
+    super::npm_workspaces::member_dirs(workspace_root, &root_pkg)
+}
+
 /// A manifest directory as a lockfile importer key: `/`-separated and relative
 /// to the lockfile, with the lockfile's own directory keyed `.` the way pnpm
 /// writes it.
@@ -628,6 +657,104 @@ devDependencies:
         let result = parse(root);
         let names: Vec<&str> = result.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["react"]);
+    }
+
+    /// Manifest-versus-lockfile drift must see workspace links and installs
+    /// that live under the declaring member rather than at the root.
+    #[test]
+    fn resolved_names_cover_links_and_member_local_installs() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        fs::write(
+            root.join("package.json"),
+            r#"{"workspaces":["apps/*","packages/*"]}"#,
+        )
+        .unwrap();
+        let docs = root.join("apps/docs");
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(
+            docs.join("package.json"),
+            r#"{"name":"docs","dependencies":{"next":"^15.0.0","@acme/lib":"*"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("package-lock.json"),
+            r#"{
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "root"},
+                    "packages/lib": {"name": "@acme/lib", "version": "0.0.0"},
+                    "node_modules/@acme/lib": {"resolved": "packages/lib", "link": true},
+                    "node_modules/react": {"version": "19.0.0"},
+                    "apps/docs/node_modules/next": {"version": "15.1.0"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let names = resolved_lockfile_names(&docs);
+        assert!(names.contains("next"), "{names:?}");
+        assert!(names.contains("@acme/lib"), "{names:?}");
+        assert!(names.contains("react"), "{names:?}");
+        assert!(!names.contains("vue"), "{names:?}");
+
+        // A member that does not own the local install does not see it.
+        let web = root.join("apps/web");
+        fs::create_dir_all(&web).unwrap();
+        fs::write(web.join("package.json"), r#"{"name":"web"}"#).unwrap();
+        assert!(!resolved_lockfile_names(&web).contains("next"));
+    }
+
+    /// Code Scan gates `lockfile-missing`, `lockfile-mismatch`, and
+    /// `unused-dependency` on whether an ancestor lockfile declares a manifest
+    /// as a member, so both declaration formats need coverage. A pnpm
+    /// workspace root usually has no `workspaces` field at all: if
+    /// `pnpm-workspace.yaml` stopped being read, every member of every pnpm
+    /// monorepo (this repository included) would start reporting a missing
+    /// lockfile and lose the other two rules.
+    #[test]
+    fn workspace_members_are_read_from_npm_and_pnpm_declarations() {
+        fn member_and_outsider(root: &Path) -> (PathBuf, PathBuf) {
+            let member = root.join("packages/api");
+            fs::create_dir_all(&member).unwrap();
+            fs::write(member.join("package.json"), r#"{"name":"api"}"#).unwrap();
+            let outsider = root.join("sample/demo");
+            fs::create_dir_all(&outsider).unwrap();
+            fs::write(outsider.join("package.json"), r#"{"name":"demo"}"#).unwrap();
+            (member, outsider)
+        }
+
+        // npm / Yarn: members live in the package.json `workspaces` field.
+        let npm_root = tempfile::tempdir().unwrap();
+        let npm_root = npm_root.path();
+        fs::write(
+            npm_root.join("package.json"),
+            r#"{"workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        let (npm_member, npm_outsider) = member_and_outsider(npm_root);
+        let members = workspace_member_dirs(npm_root);
+        assert!(members.contains(&npm_member), "npm: {members:?}");
+        assert!(!members.contains(&npm_outsider), "npm: {members:?}");
+
+        // pnpm: members live in pnpm-workspace.yaml, and the root manifest
+        // declares none of them.
+        let pnpm_root = tempfile::tempdir().unwrap();
+        let pnpm_root = pnpm_root.path();
+        fs::write(
+            pnpm_root.join("package.json"),
+            r#"{"name":"monorepo-root","private":true}"#,
+        )
+        .unwrap();
+        fs::write(
+            pnpm_root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'packages/*'\n",
+        )
+        .unwrap();
+        let (pnpm_member, pnpm_outsider) = member_and_outsider(pnpm_root);
+        let members = workspace_member_dirs(pnpm_root);
+        assert!(members.contains(&pnpm_member), "pnpm: {members:?}");
+        assert!(!members.contains(&pnpm_outsider), "pnpm: {members:?}");
     }
 
     #[test]

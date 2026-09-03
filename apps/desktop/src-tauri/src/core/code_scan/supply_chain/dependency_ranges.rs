@@ -15,9 +15,14 @@ fn spec_is_unbounded(spec: &str) -> bool {
 }
 
 /// Flag unbounded runtime dependency ranges once per manifest.
+///
+/// `local_package_names` holds the workspace packages the scan found: npm
+/// workspaces conventionally reference a sibling package with a bare `"*"`,
+/// which resolves to that local directory and never to a registry release.
 pub(super) fn collect_unbounded_dependency_issues(
     issues: &mut Vec<CodeIssue>,
     manifests: &[PackageManifest],
+    local_package_names: &HashSet<String>,
 ) {
     for manifest in manifests {
         // Fixture / example / playground manifests use loose specs on purpose and
@@ -36,6 +41,9 @@ pub(super) fn collect_unbounded_dependency_issues(
             .iter()
             .filter_map(|(name, value)| {
                 let spec = value.as_str()?;
+                if local_package_names.contains(&name.to_ascii_lowercase()) {
+                    return None;
+                }
                 spec_is_unbounded(spec).then(|| format!("{name} (\"{spec}\")"))
             })
             .collect();

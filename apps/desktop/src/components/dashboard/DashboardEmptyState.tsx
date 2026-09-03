@@ -125,9 +125,9 @@ export function DashboardEmptyState({
   });
   const scanBlurb = hasSite
     ? hasCode
-      ? "Checks your live site and your linked code in one pass: security, performance, SEO, accessibility, and code risks."
+      ? "Checks your live site and your code in one pass: security, performance, SEO, accessibility, and code risks."
       : "Checks your live site for security, performance, SEO, and accessibility problems."
-    : "Checks your linked code for database, security, AI-safety, architecture, and deploy risks.";
+    : "Checks your code for database, security, AI-safety, architecture, and deploy risks.";
 
   const signalRows: SignalRow[] = [
     { icon: Shield, label: "Security", desc: "Vulnerabilities, headers, SSL, exposed data" },

@@ -2,7 +2,7 @@
 //! Alternate-host probes preserve redirects because a 3xx is the evidence.
 
 use crate::checks::{CheckResult, CheckStatus, ScanCategory, Severity};
-use crate::probe::{BodyPolicy, ProbeOutcome, ProbeRequest, RedirectPolicy};
+use crate::probe::{BodyPolicy, ProbeFailureClass, ProbeOutcome, ProbeRequest, RedirectPolicy};
 
 /// The alternate host for a page host: `www.` added when absent, stripped
 /// when present.
@@ -41,17 +41,49 @@ pub fn alt_host_response(status: u16) -> AltHostResponse {
     }
 }
 
+/// The verdict for an alternate host the resolver has no address for. A site
+/// published on one host only is a legitimate configuration: there is no
+/// second copy to split authority with, and nothing to redirect.
+fn unresolved_alt_host_result(alt_host: &str) -> CheckResult {
+    CheckResult {
+        check_id: "config.www_redirect".into(),
+        category: ScanCategory::Seo,
+        title: "Alternate host does not resolve".into(),
+        description: format!(
+            "{} does not resolve: the DNS lookup returned no address for it. Publishing the site on a single host is a legitimate configuration, so there is no second copy splitting authority and no www/non-www pair to grade.",
+            alt_host
+        ),
+        status: CheckStatus::Skipped,
+        severity: Severity::Medium,
+        fix_prompt: None,
+        manual_fix: None,
+        raw_data: Some(serde_json::json!({
+            "alt_host": alt_host,
+            "reason": "dns_unresolved",
+        })),
+        confidence: crate::checks::IssueConfidence::High,
+        confidence_reason: None,
+        why_it_matters: None,
+    }
+}
+
 /// Grade the alternate-host probe outcome.
 pub fn evaluate_alt_host(alt_host: &str, outcome: ProbeOutcome) -> Vec<CheckResult> {
+    if let ProbeOutcome::Failure(failure) = &outcome {
+        if failure.class == ProbeFailureClass::DnsUnresolved {
+            return vec![unresolved_alt_host_result(alt_host)];
+        }
+    }
     let ProbeOutcome::Response(response) = outcome else {
-        // The probe cannot distinguish a missing host from a timeout, so neither
-        // can support a clean consistency verdict.
+        // Whatever is left after the resolver case above: a timeout, a reset,
+        // a refused connection, or a resolver failure an adapter could not
+        // identify. None of them supports a consistency verdict.
         return vec![CheckResult {
             check_id: "config.www_redirect".into(),
             category: ScanCategory::Seo,
             title: "www/non-www probe did not complete".into(),
             description: format!(
-                "The request to {} did not complete, so this scan produced no www/non-www consistency verdict. A host that does not exist at all is a common and harmless reason for that, but so is a timeout at a host that does serve the site.",
+                "The request to {} did not complete, so this scan produced no www/non-www consistency verdict. A timeout, a reset, or a refused connection at a host that does serve the site all look like this, and so does a name that failed to resolve for a reason this runtime could not identify.",
                 alt_host
             ),
             status: CheckStatus::Skipped,
@@ -150,7 +182,7 @@ mod tests {
 
     #[test]
     fn a_failed_probe_declines_to_grade_rather_than_passing() {
-        use crate::probe::{ProbeFailure, ProbeFailureClass};
+        use crate::probe::ProbeFailure;
         let results = evaluate_alt_host(
             "www.example.com",
             ProbeOutcome::Failure(ProbeFailure {
@@ -161,5 +193,36 @@ mod tests {
         assert_ne!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].status, CheckStatus::Skipped);
         assert!(results[0].title.contains("did not complete"));
+    }
+
+    #[test]
+    fn a_host_that_does_not_resolve_says_so_instead_of_reporting_a_network_failure() {
+        use crate::probe::ProbeFailure;
+        let results = evaluate_alt_host(
+            "www.example.com",
+            ProbeOutcome::Failure(ProbeFailure {
+                class: ProbeFailureClass::DnsUnresolved,
+                detail: "error sending request".into(),
+            }),
+        );
+        assert_eq!(results[0].status, CheckStatus::Skipped);
+        assert!(
+            results[0]
+                .description
+                .starts_with("www.example.com does not resolve:"),
+            "got {}",
+            results[0].description
+        );
+        assert!(
+            !results[0].description.contains("did not complete"),
+            "a resolver answer must not be described as an incomplete request"
+        );
+        assert_eq!(
+            results[0]
+                .raw_data
+                .as_ref()
+                .and_then(|data| data.get("reason").and_then(serde_json::Value::as_str)),
+            Some("dns_unresolved")
+        );
     }
 }

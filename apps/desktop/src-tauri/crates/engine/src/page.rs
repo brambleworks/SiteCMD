@@ -3,6 +3,13 @@
 
 /// Fetched page data plus scan posture for one evaluated page.
 pub struct PageContext {
+    /// The URL the fetch FINISHED on, after every redirect, not the URL that
+    /// was requested. Verdicts read the scheme as evidence about the response
+    /// they are grading: `security.https_enforcement` treats an `http` value
+    /// as direct proof that the page was delivered over cleartext and never
+    /// redirected to HTTPS, and fails the site for it. A caller that supplies
+    /// the requested URL instead turns every correctly redirecting site into a
+    /// high-severity false positive.
     pub url: url::Url,
     pub response_headers: http::HeaderMap,
     pub status_code: u16,

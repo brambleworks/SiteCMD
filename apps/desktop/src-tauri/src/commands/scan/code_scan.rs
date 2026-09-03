@@ -130,9 +130,15 @@ pub(crate) async fn run_code_scan_internal(
     // Code Scan runs locally with zero marginal cost - free users can run it
     // and see summary stats. Detail gating (issue list, fix prompts, dossier)
     // lives in the frontend.
-    let project_path =
-        crate::project_paths::resolve_registered_project_dir(&db, project_id, project_path_hint)
-            .map_err(CodeScanError::Failed)?;
+    // Resolving the registered folder is a database read; take it through the
+    // async interface so it never parks an async runtime worker.
+    let project_path = crate::project_paths::resolve_registered_project_dir_async(
+        &db,
+        project_id,
+        project_path_hint,
+    )
+    .await
+    .map_err(CodeScanError::Failed)?;
     let project_path = crate::core::code_scan::validate_project_path(&project_path)
         .map_err(CodeScanError::Failed)?;
     let project_path = project_path.to_string_lossy().to_string();
@@ -149,14 +155,18 @@ pub(crate) async fn run_code_scan_internal(
         }
         let path_clone = project_path.clone();
         let progress_app = app.clone();
+        // The audit polls this between stages and before every file, so a
+        // cancel lands inside the CPU-heavy pass rather than after it.
+        let audit_control = scan_control.clone();
         let (provenance, report) = tokio::task::spawn_blocking(move || {
             let before = CodeCheckoutProvenance::capture(&path_clone);
-            let report = crate::core::code_scan::audit_project_with_options_and_progress(
+            let report = crate::core::code_scan::audit_project_with_control(
                 std::path::Path::new(&path_clone),
                 crate::core::code_scan::CodeScanOptions {
                     inspect_local_databases,
                 },
                 move |progress| emit_code_scan_progress(&progress_app, progress),
+                move || audit_control.is_cancelled(scan_request_id),
             );
             let report = report.and_then(|report| {
                 apply_source_control_suppressions(
@@ -164,14 +174,17 @@ pub(crate) async fn run_code_scan_internal(
                     report,
                     chrono::Utc::now().date_naive(),
                 )
+                .map_err(CodeScanError::Failed)
             });
             let provenance = before.confirm_unchanged(CodeCheckoutProvenance::capture(&path_clone));
             (provenance, report)
         })
         .await
         .map_err(|e| CodeScanError::Failed(format!("Code scan task failed: {}", e)))?;
-        let source_controlled =
-            report.map_err(|error| CodeScanError::Failed(sanitize_error(error)))?;
+        let source_controlled = report.map_err(|error| match error {
+            CodeScanError::Cancelled => CodeScanError::Cancelled,
+            CodeScanError::Failed(message) => CodeScanError::Failed(sanitize_error(message)),
+        })?;
         if source_controlled.ignored_count > 0 {
             tracing::info!(
                 ignored_findings = source_controlled.ignored_count,
@@ -192,31 +205,53 @@ pub(crate) async fn run_code_scan_internal(
             return Err(CodeScanError::Cancelled);
         }
 
-        let previous_history = match db.get_code_scan_history(project_id, 10) {
-            Ok(history) => history,
-            Err(error) => {
-                tracing::warn!("Could not load prior Code Scan summary: {}", error);
-                Vec::new()
-            }
+        // The history read and the blame baseline are synchronous SQLite round
+        // trips; keep them off the async worker.
+        let (previous_summary, blame_snapshot) = {
+            let history_db = db.clone();
+            let history_env = environment_url.clone();
+            let history_scope_key = environment_scope_key.clone();
+            tokio::task::spawn_blocking(move || {
+                let previous_history = match history_db.get_code_scan_history(project_id, 10) {
+                    Ok(history) => history,
+                    Err(error) => {
+                        tracing::warn!("Could not load prior Code Scan summary: {}", error);
+                        Vec::new()
+                    }
+                };
+                let previous_summary = select_relevant_previous_code_scan_summary(
+                    previous_history,
+                    history_env.as_deref(),
+                );
+                let previous_scan =
+                    blame_previous_scan(previous_summary.as_ref(), history_env.as_deref());
+                let blame_snapshot = crate::core::regression_blame::capture_snapshot(
+                    history_db.as_ref(),
+                    project_id,
+                    &history_scope_key,
+                    "code_scan",
+                    previous_scan,
+                );
+                (previous_summary, blame_snapshot)
+            })
+            .await
+            .map_err(|error| {
+                CodeScanError::Failed(format!("Code scan history task failed: {error}"))
+            })?
         };
-        let previous_summary = select_relevant_previous_code_scan_summary(
-            previous_history,
-            environment_url.as_deref(),
-        );
+        let blame_snapshot =
+            blame_snapshot.map_err(|error| CodeScanError::Failed(sanitize_error(error)))?;
         let duration_ms = started_at.elapsed().as_millis() as u64;
         let domain_summaries = build_domain_summaries(&report.issues);
         let overall_score = crate::core::code_scan::score_report(&report);
-        let env_url_str = environment_scope_key.as_str();
-        let previous_scan =
-            blame_previous_scan(previous_summary.as_ref(), environment_url.as_deref());
-        let blame_snapshot = crate::core::regression_blame::capture_snapshot(
-            db.as_ref(),
-            project_id,
-            env_url_str,
-            "code_scan",
-            previous_scan,
-        )
-        .map_err(|error| CodeScanError::Failed(sanitize_error(error)))?;
+        // Last gate before the save stage is announced or anything is written:
+        // a cancel that landed while the history read or the blame baseline
+        // was in flight must leave no run behind, and no save step stuck on
+        // running either. Only synchronous work separates this check from the
+        // write; nothing between them can await a cancel.
+        if is_cancelled() {
+            return Err(CodeScanError::Cancelled);
+        }
         if cfg!(debug_assertions) {
             tracing::warn!("code_scan: saving scan record");
         }
@@ -241,8 +276,11 @@ pub(crate) async fn run_code_scan_internal(
         })?;
         mark_suppressed_findings(&mut batch, &suppressed_occurrence_ids)
             .map_err(CodeScanError::Failed)?;
+        // Persist through the async database interface so the report write
+        // never parks the async worker on the SQLite thread.
         let scan_id = db
-            .persist_normalized_scan_run(batch)
+            .persist_normalized_scan_run_async(batch)
+            .await
             .map_err(|error| CodeScanError::Failed(sanitize_error(error)))?;
         emit_code_scan_progress_step(&app, "code-scan.save", "complete", report.issue_count, 90);
         if cfg!(debug_assertions) {
@@ -301,19 +339,35 @@ pub(crate) async fn run_code_scan_internal(
         if cfg!(debug_assertions) {
             tracing::warn!("code_scan: emitting native alerts");
         }
-        crate::core::native_alerts::emit_code_scan_alerts(
-            db.as_ref(),
-            project_id,
-            environment_url.as_deref(),
-            scan_id,
-            &report.checked_at,
-            overall_score,
-            report.issue_count as u32,
-            report.critical_count as u32,
-            report.high_count as u32,
-            previous_summary.as_ref(),
-            notice.is_some(),
-        );
+        // Alert upserts are further SQLite writes; offload them too.
+        {
+            let alerts_db = db.clone();
+            let alerts_env = environment_url.clone();
+            let alerts_checked_at = report.checked_at.clone();
+            let alerts_issue_count = report.issue_count as u32;
+            let alerts_critical_count = report.critical_count as u32;
+            let alerts_high_count = report.high_count as u32;
+            let alerts_notified = notice.is_some();
+            if let Err(error) = tokio::task::spawn_blocking(move || {
+                crate::core::native_alerts::emit_code_scan_alerts(
+                    alerts_db.as_ref(),
+                    project_id,
+                    alerts_env.as_deref(),
+                    scan_id,
+                    &alerts_checked_at,
+                    overall_score,
+                    alerts_issue_count,
+                    alerts_critical_count,
+                    alerts_high_count,
+                    previous_summary.as_ref(),
+                    alerts_notified,
+                );
+            })
+            .await
+            {
+                tracing::error!("Code Scan alert task failed: {}", error);
+            }
+        }
         if let Some(notice) = notice {
             super::notify_deploy_regression(&app, &notice).await;
         }
@@ -358,13 +412,22 @@ pub(crate) async fn run_code_scan_internal(
     .await;
 
     if let Some(error) = code_scan_failure_alert_error(&result) {
-        crate::core::native_alerts::emit_scan_failure_alert(
-            db.as_ref(),
-            project_id,
-            environment_url.as_deref(),
-            "Code Scan",
-            &error.to_string(),
-        );
+        let failure_db = db.clone();
+        let failure_env = environment_url.clone();
+        let failure_text = error.to_string();
+        if let Err(task_error) = tokio::task::spawn_blocking(move || {
+            crate::core::native_alerts::emit_scan_failure_alert(
+                failure_db.as_ref(),
+                project_id,
+                failure_env.as_deref(),
+                "Code Scan",
+                &failure_text,
+            );
+        })
+        .await
+        {
+            tracing::error!("Code Scan failure-alert task failed: {}", task_error);
+        }
     }
 
     result
@@ -383,214 +446,5 @@ fn code_scan_failure_alert_error(
 }
 
 #[cfg(test)]
-mod tests {
-    //! Blame helpers must compare only scans from the same environment;
-    //! cross-environment fallback is valid for trends, not regression attribution.
-
-    use super::*;
-
-    fn summary(id: i64, environment_url: Option<&str>) -> CodeScanSummary {
-        CodeScanSummary {
-            id,
-            project_id: 1,
-            environment_url: environment_url.map(str::to_string),
-            overall_score: 88,
-            issue_count: 3,
-            grouped_issue_count: 3,
-            critical_count: 0,
-            high_count: 1,
-            duration_ms: 1200,
-            checked_at: "2026-06-09T12:00:00Z".to_string(),
-            framework: None,
-            top_domain: None,
-            top_domain_count: 0,
-            domain_summaries: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn blame_previous_scan_same_env_normalized_variants_match() {
-        // Trailing slash and host case differences must normalize equal,
-        // exactly like the work_items env key (normalize_env_url).
-        let previous = summary(7, Some("https://Example.COM/app/"));
-        let result = blame_previous_scan(Some(&previous), Some("https://example.com/app"))
-            .expect("normalized-equal envs must produce a blame PreviousScan");
-        assert_eq!(result.scan_id, 7);
-        assert_eq!(result.overall_score, 88);
-        assert_eq!(result.timestamp, "2026-06-09T12:00:00Z");
-    }
-
-    #[test]
-    fn blame_previous_scan_differing_envs_returns_none() {
-        let previous = summary(7, Some("https://staging.example.com"));
-        assert!(
-            blame_previous_scan(Some(&previous), Some("https://example.com")).is_none(),
-            "cross-env history must not feed blame"
-        );
-    }
-
-    #[test]
-    fn blame_previous_scan_env_less_history_with_env_scan_returns_none() {
-        // First scan under a new env key: the only history is project-wide
-        // (NULL env). Blaming against it would mark every finding "new".
-        let previous = summary(7, None);
-        assert!(blame_previous_scan(Some(&previous), Some("https://example.com")).is_none());
-    }
-
-    #[test]
-    fn blame_previous_scan_both_env_less_matches() {
-        // Env-less project history is consistent with an env-less current
-        // scan; blame may diff against it.
-        let previous = summary(9, None);
-        let result = blame_previous_scan(Some(&previous), None)
-            .expect("both-None envs are the same key space");
-        assert_eq!(result.scan_id, 9);
-    }
-
-    #[test]
-    fn blame_previous_scan_without_history_returns_none() {
-        assert!(blame_previous_scan(None, Some("https://example.com")).is_none());
-        assert!(blame_previous_scan(None, None).is_none());
-    }
-
-    fn code_scan_result_fixture() -> CodeScanResult {
-        CodeScanResult {
-            id: 1,
-            project_id: 1,
-            environment_url: None,
-            overall_score: 100,
-            issue_count: 0,
-            critical_count: 0,
-            high_count: 0,
-            medium_count: 0,
-            low_count: 0,
-            duration_ms: 10,
-            checked_at: "2026-06-09T12:00:00Z".to_string(),
-            framework: None,
-            domain_summaries: Vec::new(),
-            skipped_scopes: Default::default(),
-            issues: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn failure_alert_skips_user_cancellation() {
-        let result: Result<CodeScanResult, CodeScanError> = Err(CodeScanError::Cancelled);
-        let error = result.as_ref().expect_err("fixture is a cancellation");
-        assert!(
-            crate::core::native_alerts::is_user_cancelled_code_scan(error),
-            "the typed predicate must match the Cancelled variant"
-        );
-        assert!(
-            code_scan_failure_alert_error(&result).is_none(),
-            "a user cancellation must not record a scan-failure alert"
-        );
-    }
-
-    #[test]
-    fn failure_alert_fires_for_real_errors() {
-        let result: Result<CodeScanResult, CodeScanError> = Err(CodeScanError::Failed(
-            "Code scan task failed: boom".to_string(),
-        ));
-        let error = code_scan_failure_alert_error(&result)
-            .expect("engine/infra failures must record a scan-failure alert");
-        assert!(matches!(error, CodeScanError::Failed(_)));
-    }
-
-    #[test]
-    fn failure_alert_skips_success() {
-        let result: Result<CodeScanResult, CodeScanError> = Ok(code_scan_result_fixture());
-        assert!(code_scan_failure_alert_error(&result).is_none());
-    }
-
-    #[test]
-    fn source_control_suppressions_filter_the_persisted_scan_report() {
-        let project = tempfile::tempdir().expect("project");
-        let sitecmd_dir = project.path().join(".sitecmd");
-        std::fs::create_dir_all(&sitecmd_dir).expect("sitecmd directory");
-        std::fs::write(
-            sitecmd_dir.join("config.json"),
-            r#"{
-  "version": 1,
-  "url": "https://example.com",
-  "name": "Suppressed project",
-  "code_scan": {
-    "suppressions": [{
-      "match": {
-        "rule": "code_scan.cors-origin-reflection",
-        "path": "content/security.ts"
-      },
-      "reason": "This file contains inert security guidance."
-    }]
-  }
-}"#,
-        )
-        .expect("suppression config");
-        let issue = crate::core::code_scan::CodeIssue {
-            id: "cors-origin-reflection:content/security.ts:371".to_string(),
-            check_id: "code_scan.cors-origin-reflection".to_string(),
-            category: "security".to_string(),
-            severity: crate::checks::Severity::High,
-            title: "CORS reflects the request origin while allowing credentials".to_string(),
-            description: "The source appears to reflect credentialed origins.".to_string(),
-            relative_path: "content/security.ts".to_string(),
-            absolute_path: project
-                .path()
-                .join("content/security.ts")
-                .to_string_lossy()
-                .to_string(),
-            line: Some(371),
-            source_excerpt: Some("replace origin: true with an exact allowlist".to_string()),
-            evidence: None,
-            why_now: None,
-            likely_fix: Some("Use an exact allowlist.".to_string()),
-            confidence: crate::checks::IssueConfidence::High,
-            confidence_reason: None,
-            verify_hint: None,
-        };
-        let report = crate::core::code_scan::CodeScanReport {
-            checked_at: "2026-08-31T12:00:00Z".to_string(),
-            framework: Some("typescript".to_string()),
-            issue_count: 1,
-            critical_count: 0,
-            high_count: 1,
-            medium_count: 0,
-            low_count: 0,
-            issues: vec![issue],
-            skipped_scopes: Default::default(),
-        };
-
-        let filtered = apply_source_control_suppressions(
-            project.path(),
-            report,
-            chrono::NaiveDate::from_ymd_opt(2026, 8, 31).expect("date"),
-        )
-        .expect("valid suppression");
-
-        assert_eq!(filtered.report.issue_count, 0);
-        assert!(filtered.report.issues.is_empty());
-        assert_eq!(filtered.ignored_count, 1);
-        assert_eq!(filtered.evidence_report.issue_count, 1);
-
-        let mut batch = crate::core::normalized_scan::normalize_code_scan(
-            &filtered.evidence_report,
-            1,
-            1,
-            Some("https://example.com".to_string()),
-            "https://example.com".to_string(),
-            project.path().to_string_lossy().to_string(),
-            100,
-            10,
-            1_000,
-        )
-        .expect("normalize evidence");
-        mark_suppressed_findings(&mut batch, &filtered.suppressed_occurrence_ids)
-            .expect("mark suppressed evidence");
-
-        assert_eq!(batch.findings.len(), 1);
-        assert_eq!(
-            batch.findings[0].verdict,
-            crate::checks::CheckStatus::Skipped
-        );
-    }
-}
+#[path = "code_scan_tests.rs"]
+mod tests;

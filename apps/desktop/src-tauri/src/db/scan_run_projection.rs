@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use rusqlite::types::ToSql;
 use rusqlite::{params, Transaction};
 
 use super::helpers::{lifecycle_env_url, normalize_occurrence_url};
@@ -161,32 +162,14 @@ fn resolve_covered_absences(
         .map(|finding| finding.occurrence_id.as_str())
         .collect();
 
-    let mut candidates = tx.prepare(
-        "SELECT id, signal_id, check_id, page_url FROM work_items
-         WHERE source = ?1 AND project_id = ?2 AND env_url = ?3
-           AND resolved_at IS NULL",
-    )?;
-    let open = candidates
-        .query_map(
-            params![scope.source, scope.project_id, scope.environment_url],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            },
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let resolved: Vec<i64> = open
+    let resolved: Vec<i64> = load_open_candidates(tx, &scope, &coverage)?
         .into_iter()
-        .filter(|(_, signal_id, check_id, page_url)| {
-            let route = page_url.as_deref().map(normalize_occurrence_url);
-            !seen.contains(signal_id.as_str()) && coverage.covers(route.as_deref(), check_id)
+        .filter(|candidate| {
+            let route = candidate.page_url.as_deref().map(normalize_occurrence_url);
+            !seen.contains(candidate.signal_id.as_str())
+                && coverage.covers(route.as_deref(), &candidate.check_id)
         })
-        .map(|(id, ..)| id)
+        .map(|candidate| candidate.id)
         .collect();
 
     for id in resolved {
@@ -198,6 +181,69 @@ fn resolve_covered_absences(
         )?;
     }
     Ok(())
+}
+
+/// One open lifecycle row a run may speak for.
+struct OpenCandidate {
+    id: i64,
+    signal_id: String,
+    check_id: String,
+    page_url: Option<String>,
+}
+
+/// Load the open rows whose `(route, check)` pairs the run could speak for.
+///
+/// A route-scoped claim cannot cover a route it never observed, so the claimed
+/// routes are bound into the query and one finished page never decodes the
+/// whole site's open findings. The bound is deliberately wider than the
+/// answer: it keeps every routeless row, and it compares routes without ASCII
+/// case because `normalize_occurrence_url` lowercases only the origin. Every
+/// row that survives it is still put to `covers`, which alone decides the
+/// pair.
+fn load_open_candidates(
+    tx: &Transaction<'_>,
+    scope: &ResolveScope<'_>,
+    coverage: &ScanCoverageManifest,
+) -> Result<Vec<OpenCandidate>, DbError> {
+    let mut sql = String::from(
+        "SELECT id, signal_id, check_id, page_url FROM work_items
+         WHERE source = ?1 AND project_id = ?2 AND env_url = ?3
+           AND resolved_at IS NULL",
+    );
+    let mut bound: Vec<Box<dyn ToSql>> = vec![
+        Box::new(scope.source.to_string()),
+        Box::new(scope.project_id),
+        Box::new(scope.environment_url.to_string()),
+    ];
+    if let Some(routes) = coverage.route_bound() {
+        let first = bound.len() + 1;
+        let placeholders = (0..routes.len())
+            .map(|index| format!("?{}", first + index))
+            .collect::<Vec<_>>()
+            .join(",");
+        sql.push_str(&format!(
+            " AND (page_url IS NULL OR lower(page_url) IN ({placeholders}))"
+        ));
+        bound.extend(
+            routes
+                .iter()
+                .map(|route| Box::new(route.to_ascii_lowercase()) as Box<dyn ToSql>),
+        );
+    }
+
+    let mut statement = tx.prepare(&sql)?;
+    let values: Vec<&dyn ToSql> = bound.iter().map(|value| value.as_ref()).collect();
+    let candidates = statement
+        .query_map(values.as_slice(), |row| {
+            Ok(OpenCandidate {
+                id: row.get(0)?,
+                signal_id: row.get(1)?,
+                check_id: row.get(2)?,
+                page_url: row.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(candidates)
 }
 
 /// The claim in DB key form. Both sides of the route comparison go through
@@ -215,3 +261,7 @@ fn as_stored_keys(coverage: &ScanCoverageManifest) -> ScanCoverageManifest {
     }
     stored
 }
+
+#[cfg(test)]
+#[path = "scan_run_projection_tests.rs"]
+mod tests;

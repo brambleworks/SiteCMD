@@ -59,6 +59,15 @@ pub const AXE_RESULT_TIMEOUT: Duration = Duration::from_secs(20);
 /// title read, so polling fast costs little and stops as soon as axe finishes.
 pub const AXE_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Interval between polls for one chunk of a payload crossing the title
+/// bridge. The value already exists on the page, so only the eval round trip
+/// remains, and a tight poll keeps a several-hundred-chunk axe report to a
+/// second or two.
+pub const TITLE_BRIDGE_CHUNK_POLL_INTERVAL: Duration = Duration::from_millis(5);
+
+/// Budget for one requested chunk to arrive across the title bridge.
+pub const TITLE_BRIDGE_CHUNK_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Shared privacy and size caps for retained axe evidence.
 pub const AXE_NODE_EVIDENCE_LIMIT: usize = AXE_EVIDENCE_CAPS.nodes;
 pub const AXE_NODE_TARGET_PARTS_LIMIT: usize = AXE_EVIDENCE_CAPS.target_parts;
@@ -137,6 +146,15 @@ pub const PROBE_SIGNATURE_SAMPLE_CHARS: usize = 4096;
 /// Maximum body size for each stylesheet fetched by the polish scanner.
 pub const MAX_STYLESHEET_BODY_SIZE: u64 = 2 * 1024 * 1024;
 
+/// Maximum distinct stylesheet URLs one scan execution keeps in memory. Eight
+/// stylesheets are fetched per page, so this holds the shared set of a large
+/// multi-page scan without growing with the page count.
+pub const MAX_STYLESHEET_CACHE_ENTRIES: usize = 64;
+
+/// Maximum total cached stylesheet bytes held for one scan execution, sized to
+/// eight stylesheets at the per-stylesheet body cap.
+pub const MAX_STYLESHEET_CACHE_BYTES: usize = 16 * 1024 * 1024;
+
 /// Maximum dependency manifest or lockfile size accepted by Updates and Code Scan.
 pub const MAX_DEPENDENCY_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum `.sitecmd/config.json` size accepted by CLI and deep-link imports.
@@ -155,6 +173,49 @@ pub const CHECK_LINK_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Very short timeout for quick liveness probes (checklist probes, connectivity checks).
 pub const PROBE_QUICK_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Maximum in-flight probe requests to one origin (scheme, host, port) from
+/// this process, enforced at the probe seam in `checks::probe_adapter`.
+///
+/// Sized between the failure it prevents and the deadline it has to fit.
+///
+/// The failure: every probe to an HTTPS origin rides one multiplexed HTTP/2
+/// connection, and h2 tears that connection down (GOAWAY ENHANCE_YOUR_CALM,
+/// "too_many_data_frames") once enough sub-256-byte DATA frames sit buffered
+/// on streams whose bodies nobody has read, which is what a status-only probe
+/// leaves behind between its response head arriving and the body being
+/// dropped. Measured against the origin that first showed this
+/// (visityourteam.com, Next.js behind Cloudflare, 98 open-redirect probes):
+/// the sweep answers 98 of 98 at bounds 8, 16, 24, 32 and 48, and only the
+/// unbounded shape at 98 trips the guard (83 and 89 of 98 answered). Sixteen
+/// therefore sits a factor of three below the highest bound measured safe.
+///
+/// The deadline: a whole scan's same-origin probe traffic shares this bound
+/// inside one `CHECK_TIMEOUT` window, and the largest source is not the
+/// open-redirect sweep but internal link probing. `BROKEN_LINK_INTERNAL_SAMPLE`
+/// is 100 same-origin links, each a HEAD plus, when the HEAD errors, a GET
+/// confirmation, so the worst case is roughly 100 HEAD + 100 GET + 98 sweep
+/// probes plus about 30 others: 230 to 330, not 130. Measured on a 120-link
+/// loopback page whose origin waits 500 ms before every response, with the
+/// sweep running concurrently, the broken-links check finishes in 19.2 s at a
+/// bound of 8 (past `CHECK_TIMEOUT`, so the check is skipped as timed out),
+/// 13.2 s at 16 and 11.6 s at 24. Above 16 the curve flattens, because the
+/// links check's own `BROKEN_LINK_INTERNAL_CONCURRENCY` of 10 becomes the
+/// limit; below 16 this seam is the limit and eats the check's deadline.
+///
+/// Keeping this at or above `BROKEN_LINK_INTERNAL_CONCURRENCY` also keeps the
+/// two knobs from fighting: a smaller bound here silently narrows the link
+/// check's own concurrency, leaving a setting that no longer does anything.
+pub const PROBE_HOST_CONCURRENCY: usize = 16;
+
+/// Holds the paragraph above to something the compiler checks. Below the link
+/// check's own concurrency this seam becomes the narrower of the two knobs,
+/// which makes that setting dead configuration and moves the check's deadline
+/// somewhere its module never mentions.
+const _: () = assert!(
+    PROBE_HOST_CONCURRENCY >= sitecmd_engine::checks::seo::links::BROKEN_LINK_INTERNAL_CONCURRENCY,
+    "PROBE_HOST_CONCURRENCY must not be lower than BROKEN_LINK_INTERNAL_CONCURRENCY"
+);
 
 /// Local database inspection must not stall Code Scan during socket setup.
 pub const CODE_SCAN_DATABASE_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);

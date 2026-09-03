@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getScanExecutionsMock } = vi.hoisted(() => ({
+const { getScanExecutionDetailMock, getScanExecutionsMock } = vi.hoisted(() => ({
+  getScanExecutionDetailMock: vi.fn(),
   getScanExecutionsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/commands", () => ({
-  getScanExecutionDetail: vi.fn(),
+  getScanExecutionDetail: getScanExecutionDetailMock,
   getScanExecutions: getScanExecutionsMock,
 }));
 
@@ -20,6 +21,8 @@ import type {
 import {
   codeResultFromExecutionRun,
   deriveScanPresentationHistory,
+  getCodeScanDetail,
+  getScanDetail,
   getScanHistory,
   getSessionHistory,
   webResultFromExecutionRun,
@@ -28,6 +31,8 @@ import {
 beforeEach(() => {
   getScanExecutionsMock.mockReset();
   getScanExecutionsMock.mockResolvedValue([]);
+  getScanExecutionDetailMock.mockReset();
+  getScanExecutionDetailMock.mockResolvedValue(null);
 });
 
 const diagnostics: NormalizedRunDiagnostics = {
@@ -301,6 +306,61 @@ describe("execution detail adapters", () => {
       checkId: "hsts",
       rawData: { header: "strict-transport-security" },
     });
+  });
+});
+
+describe("execution detail transport", () => {
+  // The response carries one run because the SQL filtered it. Re-checking the id
+  // on the client would only be meaningful if the sibling runs had been queried,
+  // serialized, and parsed first, which is what the filter exists to avoid. Both
+  // loaders are given a run id that differs from the one they asked for, so
+  // restoring a client-side match would fail here.
+  it("sends the run filter and maps the web run the backend narrowed to", async () => {
+    const run = runDetail({
+      id: 87,
+      runKind: "page",
+      diagnostics: { ...diagnostics, securityScore: 72, pageUrl: "https://example.com/two" },
+      findings: [
+        finding({
+          source: "web_scan",
+          canonicalCheckId: "security.hsts",
+          producerCheckId: "hsts",
+          locationKind: "page",
+          pageUrl: "https://example.com/two",
+          relativePath: null,
+          line: null,
+          detailJson: null,
+        }),
+      ],
+    });
+    getScanExecutionDetailMock.mockResolvedValue({ summary: executionSummary(), runs: [run] });
+
+    const result = await getScanDetail({ scanId: 22 });
+
+    expect(getScanExecutionDetailMock).toHaveBeenCalledWith({ runId: 22 });
+    expect(result?.url).toBe("https://example.com/two");
+    expect(result?.issues.map((issue) => issue.checkId)).toEqual(["hsts"]);
+  });
+
+  it("sends the run filter and maps the code run the backend narrowed to", async () => {
+    getScanExecutionDetailMock.mockResolvedValue({
+      summary: executionSummary(),
+      runs: [runDetail({ id: 99, source: "code_scan", runKind: "code", findings: [finding()] })],
+    });
+
+    const result = await getCodeScanDetail({ scanId: 11 });
+
+    expect(getScanExecutionDetailMock).toHaveBeenCalledWith({ runId: 11 });
+    expect(result?.issues.map((issue) => issue.relativePath)).toEqual(["src/api.ts"]);
+  });
+
+  it("returns nothing when the requested run is not of the source asked for", async () => {
+    getScanExecutionDetailMock.mockResolvedValue({
+      summary: executionSummary(),
+      runs: [runDetail({ id: 10, source: "web_scan", runKind: "single" })],
+    });
+
+    expect(await getCodeScanDetail({ scanId: 10 })).toBeNull();
   });
 });
 

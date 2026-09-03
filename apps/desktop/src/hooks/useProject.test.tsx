@@ -24,6 +24,13 @@ import {
 import { getActiveSelection, resetActiveSelectionForTest } from "@/lib/active-selection-store";
 import { createTestQueryClient } from "@/test-utils/query-client";
 import { queryKeys } from "@/lib/query/query-keys";
+import {
+  invalidateLatestCodeScanSnapshot,
+  mergePrimedCodeScanForAccess,
+  primeLatestCodeScanSnapshot,
+} from "@/lib/project-summary-code-scan";
+import type { ProjectSignalSnapshot } from "@/lib/project-summary-types";
+import type { CodeScanResult } from "@/lib/types";
 
 let queryClient: QueryClient;
 
@@ -268,6 +275,94 @@ describe("useProject", () => {
       expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
     }
     expect(queryClient.getQueryState(summaryKey)).toBeUndefined();
+  });
+
+  it("drops a deleted project's primed code scan report even with no environments", async () => {
+    // Regression coverage for the primed full-code-scan-report cache: a
+    // deleted project with zero environments cannot be swept by the
+    // per-URL cache-clear loop, so cleanup must key off the project id alone.
+    const doomed = buildProject({ id: 9, name: "Doomed", environments: [] });
+    invokeMock.mockResolvedValueOnce([doomed]).mockResolvedValueOnce([]);
+
+    const { result } = renderHook(() => useProject(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.projects).toHaveLength(1);
+    });
+
+    const codeScanResult: CodeScanResult = {
+      id: 100,
+      projectId: 9,
+      environmentUrl: null,
+      overallScore: 80,
+      // issueCount 0 with an empty issues array is a fully detailed
+      // (zero-issue) payload, so the primed cache keeps `result`.
+      issueCount: 0,
+      criticalCount: 0,
+      highCount: 0,
+      mediumCount: 0,
+      lowCount: 0,
+      durationMs: 100,
+      checkedAt: "2026-04-10T00:00:00Z",
+      framework: null,
+      domainSummaries: [],
+      issues: [],
+    };
+    primeLatestCodeScanSnapshot(codeScanResult);
+
+    const baseSnapshot: ProjectSignalSnapshot = {
+      projectId: 9,
+      environmentUrl: null,
+      firstScanBannerDismissed: false,
+      codeScanSummary: null,
+      previousCodeScanSummary: null,
+      codeScanDetail: null,
+      monitoring: {
+        enabledIntegrations: [],
+        integrationFailureCount: 0,
+        staleIntegrationCount: 0,
+        searchRegression: null,
+      },
+      monitoringRefreshedAt: null,
+      updates: null,
+      updatesRefreshedAt: null,
+      targets: { securityIssueId: null, securityFocus: null },
+      workSummary: {
+        unresolvedCount: 0,
+        newCount: 0,
+        workingCount: 0,
+        regressedCount: 0,
+        ignoredCount: 0,
+        blockedCount: 0,
+        launchBlockerCount: 0,
+        maintenanceCount: 0,
+        primaryAction: null,
+        regressedAction: null,
+        workingAction: null,
+        blockedAction: null,
+        ignoredAction: null,
+        launchBlockerAction: null,
+        weeklySummary: null,
+      },
+    };
+
+    // The primed report is cached before deletion.
+    expect(mergePrimedCodeScanForAccess(baseSnapshot, true).codeScanDetail?.id).toBe(100);
+
+    try {
+      // This mirrors what handleProjectDeleted does after deleteProject
+      // resolves: refetch the project list and diff it against the previous one.
+      await act(async () => {
+        await result.current.refreshProjects();
+      });
+
+      await waitFor(() => {
+        expect(result.current.projects).toHaveLength(0);
+      });
+
+      expect(mergePrimedCodeScanForAccess(baseSnapshot, true).codeScanDetail).toBeNull();
+    } finally {
+      invalidateLatestCodeScanSnapshot(9);
+    }
   });
 
   it("restores the previously selected project and environment on mount", async () => {

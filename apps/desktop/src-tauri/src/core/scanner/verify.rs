@@ -71,7 +71,7 @@ pub async fn verify_checks<F: Fn() -> bool>(
         .get(url)
         .send()
         .await
-        .map_err(|e| ScanError::NetworkError(format!("Failed to fetch {}: {}", url, e)))?;
+        .map_err(|e| ScanError::NetworkError(crate::http_client::fetch_failure(url, &e)))?;
 
     let effective_url = resp.url().clone();
     let is_local = localhost::is_localhost(&effective_url);
@@ -196,6 +196,8 @@ pub async fn verify_checks<F: Fn() -> bool>(
             &ctx.url,
             &ctx.client,
             ctx.is_strict_localhost,
+            // Verification re-reads the page under test; never reuse scan CSS.
+            None,
         )
         .await;
         if let Some(f) = is_cancelled {

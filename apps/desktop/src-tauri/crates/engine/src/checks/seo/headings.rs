@@ -15,6 +15,18 @@ pub static NON_CONTENT_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid non-content regex")
 });
 
+/// Remove comments and scripts while keeping `<style>` blocks, for checks that
+/// grade the page's CSS but must not read a comment as a stylesheet rule.
+///
+/// This and `NON_CONTENT_BLOCK_RE` are markup helpers rather than heading
+/// helpers, and belong in a shared markup module. They live here because that
+/// is where the first one landed and because callers across every category
+/// already reach for `seo::headings::NON_CONTENT_BLOCK_RE`; moving both is a
+/// rename for whichever change owns `checks/html_attrs.rs` next.
+pub static COMMENT_AND_SCRIPT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<!--.*?-->|<script\b.*?</script>").expect("valid comment/script regex")
+});
+
 /// Heading levels in document order from comment/script/style-stripped markup.
 fn heading_levels(ctx: &PageContext) -> Vec<u8> {
     let scannable = NON_CONTENT_BLOCK_RE.replace_all(ctx.body_lower(), " ");

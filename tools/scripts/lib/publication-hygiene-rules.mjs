@@ -159,8 +159,12 @@ const SOURCE_TEXT_EXTENSIONS = new Set([
   ".yaml",
   ".yml",
 ]);
+// Case-sensitive on purpose. macOS spells its home root `/Users/` and Windows
+// `C:\Users\`, both capitalized; a lowercase `/users/` is a URL path segment,
+// and matching it folded reported `api.patch("/users/profile")` as the home
+// directory of an account named "profile".
 const HOME_DIRECTORY_RE =
-  /(?:^|[\s"'`(=:,[])(?:\/Users\/|\/home\/|%2FUsers%2F|[A-Za-z]:\\Users\\)([A-Za-z0-9._-]+)/gi;
+  /(?:^|[\s"'`(=:,[])(?:\/Users\/|\/home\/|%2FUsers%2F|[A-Za-z]:\\Users\\)([A-Za-z0-9._-]+)/g;
 const PLACEHOLDER_HOME_NAMES = new Set([
   "ci",
   "dev",

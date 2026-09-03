@@ -240,14 +240,23 @@ pub(super) fn analyze_file(
     laravel_protection: &LaravelRouteProtection,
 ) -> (Vec<CodeIssue>, FileSignalSummary) {
     let mut issues = Vec::new();
-    let content = &file.content;
-    let (signals, summary) = FileAnalysisSignals::from_file(file, laravel_protection);
+    // Comments describe code, they are not code. Every signal reads the
+    // executable view, so a commented-out query or a JSDoc mention of a sink
+    // cannot produce a finding. Blanking preserves byte offsets and newlines,
+    // so reported line numbers still point at the real source line, and
+    // `ctx.file` stays the original so excerpts quote real source.
+    let code_view = code_view_for_analysis(file);
+    let analysis_file = code_view.as_ref().unwrap_or(file);
+    let content = &analysis_file.content;
+    let (mut signals, summary) = FileAnalysisSignals::from_file(analysis_file, laravel_protection);
+    refine_sink_signals(&mut signals, content);
     let oauth_callback_like = signals.route_like
         && signals.has_oauth_code
         && signals.has_oauth_token_exchange
         && (file.relative_path.to_ascii_lowercase().contains("callback")
             || signals.lower.contains("oauth")
-            || signals.lower.contains("openid"));
+            || signals.lower.contains("openid"))
+        && !is_oauth_authorization_server_file(file, content, signals.parses_body);
     let one_time_token_handler = signals.route_like
         && signals.has_request_token
         && signals.has_one_time_token_flow
@@ -326,6 +335,109 @@ pub(super) fn analyze_file(
     collect_python_sink_issues(&mut issues, &ctx);
 
     (issues, summary)
+}
+
+/// A same-length copy of `file` whose comments are blanked, for languages
+/// where the signal patterns would otherwise read documentation as code.
+///
+/// Returns `None` when the file needs no rewrite, so the caller keeps
+/// borrowing the original. String literals are left intact: quoted route
+/// names, cookie names, CORS values, and `"use server"` directives are
+/// evidence, and the patterns that must ignore quoted data already use
+/// `has_any_unquoted`. PHP and Python sink checks build their own views.
+fn code_view_for_analysis(file: &SourceFile) -> Option<SourceFile> {
+    if !is_js_or_ts_file(&file.relative_path) {
+        return None;
+    }
+    if !file.content.contains("//") && !file.content.contains("/*") {
+        return None;
+    }
+    Some(SourceFile {
+        absolute_path: file.absolute_path.clone(),
+        relative_path: file.relative_path.clone(),
+        content: js_sinks::blank_js(&file.content, false),
+        line_count: file.line_count,
+    })
+}
+
+/// Withdraw whole-file sink signals that the sink site itself disproves.
+///
+/// `FileAnalysisSignals` grades a file by whether a pattern appears anywhere
+/// in it. Two sinks need the value beside them before the finding is honest:
+/// a raw-HTML sink handed a literal renders fixed text, and a fetch whose
+/// argument is a bare `url` identifier is only request-derived when the file
+/// binds that identifier to a request.
+fn refine_sink_signals(signals: &mut FileAnalysisSignals, content: &str) {
+    if signals.dangerous_html && all_raw_html_values_are_static(content) {
+        signals.dangerous_html = false;
+    }
+    if signals.user_controlled_fetch && !ssrf_destination_is_request_derived(content) {
+        signals.user_controlled_fetch = false;
+    }
+}
+
+/// Whether every raw-HTML sink in the file assigns a literal value, and no
+/// other raw-HTML sink shape (`v-html`, dynamic `innerHTML`, a PHP echo of a
+/// superglobal) appears alongside it.
+fn all_raw_html_values_are_static(content: &str) -> bool {
+    if !content.contains(RAW_HTML_SINK_MARKER) {
+        return false;
+    }
+    if has_any_unquoted(
+        &content.replace(RAW_HTML_SINK_MARKER, ""),
+        &DANGEROUS_HTML_PATTERNS,
+    ) {
+        return false;
+    }
+    content
+        .match_indices(RAW_HTML_SINK_MARKER)
+        .all(|(start, _)| {
+            let mut end = (start + RAW_HTML_VALUE_WINDOW).min(content.len());
+            while !content.is_char_boundary(end) {
+                end += 1;
+            }
+            RAW_HTML_STATIC_VALUE_PATTERN.is_match(&content[start..end])
+        })
+}
+
+/// React's raw-HTML prop, the only sink whose value the literal check reads.
+const RAW_HTML_SINK_MARKER: &str = "dangerouslySetInnerHTML";
+
+/// How far past a raw-HTML sink the literal-value check reads, in bytes.
+const RAW_HTML_VALUE_WINDOW: usize = 200;
+
+/// Whether the file's SSRF evidence names a request source.
+///
+/// A direct accessor argument (`fetch(req.query.url)`) proves it on its own.
+/// When every match is the bare-identifier form, the file must also bind that
+/// identifier to a request value; a URL built from a stored credential,
+/// configuration, or a provider's own pagination link is not attacker-chosen.
+fn ssrf_destination_is_request_derived(content: &str) -> bool {
+    let only_bare_identifiers = SSRF_PATTERNS
+        .iter()
+        .flat_map(|pattern| pattern.find_iter(content))
+        .all(|matched| {
+            SSRF_BARE_IDENTIFIER_FETCH_PATTERNS
+                .iter()
+                .any(|bare| bare.is_match(matched.as_str()))
+        });
+    !only_bare_identifiers || has_any(content, &SSRF_REQUEST_SOURCE_ASSIGNMENT_PATTERNS)
+}
+
+/// Whether this file is the authorization server's own endpoint rather than a
+/// client-side callback. It reads the client secret out of the request, or
+/// lives in the OAuth client-registration tree, so there is no browser state
+/// it could have stored and no code verifier of its own to send.
+///
+/// A secret read off an already-parsed `body`/`payload`/`dto` is only counted
+/// when the file actually parses a request body, because those names are
+/// equally natural for the OUTGOING token request a client builds. An OAuth
+/// redirect callback reads query parameters, not a body.
+fn is_oauth_authorization_server_file(file: &SourceFile, content: &str, parses_body: bool) -> bool {
+    let path = file.relative_path.replace('\\', "/").to_ascii_lowercase();
+    format!("/{path}").contains("/oauth-clients/")
+        || has_any(content, &OAUTH_SERVER_REQUEST_SECRET_PATTERNS)
+        || (parses_body && has_any(content, &OAUTH_SERVER_PARSED_BODY_SECRET_PATTERNS))
 }
 
 fn is_js_or_ts_file(path: &str) -> bool {
@@ -542,5 +654,142 @@ mod blank_python_tests {
         let structure = blank_python(src, true);
         assert_eq!(structure.len(), src.len());
         assert!(!structure.contains("request.args['q']"));
+    }
+}
+
+#[cfg(test)]
+mod code_view_tests {
+    use super::{
+        all_raw_html_values_are_static, code_view_for_analysis, is_oauth_authorization_server_file,
+        ssrf_destination_is_request_derived, SourceFile,
+    };
+    use std::path::PathBuf;
+
+    fn source(relative_path: &str, content: &str) -> SourceFile {
+        SourceFile {
+            absolute_path: PathBuf::from("/tmp").join(relative_path),
+            relative_path: relative_path.to_string(),
+            content: content.to_string(),
+            line_count: content.lines().count(),
+        }
+    }
+
+    #[test]
+    fn comments_are_blanked_while_offsets_and_strings_survive() {
+        let file = source(
+            "app/api/settings/route.ts",
+            "export async function GET() {\n  // await prisma.account.findMany();\n  /* dangerouslySetInnerHTML */\n  return Response.json({ path: \"/api/settings\" });\n}\n",
+        );
+        let view = code_view_for_analysis(&file).expect("a commented JavaScript file gets a view");
+        assert_eq!(view.content.len(), file.content.len());
+        assert_eq!(
+            view.content.lines().count(),
+            file.content.lines().count(),
+            "line numbers must survive blanking"
+        );
+        assert!(!view.content.contains("findMany"));
+        assert!(!view.content.contains("dangerouslySetInnerHTML"));
+        // String literals are evidence and stay readable.
+        assert!(view.content.contains("\"/api/settings\""));
+    }
+
+    #[test]
+    fn files_without_comments_and_other_languages_keep_their_own_content() {
+        assert!(
+            code_view_for_analysis(&source("src/plain.ts", "export const value = 1;\n")).is_none()
+        );
+        assert!(code_view_for_analysis(&source(
+            "src/class-import.php",
+            "<?php\n// $wpdb->get_results();\n"
+        ))
+        .is_none());
+    }
+
+    #[test]
+    fn only_literal_raw_html_values_count_as_static() {
+        assert!(all_raw_html_values_are_static(
+            "<style dangerouslySetInnerHTML={{ __html: `* { animation: none }` }} />",
+        ));
+        assert!(!all_raw_html_values_are_static(
+            "<div dangerouslySetInnerHTML={{ __html: user.bio }} />",
+        ));
+        // One dynamic sink beside a literal one keeps the whole file graded.
+        assert!(!all_raw_html_values_are_static(
+            "<style dangerouslySetInnerHTML={{ __html: `a{}` }} />\n<div dangerouslySetInnerHTML={{ __html: user.bio }} />",
+        ));
+        // A different raw-HTML sink shape is never excused by a literal one.
+        assert!(!all_raw_html_values_are_static(
+            "<style dangerouslySetInnerHTML={{ __html: `a{}` }} />\n<div v-html=\"post.body\" />",
+        ));
+    }
+
+    #[test]
+    fn a_bare_fetch_identifier_is_request_derived_only_with_a_binding() {
+        assert!(!ssrf_destination_is_request_derived(
+            "const url = `${credential.account.href}/projects.json`;\nawait fetch(url);",
+        ));
+        assert!(ssrf_destination_is_request_derived(
+            "const url = req.body.url;\nawait fetch(url);",
+        ));
+        // A direct accessor argument proves it without any binding line.
+        assert!(ssrf_destination_is_request_derived(
+            "await fetch(req.query.target);",
+        ));
+    }
+
+    #[test]
+    fn the_authorization_server_side_of_oauth_is_recognised() {
+        let server = source(
+            "app/api/oauth/callback/route.ts",
+            "const body = await request.json();\nconst tokens = await exchange(body.code, body.client_secret);",
+        );
+        assert!(is_oauth_authorization_server_file(
+            &server,
+            &server.content,
+            true
+        ));
+
+        let direct = source(
+            "app/api/oauth/token/route.ts",
+            "const tokens = await exchange(req.body.code, req.body.client_secret);",
+        );
+        assert!(is_oauth_authorization_server_file(
+            &direct,
+            &direct.content,
+            false
+        ));
+
+        let registration = source(
+            "src/modules/oauth-clients/controllers/oauth-flow.controller.ts",
+            "const tokens = await exchange(code);",
+        );
+        assert!(is_oauth_authorization_server_file(
+            &registration,
+            &registration.content,
+            false
+        ));
+
+        let client = source(
+            "app/api/oauth/callback/route.ts",
+            "const tokens = await exchange({ code, client_secret: process.env.SECRET });",
+        );
+        assert!(!is_oauth_authorization_server_file(
+            &client,
+            &client.content,
+            false
+        ));
+
+        // A client callback that builds its OUTGOING token request reads the
+        // secret off a local payload. With no request body parsed, that is not
+        // the authorization server.
+        let outgoing = source(
+            "app/api/oauth/callback/route.ts",
+            "const payload = { code, client_secret: env.SECRET };\nlog(payload.client_secret);",
+        );
+        assert!(!is_oauth_authorization_server_file(
+            &outgoing,
+            &outgoing.content,
+            false
+        ));
     }
 }

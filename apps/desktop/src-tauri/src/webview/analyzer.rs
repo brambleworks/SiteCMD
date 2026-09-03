@@ -1,9 +1,14 @@
 //! Hidden-webview transport for shared accessibility and Web Vitals payloads.
 
 use serde::{Deserialize, Serialize};
+
 use sitecmd_engine::browser::{
-    self, axe_run_script, parse_axe_report, AxeEvidenceCaps, AxeReport, AXE_RESULT_GLOBAL,
+    self, axe_report_from_value, axe_run_script, payload_document_url, AdmittedDocuments,
+    AxeEvidenceCaps, AxeReport, DocumentMismatch, AXE_RESULT_GLOBAL, CWV_RESULT_GLOBAL,
 };
+
+use super::deferred_navigation::{admit_deferred_target, MainFrame};
+use super::title_bridge::{poll_webview, read_bridged_json, BridgeReadError, TitleBridge};
 use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
 use ts_rs::TS;
 
@@ -33,43 +38,121 @@ impl WebviewAnalysis {
             error: Some(error),
         }
     }
+
+    /// The browser ran, but a payload describes a document the analyzer
+    /// never admitted. Nothing is attached: the page grades as
+    /// browser-unavailable rather than as some other document.
+    fn other_document(browser_build: Option<String>, mismatch: DocumentMismatch) -> Self {
+        Self {
+            cwv: None,
+            accessibility: None,
+            browser_ran: true,
+            browser_build,
+            error: Some(mismatch.to_string()),
+        }
+    }
+}
+
+/// The scan was cancelled while the analyzer was running. The webview has been
+/// closed and nothing was measured, so the caller must neither report the run
+/// as complete nor persist a result for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalysisCancelled;
+
+/// Cancellation probe shared with the network scanner.
+pub type CancelCheck = crate::scan_runtime::CancelFn;
+
+/// Await `work`, abandoning it as soon as `cancel` reports the scan was
+/// cancelled. The analyzer's waits are timer polls over the document-title
+/// bridge, so dropping the future costs nothing beyond the reading in flight.
+async fn until_cancelled<T>(
+    cancel: &CancelCheck,
+    work: impl std::future::Future<Output = T>,
+) -> Result<T, AnalysisCancelled> {
+    if cancel() {
+        return Err(AnalysisCancelled);
+    }
+    tokio::pin!(work);
+    loop {
+        tokio::select! {
+            biased;
+            value = &mut work => return Ok(value),
+            _ = tokio::time::sleep(crate::constants::WEBVIEW_POLL_INTERVAL) => {
+                if cancel() {
+                    return Err(AnalysisCancelled);
+                }
+            }
+        }
+    }
 }
 
 /// JavaScript injected immediately after webview creation to observe Core Web Vitals.
 /// Must run early to catch LCP and layout-shift entries during page load.
 const CWV_OBSERVER_SCRIPT: &str = browser::CWV_OBSERVER_SCRIPT;
 const CWV_READ_SCRIPT: &str = browser::CWV_READ_SCRIPT;
+/// Title markers under which the page frames its chunked JSON payloads; the
+/// bridge module documents why a payload never crosses as one title.
+const CWV_TITLE_MARKER: &str = "___SHK_CWV___";
+const AXE_TITLE_MARKER: &str = "___SHK_AXE___";
 
-/// Run Layer 2 analysis: load URL in hidden webview, capture CWV metrics, and
-/// optionally run axe-core accessibility checks.
-#[tracing::instrument(skip(app, url), fields(include_accessibility))]
+/// Run Layer 2 analysis without cancellation, for the standalone analyzer
+/// commands that have no scan request to cancel.
 pub async fn analyze_url(
     app: &AppHandle,
     url: &str,
     include_accessibility: bool,
 ) -> WebviewAnalysis {
+    let never_cancelled = || false;
+    analyze_url_cancellable(app, url, include_accessibility, &never_cancelled)
+        .await
+        .unwrap_or_else(|AnalysisCancelled| {
+            WebviewAnalysis::failed("Browser analysis cancelled".to_string())
+        })
+}
+
+/// Run Layer 2 analysis: load URL in hidden webview, capture CWV metrics, and
+/// optionally run axe-core accessibility checks. Returns `Err` as soon as
+/// `cancel` reports the scan was cancelled, with the webview closed.
+#[tracing::instrument(skip(app, url, cancel), fields(include_accessibility))]
+pub async fn analyze_url_cancellable(
+    app: &AppHandle,
+    url: &str,
+    include_accessibility: bool,
+    cancel: &CancelCheck,
+) -> Result<WebviewAnalysis, AnalysisCancelled> {
+    if cancel() {
+        return Err(AnalysisCancelled);
+    }
     // Resolve and validate the target on the async runtime; the navigation
     // callback runs on the webview thread and must never touch DNS.
     let parsed_url = match url::Url::parse(url) {
         Ok(parsed_url) => parsed_url,
         Err(error) => {
-            return WebviewAnalysis::failed(format!(
+            return Ok(WebviewAnalysis::failed(format!(
                 "Refused to analyze URL: Invalid URL: {error}"
-            ));
+            )));
         }
     };
-    if let Err(error) = crate::network_policy::validate_url(
-        parsed_url.as_str(),
-        crate::network_policy::UrlPolicy::Scan,
+    if let Err(error) = until_cancelled(
+        cancel,
+        crate::network_policy::validate_url(
+            parsed_url.as_str(),
+            crate::network_policy::UrlPolicy::Scan,
+        ),
     )
-    .await
+    .await?
     {
-        return WebviewAnalysis::failed(format!("Refused to analyze URL: {}", error));
+        return Ok(WebviewAnalysis::failed(format!(
+            "Refused to analyze URL: {}",
+            error
+        )));
     }
     let allow_local_dev =
         crate::network_policy::LocalOrigin::classify(&parsed_url).allows_local_dev();
     let (gate, mut deferred) = NavigationGate::new(&parsed_url, allow_local_dev);
     let rules = super::private_network_rules::PrivateNetworkRules { allow_local_dev };
+    let titles = TitleBridge::default();
+    let main_frame = MainFrame::default();
 
     let label = format!("analyzer-{}", chrono::Utc::now().timestamp_millis());
     let blank = url::Url::parse("about:blank").expect("about:blank parses"); // allow-expect: compile-time literal URL
@@ -86,13 +169,36 @@ pub async fn analyze_url(
         // the equivalent isolated mode on supported Windows/Linux runtimes.
         .incognito(true)
         .initialization_script(CWV_OBSERVER_SCRIPT)
+        // WebRTC and WebTransport bypass the resource loader the subresource
+        // rules sit on, so their constructors are removed in every frame
+        // before the page's own scripts run.
+        .initialization_script_for_all_frames(super::private_network_rules::WEBRTC_LOCKDOWN_SCRIPT)
+        // Every read-back from the page arrives as a document title; see
+        // TitleBridge for why the window title cannot be polled instead.
+        .on_document_title_changed({
+            let titles = titles.clone();
+            move |_webview, title| titles.record(title)
+        })
+        // The main frame's commits decide whether a deferred navigation is a
+        // redirect hop to follow or a subframe to leave where it is.
+        .on_page_load({
+            let main_frame = main_frame.clone();
+            move |_webview, payload| main_frame.record(payload.event(), payload.url())
+        })
         .on_navigation({
             let gate = gate.clone();
             move |target| {
-                // Apply public redirect policy to every top-level navigation. Tauri
-                // does not expose external subresource interception here; the
-                // platform rules from install_private_network_rules cover
-                // subresources on macOS and Windows.
+                // Apply public redirect policy to every navigation the webview
+                // makes. The platform hook is frame-blind: WebKit's policy
+                // delegate and WebView2's NavigationStarting hand a subframe's
+                // navigation to this same closure, so an iframe's URL arrives
+                // here looking exactly like a redirect hop. The driver tells
+                // them apart by main-frame commit state; see
+                // deferred_navigation.rs. Tauri does not expose external
+                // subresource interception here; the platform rules from
+                // install_private_network_rules block private-network
+                // subresources on macOS and Windows, and the fallback arm
+                // fails the browser layer closed everywhere else.
                 let allowed = gate.decide(target);
                 if !allowed {
                     tracing::warn!(
@@ -112,47 +218,113 @@ pub async fn analyze_url(
         .build()
     {
         Ok(w) => w,
-        Err(e) => return WebviewAnalysis::failed(format!("Failed to create webview: {}", e)),
+        Err(e) => {
+            return Ok(WebviewAnalysis::failed(format!(
+                "Failed to create webview: {}",
+                e
+            )))
+        }
     };
     let _ = webview.hide();
 
+    // One close covers every outcome from here, cancellation included.
+    let analysis = drive_analyzer(
+        &webview,
+        &titles,
+        &gate,
+        &main_frame,
+        &mut deferred,
+        rules,
+        parsed_url,
+        include_accessibility,
+        cancel,
+    )
+    .await;
+    let _ = webview.close();
+    analysis
+}
+
+/// Drive one prepared analyzer webview from network-rule install through axe.
+/// The caller owns the webview and closes it on every outcome, so cancellation
+/// here never leaves a hidden window behind.
+async fn drive_analyzer(
+    webview: &tauri::WebviewWindow,
+    titles: &TitleBridge,
+    gate: &NavigationGate,
+    main_frame: &MainFrame,
+    deferred: &mut tokio::sync::mpsc::UnboundedReceiver<url::Url>,
+    rules: super::private_network_rules::PrivateNetworkRules,
+    target: url::Url,
+    include_accessibility: bool,
+    cancel: &CancelCheck,
+) -> Result<WebviewAnalysis, AnalysisCancelled> {
     // Subresource rules must be live before the first byte of the target
     // loads, so the webview starts blank and navigates only once the platform
     // filter reports it is installed. A failed install fails the browser layer
     // closed rather than scanning with the user's LAN position exposed.
     let (ready_sender, ready_receiver) = tokio::sync::oneshot::channel::<bool>();
     if let Err(error) = super::private_network_rules::install_private_network_rules(
-        &webview,
+        webview,
         rules,
         super::private_network_rules::RulesReady::new(ready_sender),
     ) {
-        let _ = webview.close();
-        return WebviewAnalysis::failed(format!(
+        return Ok(WebviewAnalysis::failed(format!(
             "Failed to install analyzer network rules: {error}"
-        ));
+        )));
     }
-    match tokio::time::timeout(crate::constants::WEBVIEW_RULES_INSTALL_WAIT, ready_receiver).await {
+    match until_cancelled(
+        cancel,
+        tokio::time::timeout(crate::constants::WEBVIEW_RULES_INSTALL_WAIT, ready_receiver),
+    )
+    .await?
+    {
         Ok(Ok(true)) => {}
         _ => {
-            let _ = webview.close();
-            return WebviewAnalysis::failed(
-                "Analyzer private-network rules are unavailable".to_string(),
-            );
+            return Ok(WebviewAnalysis::failed(
+                super::private_network_rules::rules_unavailable_reason().to_string(),
+            ));
         }
     }
-    if let Err(error) = webview.navigate(parsed_url) {
-        let _ = webview.close();
-        return WebviewAnalysis::failed(format!("Failed to navigate analyzer: {error}"));
+    // A hidden page is timer-throttled like a background tab, which slows
+    // axe and the page itself; a failure here only costs speed.
+    if let Err(error) = super::hidden_page_timers::unthrottle_hidden_page_timers(webview) {
+        tracing::warn!("Analyzer keeps hidden-page timer throttling: {error}");
+    }
+    let mut admitted = AdmittedDocuments::new(&target);
+    if let Err(error) = webview.navigate(target) {
+        return Ok(WebviewAnalysis::failed(format!(
+            "Failed to navigate analyzer: {error}"
+        )));
     }
 
-    if let Err(error) = wait_for_page_load(&webview, &gate, &mut deferred).await {
-        let _ = webview.close();
-        return WebviewAnalysis::failed(error);
+    if let Err(error) = until_cancelled(
+        cancel,
+        wait_for_page_load(webview, titles, gate, main_frame, deferred, &mut admitted),
+    )
+    .await?
+    {
+        return Ok(WebviewAnalysis::failed(error));
     }
-    let browser_build = collect_browser_build(&webview).await;
+    let browser_build = until_cancelled(cancel, collect_browser_build(webview, titles)).await?;
+    // The gate judges a navigation by host, so a same-host scheme or port
+    // change is allowed inline and never arrives as a deferred hop. The
+    // commit says which transport the analyzer really loaded; it can only
+    // refine a host the runtime already admitted, never add one.
+    if let Some(committed) = main_frame.committed() {
+        admitted.observe_commit(&committed);
+    }
 
     // Collect CWV data before running axe (axe manipulates the DOM which could affect CLS)
-    let cwv = collect_cwv(&webview).await;
+    let cwv = until_cancelled(cancel, collect_cwv(webview, titles)).await?;
+    // Every payload names the document it was read from; one from a document
+    // the analyzer never admitted grades nothing, and there is no point
+    // spending the axe budget on it either.
+    if let Some((_, document_url)) = &cwv {
+        if let Err(mismatch) = admitted.verify(document_url.as_deref()) {
+            return Ok(WebviewAnalysis::other_document(browser_build, mismatch));
+        }
+    }
+    let cwv = cwv.map(|(cwv, _)| cwv);
     if let Some(ref c) = cwv {
         tracing::info!(
             "CWV measured - LCP: {:?}ms, CLS: {:?}, FCP: {:?}ms, TTFB: {:?}ms",
@@ -168,41 +340,26 @@ pub async fn analyze_url(
     // Accessibility is optional. We still keep CWV collection for regular web
     // scans so Dashboard Web Vitals isn't gated behind the paid deep-scan.
     let (accessibility, error) = if include_accessibility {
-        match run_axe_analysis(&webview).await {
-            Ok(report) => (Some(report), None),
+        match until_cancelled(cancel, run_axe_analysis(webview, titles)).await? {
+            Ok((report, document_url)) => match admitted.verify(document_url.as_deref()) {
+                Ok(()) => (Some(report), None),
+                Err(mismatch) => {
+                    return Ok(WebviewAnalysis::other_document(browser_build, mismatch))
+                }
+            },
             Err(error) => (None, Some(error)),
         }
     } else {
         (None, None)
     };
 
-    let _ = webview.close();
-
-    WebviewAnalysis {
+    Ok(WebviewAnalysis {
         cwv,
         accessibility,
         browser_ran: true,
         browser_build,
         error,
-    }
-}
-
-/// Poll immediately and then at `interval` until a value arrives or `cap` elapses.
-async fn poll_webview<T>(
-    interval: std::time::Duration,
-    cap: std::time::Duration,
-    mut probe: impl FnMut() -> Option<T>,
-) -> Option<T> {
-    let deadline = tokio::time::Instant::now() + cap;
-    loop {
-        if let Some(value) = probe() {
-            return Some(value);
-        }
-        if tokio::time::Instant::now() + interval > deadline {
-            return None;
-        }
-        tokio::time::sleep(interval).await;
-    }
+    })
 }
 
 const READY_TITLE_PREFIX: &str = "___SHK_READY___";
@@ -214,15 +371,20 @@ const BROWSER_UA_TITLE_PREFIX: &str = "___SHK_BROWSER_UA___";
 const BROWSER_UA_PROBE_SCRIPT: &str =
     "document.title = '___SHK_BROWSER_UA___' + navigator.userAgent;";
 
-/// Wait for page completion while admitting deferred redirect hops, then allow
-/// a short late-metric settle within the cap. Each deferred hop is
-/// DNS-validated on this runtime and re-navigated; a hop that cannot be
-/// admitted, and the hop past `MAX_REDIRECT_HOPS`, end the wait with the
-/// failure the analysis reports.
+/// Wait for page completion while handling deferred navigations, then allow
+/// a short late-metric settle within the cap. A deferred target before the
+/// main frame commits is a redirect hop: DNS-validated on this runtime,
+/// recorded in `admitted`, and re-navigated; a hop that cannot be admitted,
+/// and the hop past `MAX_REDIRECT_HOPS`, end the wait with the failure the
+/// analysis reports. A deferred target after commit came from a subframe or
+/// the page itself and never moves the main frame.
 async fn wait_for_page_load(
     webview: &tauri::WebviewWindow,
+    titles: &TitleBridge,
     gate: &NavigationGate,
+    main_frame: &MainFrame,
     deferred: &mut tokio::sync::mpsc::UnboundedReceiver<url::Url>,
+    admitted: &mut AdmittedDocuments,
 ) -> Result<(), String> {
     // Each probe first reads the title (picking up the previous iteration's
     // eval), then issues the next readiness eval; eval results can't be read
@@ -230,10 +392,8 @@ async fn wait_for_page_load(
     let deadline = tokio::time::Instant::now() + crate::constants::WEBVIEW_PAGE_LOAD_WAIT;
     let mut hops = 0usize;
     let ready = loop {
-        if let Ok(title) = webview.title() {
-            if title.starts_with(READY_TITLE_PREFIX) {
-                break true;
-            }
+        if titles.read_prefixed(READY_TITLE_PREFIX).is_some() {
+            break true;
         }
         let _ = webview.eval(READY_PROBE_SCRIPT);
         if tokio::time::Instant::now() + crate::constants::WEBVIEW_POLL_INTERVAL > deadline {
@@ -243,9 +403,16 @@ async fn wait_for_page_load(
             _ = tokio::time::sleep(crate::constants::WEBVIEW_POLL_INTERVAL) => {}
             hop = deferred.recv() => match hop {
                 Some(hop) => {
-                    let outcome = follow_deferred_hop(gate, hop, &mut hops, &mut |target| {
-                        let _ = webview.navigate(target);
-                    })
+                    let outcome = admit_deferred_target(
+                        gate,
+                        main_frame,
+                        hop,
+                        &mut hops,
+                        admitted,
+                        &mut |target| {
+                            let _ = webview.navigate(target);
+                        },
+                    )
                     .await;
                     if let Some(failure) = outcome.scan_failure() {
                         return Err(failure);
@@ -266,45 +433,60 @@ async fn wait_for_page_load(
     Ok(())
 }
 
-async fn collect_browser_build(webview: &tauri::WebviewWindow) -> Option<String> {
+async fn collect_browser_build(
+    webview: &tauri::WebviewWindow,
+    titles: &TitleBridge,
+) -> Option<String> {
     if webview.eval(BROWSER_UA_PROBE_SCRIPT).is_err() {
         return None;
     }
     let user_agent = poll_webview(
         crate::constants::WEBVIEW_POLL_INTERVAL,
         crate::constants::WEBVIEW_CWV_READ_TIMEOUT,
-        || {
-            webview
-                .title()
-                .ok()?
-                .strip_prefix(BROWSER_UA_TITLE_PREFIX)
-                .map(str::to_string)
-        },
+        || titles.read_prefixed(BROWSER_UA_TITLE_PREFIX),
     )
     .await?;
     browser_build_from_user_agent(crate::core::engine_release::browser_engine(), &user_agent)
 }
 
-/// Read CWV data from the webview via document.title polling
-async fn collect_cwv(webview: &tauri::WebviewWindow) -> Option<CoreWebVitals> {
+/// Read CWV data from the webview via the document-title bridge, with the
+/// `document_url` the payload recorded so the caller can verify which
+/// document the sample describes.
+async fn collect_cwv(
+    webview: &tauri::WebviewWindow,
+    titles: &TitleBridge,
+) -> Option<(CoreWebVitals, Option<String>)> {
     if let Err(e) = webview.eval(CWV_READ_SCRIPT) {
         tracing::warn!("Failed to read CWV data: {}", e);
         return None;
     }
 
-    let json = poll_webview(
+    let json = match read_bridged_json(
+        webview,
+        titles,
+        CWV_RESULT_GLOBAL,
+        CWV_TITLE_MARKER,
         crate::constants::WEBVIEW_POLL_INTERVAL,
         crate::constants::WEBVIEW_CWV_READ_TIMEOUT,
-        || {
-            let title = webview.title().ok()?;
-            title
-                .strip_prefix("___SHK_CWV___")
-                .map(|json_str| json_str.to_string())
-        },
     )
-    .await?;
+    .await
+    {
+        Ok(json) => json,
+        Err(error) => {
+            tracing::warn!("Failed to read CWV data: {}", error);
+            return None;
+        }
+    };
 
-    match serde_json::from_str::<CoreWebVitals>(&json) {
+    let value: serde_json::Value = match serde_json::from_str(&json) {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::warn!("Failed to parse CWV JSON: {} - raw: {}", e, json);
+            return None;
+        }
+    };
+    let document_url = payload_document_url(&value);
+    match serde_json::from_value::<CoreWebVitals>(value) {
         Ok(cwv) => {
             // Return Some only if at least one metric was captured
             if cwv.lcp_ms.is_some()
@@ -314,7 +496,7 @@ async fn collect_cwv(webview: &tauri::WebviewWindow) -> Option<CoreWebVitals> {
                 || cwv.observed_long_task_blocking_ms.is_some()
                 || cwv.js_error_count.is_some()
             {
-                return Some(cwv);
+                return Some((cwv, document_url));
             }
         }
         Err(e) => {
@@ -325,7 +507,12 @@ async fn collect_cwv(webview: &tauri::WebviewWindow) -> Option<CoreWebVitals> {
     None
 }
 
-async fn run_axe_analysis(webview: &tauri::WebviewWindow) -> Result<AxeReport, String> {
+/// Run axe in the main frame and read its report back, with the
+/// `document_url` the payload recorded.
+async fn run_axe_analysis(
+    webview: &tauri::WebviewWindow,
+    titles: &TitleBridge,
+) -> Result<(AxeReport, Option<String>), String> {
     // Inject axe before its runner; the payload also tolerates deferred script
     // evaluation.
     if let Err(e) = webview.eval(browser::AXE_CORE_SCRIPT) {
@@ -335,51 +522,48 @@ async fn run_axe_analysis(webview: &tauri::WebviewWindow) -> Result<AxeReport, S
         return Err(format!("Failed to run axe: {}", e));
     }
 
-    // External pages cannot use __TAURI__, so poll axe results through a
-    // document-title bridge while complex pages finish analysis.
-    let title_script = format!(
-        "document.title = '___SHK___' + (JSON.stringify(window.{AXE_RESULT_GLOBAL} || null))"
-    );
+    // External pages cannot use __TAURI__, so the report crosses the
+    // document-title bridge in chunks once axe parks it in its global.
     let started = std::time::Instant::now();
-    let payload = poll_webview(
+    let payload = read_bridged_json(
+        webview,
+        titles,
+        AXE_RESULT_GLOBAL,
+        AXE_TITLE_MARKER,
         crate::constants::AXE_POLL_INTERVAL,
         crate::constants::AXE_RESULT_TIMEOUT,
-        || {
-            if let Ok(title) = webview.title() {
-                if let Some(json) = title.strip_prefix("___SHK___") {
-                    if json != "null" && serde_json::from_str::<serde_json::Value>(json).is_ok() {
-                        return Some(json.to_string());
-                    }
-                }
-            }
-            let _ = webview.eval(&title_script);
-            None
-        },
     )
-    .await;
-
-    let Some(payload) = payload else {
-        return Err(format!(
+    .await
+    .map_err(|error| match error {
+        BridgeReadError::NotReady => format!(
             "Axe-core timed out after {} seconds",
             crate::constants::AXE_RESULT_TIMEOUT.as_secs()
-        ));
-    };
+        ),
+        other => format!("Axe-core results could not be read from the analyzer: {other}"),
+    })?;
 
-    let report = parse_axe_report(&payload)?;
+    let value: serde_json::Value = serde_json::from_str(&payload)
+        .map_err(|error| format!("axe payload was not valid JSON: {error}"))?;
+    let document_url = payload_document_url(&value);
+    let report = axe_report_from_value(value)?;
     tracing::info!(
         "Axe-core completed after {}ms: {} violations, {} rules executed",
         started.elapsed().as_millis(),
         report.violations.len(),
         report.executed_rules().len()
     );
-    Ok(report)
+    Ok((report, document_url))
 }
 
-/// Decides top-level navigations on the webview thread without DNS. IP
-/// literals and local names are judged inline; a hostname is allowed only
-/// once `analyze_url` has resolved and validated it on the async runtime,
-/// so an unknown host is deferred through the channel, refused for now, and
-/// re-navigated after validation.
+/// Decides navigations on the webview thread without DNS. The platform hook
+/// this sits behind is frame-blind, so a subframe's navigation reaches the
+/// gate the same way a top-level one does; the gate judges the URL and the
+/// driver decides what a deferred URL means (see `deferred_navigation.rs`:
+/// before the main frame commits it is a redirect hop to follow, after commit
+/// it is a subframe or a page-initiated navigation and the main frame stays
+/// put). IP literals and local names are judged inline; a hostname is allowed
+/// only once the async runtime has resolved and validated it, so an unknown
+/// host is deferred through the channel and refused for now.
 pub(crate) struct NavigationGate {
     allow_local_dev: bool,
     allowed_hosts: std::sync::Mutex<std::collections::HashSet<String>>,
@@ -462,86 +646,6 @@ fn normalized_domain(url: &url::Url) -> Option<String> {
     match url.host()? {
         url::Host::Domain(domain) => Some(domain.trim_end_matches('.').to_ascii_lowercase()),
         url::Host::Ipv4(_) | url::Host::Ipv6(_) => None,
-    }
-}
-
-/// `network_policy` reports a failed lookup with this prefix; every other
-/// error it returns is a policy refusal.
-const RESOLUTION_FAILURE_PREFIX: &str = "Could not resolve URL host";
-
-/// What the drain did with one deferred hop.
-#[derive(Debug, PartialEq, Eq)]
-enum HopOutcome {
-    Followed,
-    /// The hop passed the inline checks but resolved to an address the policy
-    /// refuses, so a public-looking hostname pointed into a private range.
-    RefusedByPolicy,
-    /// The hop's host did not resolve, so it can never be validated.
-    Unresolvable,
-    /// The cross-host redirect chain reached `MAX_REDIRECT_HOPS`.
-    HopLimitReached,
-}
-
-impl HopOutcome {
-    /// The analysis failure this outcome reports, or `None` when the hop was
-    /// followed. A hop the runtime cannot admit leaves the analyzer unable to
-    /// reach its target, so the scan fails closed instead of reporting a
-    /// completed browser run with missing metrics.
-    fn scan_failure(&self) -> Option<String> {
-        match self {
-            Self::Followed => None,
-            Self::RefusedByPolicy => Some(
-                "Analyzer refused a redirect that resolved to a private network address"
-                    .to_string(),
-            ),
-            Self::Unresolvable => Some("Analyzer could not resolve a redirect target".to_string()),
-            Self::HopLimitReached => Some(format!(
-                "Analyzer stopped after {} cross-host redirects",
-                crate::constants::MAX_REDIRECT_HOPS
-            )),
-        }
-    }
-}
-
-/// Whether a refused admission was a failed lookup or a policy refusal.
-fn classify_admission_error(error: &str) -> HopOutcome {
-    if error.starts_with(RESOLUTION_FAILURE_PREFIX) {
-        HopOutcome::Unresolvable
-    } else {
-        HopOutcome::RefusedByPolicy
-    }
-}
-
-/// Validate one deferred hop on the async runtime and re-navigate to it. The
-/// hop counter is shared across the whole page load, so a chain of cross-host
-/// redirects cannot outlive `MAX_REDIRECT_HOPS`.
-async fn follow_deferred_hop(
-    gate: &NavigationGate,
-    hop: url::Url,
-    hops: &mut usize,
-    navigate: &mut impl FnMut(url::Url),
-) -> HopOutcome {
-    *hops += 1;
-    if *hops > crate::constants::MAX_REDIRECT_HOPS {
-        tracing::warn!(
-            "Analyzer stopped following cross-host redirects after {} hops",
-            *hops - 1
-        );
-        return HopOutcome::HopLimitReached;
-    }
-    match gate.admit_after_dns(&hop).await {
-        Ok(()) => {
-            navigate(hop);
-            HopOutcome::Followed
-        }
-        Err(error) => {
-            tracing::warn!(
-                "Analyzer refused navigation to {}: {}",
-                crate::log_sanitizer::log_safe_url_target(hop.as_str()),
-                error
-            );
-            classify_admission_error(&error)
-        }
     }
 }
 

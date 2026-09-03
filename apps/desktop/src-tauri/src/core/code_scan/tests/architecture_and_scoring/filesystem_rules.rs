@@ -163,3 +163,72 @@ fn audit_project_rejects_folder_without_app_source_or_project_markers() {
         "unexpected error: {error}"
     );
 }
+
+#[test]
+fn drupal_scaffold_files_are_recognized_by_site_location_and_name() {
+    assert!(is_drupal_scaffold_file(
+        "web/sites/default/default.settings.php"
+    ));
+    assert!(is_drupal_scaffold_file(
+        "web/sites/default/default.services.yml"
+    ));
+    assert!(is_drupal_scaffold_file(
+        "web/sites/example.settings.local.php"
+    ));
+    assert!(is_drupal_scaffold_file("web/sites/example.sites.php"));
+    assert!(is_drupal_scaffold_file(
+        "docroot/sites/default/default.settings.php"
+    ));
+
+    // The project's own settings, and a same-named file outside sites/, stay in scope.
+    assert!(!is_drupal_scaffold_file("web/sites/default/settings.php"));
+    assert!(!is_drupal_scaffold_file(
+        "web/sites/default/settings.ddev.php"
+    ));
+    assert!(!is_drupal_scaffold_file("web/sites/default/services.yml"));
+    assert!(!is_drupal_scaffold_file("config/default.settings.php"));
+}
+
+#[test]
+fn drupal_scaffold_settings_file_is_not_analyzed_as_first_party_source() {
+    let temp = TempDir::new().unwrap();
+    let mut big = String::from("<?php\n// Drupal-style settings documentation.\n");
+    for i in 0..920 {
+        big.push_str(&format!("// option {}\n", i));
+    }
+    big.push_str("$databases['default']['default'] = ['driver' => 'mysql'];\n");
+    big.push_str("$pdo = new PDO('mysql:host=localhost');\n");
+    write_file(
+        temp.path(),
+        "composer.json",
+        r#"{ "name": "acme/site", "require": { "drupal/core-recommended": "^11.0" } }"#,
+    );
+    write_file(temp.path(), "web/sites/default/default.settings.php", &big);
+    // Negative control: the same content in the project's own module is still graded.
+    write_file(
+        temp.path(),
+        "web/modules/custom/acme/src/Service/Big.php",
+        &big,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let scaffold_findings: Vec<&str> = report
+        .issues
+        .iter()
+        .filter(|issue| issue.relative_path == "web/sites/default/default.settings.php")
+        .map(|issue| issue.id.as_str())
+        .collect();
+    assert!(
+        scaffold_findings.is_empty(),
+        "drupal/core scaffolds default.settings.php into every site, got {:?}",
+        scaffold_findings
+    );
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.id == "oversized-module:web/modules/custom/acme/src/Service/Big.php"),
+        "negative control: first-party module code keeps its size finding, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}

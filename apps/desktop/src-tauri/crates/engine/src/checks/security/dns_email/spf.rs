@@ -124,10 +124,14 @@ impl MissingSpf {
 
     pub fn evaluate(self, mx: &DnsOutcome<Vec<MxRecord>>) -> Vec<CheckResult> {
         let has_mx = has_mx_from(mx);
-        let mx_note = if has_mx == Some(true) {
-            " This domain has MX records, so it handles mail and is a natural spoofing target."
-        } else {
-            ""
+        let mx_note = match has_mx {
+            Some(true) => {
+                " This domain has MX records, so it handles mail and is a natural spoofing target."
+            }
+            Some(false) => {
+                " This domain publishes no MX records, so it shows no inbound mail setup; the null record `v=spf1 -all` is still the right policy for a domain that sends no mail, because it lets receivers reject anyone using the domain in the SMTP envelope identity."
+            }
+            None => "",
         };
         vec![CheckResult {
             check_id: CHECK_ID.into(),

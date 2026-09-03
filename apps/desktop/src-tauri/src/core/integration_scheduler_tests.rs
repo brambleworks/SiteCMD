@@ -478,28 +478,24 @@ fn github_context_malformed_repo_spec_is_not_configured() {
     }
 }
 
+// Adapters poll with the user's own credentials against the user's own
+// account, so cadence costs us nothing at any tier. Tiers entitle connected
+// services and catalog access, never local features - this pins the scheduler
+// to that boundary so a Free-tier throttle cannot creep back in.
 #[test]
-fn free_cadence_is_six_times_base() {
-    use std::time::Duration;
-    let base = Duration::from_secs(60);
-    assert_eq!(
-        tier_adjusted_cadence(base, crate::licensing::config::Tier::Free),
-        Duration::from_secs(360)
-    );
-}
-
-#[test]
-fn paid_cadence_is_unchanged() {
-    use std::time::Duration;
-    let base = Duration::from_secs(3600);
-    assert_eq!(
-        tier_adjusted_cadence(base, crate::licensing::config::Tier::Core),
-        base
-    );
-    assert_eq!(
-        tier_adjusted_cadence(base, crate::licensing::config::Tier::Pro),
-        base
-    );
+fn scheduler_cadence_is_not_tier_gated() {
+    let source = include_str!("integration_scheduler.rs");
+    for marker in [
+        "FREE_CADENCE_MULTIPLIER",
+        "tier_adjusted_cadence",
+        "get_effective_tier",
+        "Tier::Free",
+    ] {
+        assert!(
+            !source.contains(marker),
+            "{marker} reintroduces tier gating into adapter polling cadence"
+        );
+    }
 }
 
 // credentials_from_configs: a plaintext SQLite credential left by a failed

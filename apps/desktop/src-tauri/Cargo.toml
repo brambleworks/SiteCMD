@@ -66,6 +66,10 @@ log = "0.4"
 tracing = { version = "0.1", features = ["log"] }
 tauri = { version = "2.11.0", features = ["tray-icon"], optional = true }
 tauri-plugin-log = { version = "2", optional = true }
+# `gzip`/`brotli` let ordinary traffic negotiate response compression; the
+# limited body readers count decoded bytes so the caps still bound what a
+# compressed response may expand into. `deflate` and `zstd` stay off: origins
+# implement deflate inconsistently, and zstd would add a C library to the build.
 reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "rustls-no-provider",
@@ -75,6 +79,8 @@ reqwest = { version = "0.13", default-features = false, features = [
     "charset",
     "http2",
     "system-proxy",
+    "gzip",
+    "brotli",
 ] }
 tokio = { version = "1", features = ["full"] }
 thread-priority = "3"
@@ -153,6 +159,9 @@ windows = { version = "0.61", optional = true, features = ["Win32_System_Com"] }
 
 [dev-dependencies]
 tauri = { version = "2.11.0", features = ["test"] }
+# Builds gzip fixtures for the HTTP-client compression tests. Already in the
+# tree as reqwest's gzip decoder, so it adds nothing to the dependency graph.
+flate2 = "1"
 # Enables deterministic paused-time scheduler tests.
 tokio = { version = "1", features = ["test-util"] }
 criterion = { version = "0.8", features = ["html_reports"] }

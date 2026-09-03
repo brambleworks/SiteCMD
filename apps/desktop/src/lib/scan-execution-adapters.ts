@@ -299,15 +299,18 @@ async function loadSessionHistory(
   return deriveScanPresentationHistory(executions).sessions;
 }
 
+// `runId` narrows the execution in SQL, so the response carries that run and
+// no other. Picking it back out here would mean the sibling runs were queried,
+// serialized, and parsed for nothing.
 async function loadWebScanDetail(runId: number): Promise<ScanResult | null> {
   const detail = await getScanExecutionDetail({ runId });
-  const run = detail?.runs.find((candidate) => candidate.id === runId);
+  const [run] = detail?.runs ?? [];
   return detail && run?.source === "web_scan" ? webResultFromExecutionRun(detail, run) : null;
 }
 
 async function loadCodeScanDetail(runId: number): Promise<CodeScanResult | null> {
   const detail = await getScanExecutionDetail({ runId });
-  const run = detail?.runs.find((candidate) => candidate.id === runId);
+  const [run] = detail?.runs ?? [];
   return detail && run?.source === "code_scan" ? codeResultFromExecutionRun(detail, run) : null;
 }
 

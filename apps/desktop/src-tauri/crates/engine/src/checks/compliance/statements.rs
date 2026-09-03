@@ -1,3 +1,4 @@
+use crate::checks::compliance::{anchor_href_segment_matches, content_text_lower};
 use crate::checks::{Check, CheckResult, CheckStatus, PageContext, ScanCategory, Severity};
 
 /// Check for CCPA "Do Not Sell" notice
@@ -11,14 +12,16 @@ impl Check for CcpaNoticeCheck {
         ScanCategory::Compliance
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
-        let lower = ctx.body_lower();
+        // Only delivered content counts: a notice inside a comment, script, or
+        // stylesheet is not one a visitor can act on.
+        let content = content_text_lower(ctx.body_lower());
 
-        let has_ccpa = lower.contains("do not sell")
-            || lower.contains("do not share my personal")
-            || lower.contains("ccpa")
-            || lower.contains("california consumer privacy")
-            || lower.contains("california privacy")
-            || lower.contains("opt-out of sale");
+        let has_ccpa = content.contains("do not sell")
+            || content.contains("do not share my personal")
+            || content.contains("ccpa")
+            || content.contains("california consumer privacy")
+            || content.contains("california privacy")
+            || content.contains("opt-out of sale");
 
         vec![CheckResult {
             check_id: self.id().into(),
@@ -85,13 +88,21 @@ impl Check for AccessibilityStatementCheck {
         ScanCategory::Compliance
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
-        let lower = ctx.body_lower();
+        let content = content_text_lower(ctx.body_lower());
 
-        let has_statement = lower.contains("accessibility statement")
-            || lower.contains("accessibility policy")
-            || lower.contains("accessibility commitment")
-            || lower.contains("/accessibility")
-            || (lower.contains("wcag") && lower.contains("accessibility"));
+        // The statement itself, named in visible text or linked by path. A
+        // WCAG mention alone is a reference to a standard, not a statement.
+        let has_statement = content.contains("accessibility statement")
+            || content.contains("accessibility policy")
+            || content.contains("accessibility commitment")
+            || anchor_href_segment_matches(&content, |segment| {
+                matches!(
+                    segment,
+                    "accessibility" | "accessibility-statement" | "accessibility-policy"
+                )
+            });
+        let wcag_reference_only =
+            !has_statement && content.contains("wcag") && content.contains("accessibility");
 
         vec![CheckResult {
             check_id: self.id().into(),
@@ -103,8 +114,10 @@ impl Check for AccessibilityStatementCheck {
             },
             description: if has_statement {
                 "Accessibility statement or link detected.".into()
+            } else if wcag_reference_only {
+                "The page content references WCAG, but no accessibility statement, policy, or link to one was found: a standards reference is not a statement. A statement can document actual conformance, known barriers, and a support path. Some public-sector, procurement, and covered-service regimes require accessibility information, but the required document and content depend on the organization and jurisdiction.".into()
             } else {
-                "No accessibility statement marker was found in the scanned page source. A statement can document actual conformance, known barriers, and a support path. Some public-sector, procurement, and covered-service regimes require accessibility information, but the required document and content depend on the organization and jurisdiction.".into()
+                "No accessibility statement marker was found in the scanned page content. A statement can document actual conformance, known barriers, and a support path. Some public-sector, procurement, and covered-service regimes require accessibility information, but the required document and content depend on the organization and jurisdiction.".into()
             },
             status: if has_statement {
                 CheckStatus::Pass
@@ -124,6 +137,7 @@ impl Check for AccessibilityStatementCheck {
             },
             raw_data: Some(serde_json::json!({
                 "accessibility_statement_marker_detected": has_statement,
+                "wcag_reference_only": wcag_reference_only,
                 "separate_statement_url_probed": false,
                 "applicability_verified": false,
             })),
@@ -194,10 +208,47 @@ mod tests {
     }
 
     #[test]
-    fn wcag_mention_with_accessibility_context_counts_as_statement() {
-        let body = "<html><body><p>This site targets WCAG 2.2 AA accessibility conformance.</p></body></html>";
+    fn a_wcag_mention_is_a_standards_reference_not_a_statement() {
+        let body = "<html><body><p>Our WCAG checklist covers accessibility basics for the kitchen display.</p></body></html>";
+        let results = AccessibilityStatementCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert_eq!(
+            results[0].confidence,
+            crate::checks::IssueConfidence::NeedsReview
+        );
+        assert!(
+            results[0]
+                .description
+                .contains("a standards reference is not a statement"),
+            "{}",
+            results[0].description
+        );
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["wcag_reference_only"],
+            true
+        );
+    }
+
+    #[test]
+    fn a_footer_statement_link_passes_on_its_href_segment() {
+        let body = r#"<html><body><footer><a href="/legal/accessibility">Our commitment</a></footer></body></html>"#;
         let results = AccessibilityStatementCheck.run(&ctx_with_body(body));
         assert_eq!(results[0].status, CheckStatus::Pass);
+        assert_eq!(results[0].confidence, crate::checks::IssueConfidence::High);
+    }
+
+    #[test]
+    fn a_commented_out_statement_link_is_not_a_statement() {
+        let body = r#"<html><body><!-- <a href="/accessibility">Accessibility statement</a> --></body></html>"#;
+        let results = AccessibilityStatementCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+    }
+
+    #[test]
+    fn a_commented_out_do_not_sell_link_is_not_a_california_notice() {
+        let body = r#"<html><body><!-- <a href="/ccpa">Do Not Sell My Personal Information</a> --></body></html>"#;
+        let results = CcpaNoticeCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
     }
 
     #[test]

@@ -45,7 +45,11 @@ pub(crate) async fn scan_multi_for_execution(
     let started_at = chrono::Utc::now().timestamp_millis();
     let start = std::time::Instant::now();
     let focus = scan_type.unwrap_or_default();
-    let (site_id, multi_project_id, session_id) = {
+    // The session checks need the site's stored sitemap URL, which is read here
+    // rather than at the point of use: it is one column off the row this
+    // closure already resolves, and a separate read would be another blocking
+    // database round trip for a value the scan can settle up front.
+    let (site_id, multi_project_id, session_id, stored_sitemap_url) = {
         let db = db.clone();
         let base_url = base_url.clone();
         let selected_page_urls = urls.clone();
@@ -56,6 +60,7 @@ pub(crate) async fn scan_multi_for_execution(
                 None => db.get_or_create_site(&base_url),
             }
             .map_err(sanitize_error)?;
+            let stored_sitemap_url = db.get_sitemap_url(site_id).unwrap_or(None);
             let multi_project_id = match project_id {
                 Some(project_id) => Some(project_id),
                 None => db
@@ -74,7 +79,7 @@ pub(crate) async fn scan_multi_for_execution(
                     started_at,
                 )
                 .map_err(sanitize_error)?;
-            Ok((site_id, multi_project_id, session_id))
+            Ok((site_id, multi_project_id, session_id, stored_sitemap_url))
         })
         .await??
     };
@@ -96,6 +101,11 @@ pub(crate) async fn scan_multi_for_execution(
             None => None,
         };
 
+        // Sites link the same stylesheets from every page. One store per scan
+        // execution, dropped with this future, turns twenty pages sharing four
+        // stylesheets into four downloads instead of eighty.
+        let stylesheet_cache = Arc::new(crate::checks::polish::StylesheetCache::new());
+
         let loop_outcome = run_page_loop(
             &urls,
             session_id,
@@ -113,6 +123,7 @@ pub(crate) async fn scan_multi_for_execution(
                 let cancel_fn: std::sync::Arc<crate::scan_runtime::CancelFn> =
                     std::sync::Arc::new(move || scan_control_clone.is_cancelled(scan_request_id));
                 let enabled_categories = enabled_categories.clone();
+                let stylesheet_cache = stylesheet_cache.clone();
                 async move {
                     let mut result = crate::scan_runtime::run_scan_low_priority(
                         page_url.clone(),
@@ -121,7 +132,8 @@ pub(crate) async fn scan_multi_for_execution(
                         timeout_secs,
                         st,
                         skip_origin_checks,
-                        Some(cancel_fn),
+                        Some(cancel_fn.clone()),
+                        Some(stylesheet_cache),
                     )
                     .await?;
                     let browser_runtime = super::web_scan::apply_webview_layer(
@@ -130,6 +142,7 @@ pub(crate) async fn scan_multi_for_execution(
                         &page_url,
                         st,
                         axe_enabled,
+                        cancel_fn.as_ref(),
                     )
                     .await?;
                     Ok(PageScanOutput {
@@ -193,24 +206,15 @@ pub(crate) async fn scan_multi_for_execution(
         let session_analyzed =
             should_analyze_session(loop_status, urls.len(), session_signals.len());
         if session_analyzed {
-            let sitemap_urls = match url::Url::parse(base_url) {
-                Ok(parsed) => {
-                    let is_local = crate::core::localhost::is_localhost(&parsed);
-                    let is_strict = crate::core::localhost::is_strict_localhost(&parsed);
-                    let client = crate::http_client::for_url(is_strict);
-                    let sitemap =
-                        crate::core::sitemap::discover_sitemap(client, base_url, is_local).await;
-                    if sitemap.urls.is_empty() {
-                        None
-                    } else {
-                        Some(sitemap.urls)
-                    }
-                }
-                Err(_) => None,
-            };
+            let sitemap = session_sitemap(stored_sitemap_url.as_deref(), base_url).await;
             site_issues = crate::core::session_analysis::analyze_session(
                 &session_signals,
-                sitemap_urls.as_deref(),
+                sitemap
+                    .as_ref()
+                    .map(|sitemap| crate::core::session_analysis::SessionSitemap {
+                        urls: &sitemap.urls,
+                        partial_because: sitemap.partial_because.as_deref(),
+                    }),
             );
             scanner::finalize_check_results(&mut site_issues);
         }
@@ -382,6 +386,40 @@ fn load_active_issue_group_ids(
         .collect())
 }
 
+/// The sitemap the session checks compare against.
+///
+/// The site's stored sitemap URL is the one the app already showed the user in
+/// Site Setup, so it is tried first; auto-discovery is the fallback for a site
+/// that never had one configured, or whose configured URL no longer answers.
+/// Returns `None` when no sitemap yielded URLs, which the session checks report
+/// as Skipped rather than a clean pass.
+///
+/// The caller supplies the stored URL, read from the site row the scan already
+/// resolves at startup, so this stays a pure network step. Reading it here
+/// would be a second blocking database round trip for one column.
+async fn session_sitemap(
+    stored_sitemap_url: Option<&str>,
+    base_url: &str,
+) -> Option<crate::core::sitemap::SitemapResult> {
+    let parsed = url::Url::parse(base_url).ok()?;
+    let allow_local_dev = crate::core::localhost::is_localhost(&parsed);
+    let client = crate::http_client::for_url(crate::core::localhost::is_strict_localhost(&parsed));
+
+    if let Some(sitemap_url) = stored_sitemap_url {
+        if validate_url_async(sitemap_url).await.is_ok() {
+            let result =
+                crate::core::sitemap::fetch_sitemap_url(client, sitemap_url, allow_local_dev).await;
+            if !result.urls.is_empty() {
+                return Some(result);
+            }
+        }
+    }
+
+    let discovered =
+        crate::core::sitemap::discover_sitemap(client, base_url, allow_local_dev).await;
+    (!discovered.urls.is_empty()).then_some(discovered)
+}
+
 fn issue_group_change_counts(before: &HashSet<String>, after: &HashSet<String>) -> (usize, usize) {
     (
         after.difference(before).count(),
@@ -464,6 +502,121 @@ fn persist_multi_page_blocking(
 mod tests {
     use super::{issue_group_change_counts, should_analyze_session, PageLoopStatus};
     use std::collections::HashSet;
+
+    const SOURCE: &str = include_str!("multi_scan.rs");
+
+    /// The body of `scan_multi_for_execution`, which runs from its signature
+    /// to the next item in the file.
+    fn scan_multi_for_execution_source() -> &'static str {
+        let after_signature = SOURCE
+            .split_once("pub(crate) async fn scan_multi_for_execution(")
+            .expect("multi_scan.rs must define scan_multi_for_execution")
+            .1;
+        after_signature
+            .split_once("\nfn load_active_issue_group_ids(")
+            .expect("load_active_issue_group_ids must follow scan_multi_for_execution")
+            .0
+    }
+
+    /// The body of `session_sitemap`, which runs from its signature to the
+    /// next item in the file.
+    fn session_sitemap_source() -> &'static str {
+        let after_signature = SOURCE
+            .split_once("async fn session_sitemap(")
+            .expect("multi_scan.rs must define session_sitemap")
+            .1;
+        after_signature
+            .split_once("\nfn issue_group_change_counts(")
+            .expect("issue_group_change_counts must follow session_sitemap")
+            .0
+    }
+
+    /// The stylesheet cache is pure wiring: every page of a multi-page scan
+    /// reads the same linked stylesheets, and only the shared store keeps that
+    /// from being one download per page. Nothing observable changes when the
+    /// cache is dropped from the call, so no behavioral test can hold it. Pin
+    /// the wiring itself: one store per execution, handed to every page scan.
+    #[test]
+    fn one_stylesheet_cache_per_execution_reaches_every_page_scan() {
+        let body = scan_multi_for_execution_source();
+
+        let created = body.find("StylesheetCache::new()").expect(
+            "scan_multi_for_execution must create the execution's stylesheet cache itself; a \
+             cache created per page would download every stylesheet on every page",
+        );
+        let page_loop = body
+            .find("run_page_loop(")
+            .expect("scan_multi_for_execution must drive its pages through run_page_loop");
+        assert!(
+            created < page_loop,
+            "the stylesheet cache must be created before the page loop, so all pages share it"
+        );
+
+        let call_arguments = body
+            .split_once("run_scan_low_priority(")
+            .expect("the page scan must call run_scan_low_priority")
+            .1
+            .split_once(")\n")
+            .expect("the run_scan_low_priority argument list must end on its own line")
+            .0;
+        assert!(
+            call_arguments.contains("Some(stylesheet_cache)"),
+            "run_scan_low_priority must receive the execution's stylesheet cache; passing None \
+             silently re-downloads every page's stylesheets and no other test would notice"
+        );
+    }
+
+    /// A site whose sitemap lives at a path SiteCMD does not guess is exactly
+    /// the site whose sitemap URL the user configured by hand. Reaching for
+    /// discovery first would report "no sitemap was found" while Site Setup
+    /// shows the very sitemap the user saved. The ordering is what makes the
+    /// session sitemap agree with the rest of the app, and only a live site
+    /// with a non-default sitemap path would notice it changing, so pin it.
+    #[test]
+    fn the_session_sitemap_reads_the_sites_stored_url_before_auto_discovery() {
+        let scan = scan_multi_for_execution_source();
+        assert!(
+            scan.contains("get_sitemap_url"),
+            "the scan must read the site's stored sitemap URL; discovery alone reports no sitemap \
+             for a site whose sitemap URL the user configured by hand",
+        );
+        assert!(
+            scan.contains("session_sitemap(stored_sitemap_url.as_deref()"),
+            "the stored sitemap URL the scan read must reach the session sitemap step",
+        );
+
+        let body = session_sitemap_source();
+        let stored = body.find("stored_sitemap_url").expect(
+            "session_sitemap must take the stored sitemap URL from its caller rather than reading \
+             it itself; a read here is a second blocking database round trip",
+        );
+        let fetched = body
+            .find("fetch_sitemap_url")
+            .expect("session_sitemap must fetch the stored sitemap URL it was given");
+        let discovered = body.find("discover_sitemap").expect(
+            "session_sitemap must still auto-discover for a site with no stored sitemap URL",
+        );
+
+        assert!(
+            stored < fetched && fetched < discovered,
+            "the stored sitemap URL must be tried before auto-discovery"
+        );
+    }
+
+    /// A truncated or first-of-several sitemap set must reach the session
+    /// checks as such: `noindex_in_sitemap` reports Skipped instead of a clean
+    /// Pass over a set it knows is incomplete, and it can only know that if the
+    /// fetch's reason is carried through instead of dropped.
+    #[test]
+    fn a_partial_sitemap_read_reaches_session_analysis() {
+        let body = scan_multi_for_execution_source();
+
+        assert!(
+            body.contains("partial_because"),
+            "scan_multi_for_execution must hand the sitemap's partial-read reason to \
+             analyze_session; without it a partial sitemap produces a clean Pass"
+        );
+    }
 
     #[test]
     fn issue_group_changes_count_unique_active_rows_in_both_directions() {

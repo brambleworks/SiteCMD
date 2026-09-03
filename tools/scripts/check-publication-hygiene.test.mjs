@@ -121,6 +121,27 @@ describe("publicationHygieneFailures", () => {
     expect(failures).not.toContain("paths.test.ts");
   });
 
+  it("does not mistake a lowercase /users/ URL path for a home directory", () => {
+    const { files, read } = fixture({
+      "apps/desktop/src-tauri/src/core/code_scan/route_helpers_tests.rs":
+        'let body = "api.patch(\\"/users/profile\\", data)";\n',
+      "apps/desktop/src/lib/api.ts": 'export const ME = "/users/settings";\n',
+    });
+    expect(publicationHygieneFailures(files, read)).toEqual([]);
+  });
+
+  it("still rejects a capitalized real home directory beside a /users/ path", () => {
+    const realHome = `/Users/${"jsmith"}/Projects/app/.env`;
+    const { files, read } = fixture({
+      "apps/desktop/src/lib/logger.test.ts": `const url = "/users/profile";\nexpect(redact("${realHome}"));\n`,
+    });
+    const failures = publicationHygieneFailures(files, read).join("\n");
+    expect(failures).toContain(
+      "real home directory appears in source: apps/desktop/src/lib/logger.test.ts (jsmith)",
+    );
+    expect(failures).not.toContain("profile");
+  });
+
   it("does not mistake an ordinary home/ source directory for a home directory", () => {
     const { files, read } = fixture({
       "apps/sitecmd.com/src/styles/pages/home/hero.css": ".hero { color: red; }\n",

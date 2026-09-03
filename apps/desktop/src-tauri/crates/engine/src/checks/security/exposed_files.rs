@@ -61,6 +61,24 @@ const SOURCE_SECRET_IDENTIFIERS: &[(&str, &str)] = &[
     ("stripe_secret", "Stripe secret identifier"),
 ];
 
+/// Name what actually happened to the inconclusive probes: an answered request
+/// with an unrecognized body is a routing observation, not a network problem.
+fn inconclusive_causes(signature_mismatch: usize, inconclusive: usize) -> String {
+    let unreachable = inconclusive.saturating_sub(signature_mismatch);
+    let mut causes = Vec::new();
+    if signature_mismatch > 0 {
+        causes.push(format!(
+            "{signature_mismatch} answered HTTP 200 without the expected file signature, which a catch-all route commonly does"
+        ));
+    }
+    if unreachable > 0 {
+        causes.push(format!(
+            "{unreachable} did not return a response this scan could grade, so re-run from a network that can reach the target reliably"
+        ));
+    }
+    causes.join("; ")
+}
+
 /// Combine source and path results without passing inconclusive probes.
 pub fn summarize_exposed_files(
     source_advisory: Option<CheckResult>,
@@ -75,11 +93,15 @@ pub fn summarize_exposed_files(
 
     let mut exposed_count = 0;
     let mut inconclusive_count = unjoined_probes;
+    let mut signature_mismatch_count = 0;
     for row in path_rows {
         if row.status == CheckStatus::Fail {
             exposed_count += 1;
         } else if row.status == CheckStatus::Skipped {
             inconclusive_count += 1;
+            if inconclusive_reason_of(&row) == Some(InconclusiveReason::SignatureMismatch) {
+                signature_mismatch_count += 1;
+            }
         }
         results.push(row);
     }
@@ -101,9 +123,10 @@ pub fn summarize_exposed_files(
                 )
             } else {
                 format!(
-                    "No matching sensitive-file exposure was found, but {} of {} probes were inconclusive. Review the per-path results or re-run from a network that can reach the target reliably.",
+                    "No matching sensitive-file exposure was found, but {} of {} probes were inconclusive: {}.",
                     inconclusive_count,
-                    SENSITIVE_PATHS.len()
+                    SENSITIVE_PATHS.len(),
+                    inconclusive_causes(signature_mismatch_count, inconclusive_count)
                 )
             },
             status: if complete {
@@ -117,6 +140,7 @@ pub fn summarize_exposed_files(
             raw_data: Some(serde_json::json!({
                 "paths_probed": SENSITIVE_PATHS.len(),
                 "inconclusive": inconclusive_count,
+                "signature_mismatch": signature_mismatch_count,
             })),
             confidence: if complete {
                 crate::checks::IssueConfidence::High
@@ -207,6 +231,7 @@ pub fn grade_path_probe(
             return inconclusive_probe_result(
                 path,
                 *severity,
+                InconclusiveReason::NoUsableResponse,
                 "The request failed before an HTTP response was received, so public exposure was not determined.",
             )
         }
@@ -234,6 +259,7 @@ pub fn grade_path_probe(
             inconclusive_probe_result(
                 path,
                 *severity,
+                InconclusiveReason::NoUsableResponse,
                 &format!("{} returned HTTP {}; that response does not establish whether the file exists or is publicly retrievable.", path, status_code),
             )
         };
@@ -249,6 +275,7 @@ pub fn grade_path_probe(
             return inconclusive_probe_result(
                 path,
                 *severity,
+                InconclusiveReason::NoUsableResponse,
                 "HTTP 200 was returned, but the response body could not be read within the scan limits; exposure was not determined.",
             );
         }
@@ -275,6 +302,7 @@ pub fn grade_path_probe(
         return inconclusive_probe_result(
             path,
             *severity,
+            InconclusiveReason::SignatureMismatch,
             &format!("{} returned HTTP 200, but the sampled body did not match the expected content signature. The scan did not report the file as exposed; review unusual catch-all routing if this persists.", path),
         );
     };
@@ -296,8 +324,17 @@ pub fn grade_path_probe(
         category: ScanCategory::Security,
         title: format!("Publicly accessible sensitive path: {}", path),
         description: format!(
-            "GET {} returned HTTP 200, and the sampled response matched {}. Detected artifact: {}. The scan did not validate whether any contained credential is active or inspect the complete file.",
-            path, signature, description
+            "GET {} returned HTTP 200, and the sampled response matched {}. Detected artifact: {}. {}",
+            path,
+            signature,
+            description,
+            // Only the classes that can hold credentials get the credential
+            // caveat; a .DS_Store or a HEAD ref carries none.
+            if matches!(effective_severity, Severity::Critical | Severity::High) {
+                "The scan did not validate whether any contained credential is active or inspect the complete file."
+            } else {
+                "The scan did not inspect the complete file."
+            }
         ),
         status: CheckStatus::Fail,
         severity: effective_severity,
@@ -336,7 +373,47 @@ fn not_exposed_result(path: &str, severity: Severity, description: String) -> Ch
     }
 }
 
-fn inconclusive_probe_result(path: &str, severity: Severity, detail: &str) -> CheckResult {
+/// Why a probe produced no verdict. The summary reports an answered-but-
+/// unrecognized response differently from one that never arrived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InconclusiveReason {
+    /// HTTP 200 whose body did not match the file's signature.
+    SignatureMismatch,
+    /// No response, or a status that establishes nothing either way.
+    NoUsableResponse,
+}
+
+impl InconclusiveReason {
+    fn as_evidence(self) -> &'static str {
+        match self {
+            Self::SignatureMismatch => "signature_mismatch",
+            Self::NoUsableResponse => "no_usable_response",
+        }
+    }
+}
+
+/// Read an inconclusive row's reason back out of its evidence. An unrecognized
+/// value returns None rather than defaulting to a transport failure: guessing
+/// there would recreate the conflation this check was fixed to stop making.
+fn inconclusive_reason_of(row: &CheckResult) -> Option<InconclusiveReason> {
+    match row
+        .raw_data
+        .as_ref()?
+        .get("inconclusive_reason")?
+        .as_str()?
+    {
+        "signature_mismatch" => Some(InconclusiveReason::SignatureMismatch),
+        "no_usable_response" => Some(InconclusiveReason::NoUsableResponse),
+        _ => None,
+    }
+}
+
+fn inconclusive_probe_result(
+    path: &str,
+    severity: Severity,
+    reason: InconclusiveReason,
+    detail: &str,
+) -> CheckResult {
     CheckResult {
         check_id: format!("{CHECK_ID_PREFIX}{}", sanitize_check_id(path)),
         category: ScanCategory::Security,
@@ -349,7 +426,10 @@ fn inconclusive_probe_result(path: &str, severity: Severity, detail: &str) -> Ch
             "Repeat an unauthenticated GET request to {} from the same network. Confirm the response is 403, 404, or 410 and that no sensitive content is returned; do not copy any returned secret values into tickets or chat.",
             path
         )),
-        raw_data: None,
+        raw_data: Some(serde_json::json!({
+            "path": path,
+            "inconclusive_reason": reason.as_evidence(),
+        })),
         confidence: crate::checks::IssueConfidence::NeedsReview,
         confidence_reason: Some("The probe did not produce enough matching response evidence for a pass or an exposure finding.".into()),
         why_it_matters: None,
@@ -439,10 +519,11 @@ fn extract_script_content(html: &str) -> String {
     result
 }
 
+/// Byte-offset regressions for the HTML slicing this check does. They stay in
+/// this file because the repo guardrail requires the coverage beside the code.
 #[cfg(test)]
-mod tests {
+mod unicode_offset_tests {
     use super::*;
-    use crate::checks::IssueConfidence;
 
     #[test]
     fn script_extraction_preserves_offsets_after_unicode_case_expansion() {
@@ -456,7 +537,6 @@ mod tests {
             "const db_password = 'public-example';"
         );
     }
-
     #[test]
     fn secret_snippet_uses_valid_unicode_boundaries() {
         let script = format!("{}db_password = 'public-example';", "é".repeat(11));
@@ -466,150 +546,7 @@ mod tests {
         assert!(snippet.contains("db_password"));
         assert!(snippet.is_char_boundary(snippet.len()));
     }
-
-    #[test]
-    fn script_extraction_survives_truncated_closing_tag() {
-        let truncated = "<html><body><script>db_password = 'x';</script";
-        let out = extract_script_content(truncated);
-        assert!(out.contains("db_password"), "{out}");
-
-        // Malformed close followed by a multibyte char must also not panic.
-        let malformed = "<script>secret_value = 1;</scriptФ rest";
-        let _ = extract_script_content(malformed);
-    }
-
-    #[test]
-    fn firebase_config_apikey_is_not_flagged_as_source_secret() {
-        let html = r#"<script>const config = { apiKey: "AIzaSyDxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", authDomain: "x.firebaseapp.com" };</script>"#;
-        assert!(source_secrets_result(html).is_none());
-    }
-
-    #[test]
-    fn stripe_live_key_is_left_to_exposed_keys_check() {
-        // sk_live_ keys are flagged (value-shaped, Critical) by
-        // security.vibe.exposed_keys; this check must not double-report them.
-        let html = r#"<script>const key = "sk_live_1234567890abcdefghijklmn";</script>"#; // gitleaks:allow
-        assert!(source_secrets_result(html).is_none());
-    }
-
-    #[test]
-    fn remaining_identifier_matches_are_needs_review_advisories() {
-        let html = r#"<script>fetch(config.database_url); const x = settings.aws_secret;</script>"#;
-        let result = source_secrets_result(html).expect("identifiers should match");
-        assert_eq!(result.status, CheckStatus::Warn);
-        assert_eq!(result.severity, Severity::Medium);
-        assert_eq!(result.confidence, IssueConfidence::NeedsReview);
-        assert!(result.confidence_reason.is_some());
-        assert!(
-            result.description.contains("2 secret-named identifiers"),
-            "{}",
-            result.description
-        );
-        assert!(
-            result.description.contains("no secret value was verified"),
-            "{}",
-            result.description
-        );
-    }
-
-    #[test]
-    fn single_identifier_match_is_singular_not_one_matches() {
-        let html = r#"<script>const conn = config.db_password;</script>"#;
-        let result = source_secrets_result(html).expect("identifier should match");
-        assert!(
-            result.description.contains("1 secret-named identifier in"),
-            "{}",
-            result.description
-        );
-        assert!(!result.description.contains("1 matches"));
-    }
-
-    #[test]
-    fn security_txt_is_owned_by_the_dedicated_check() {
-        // The HEAD-only /.well-known/security.txt probe false-passed on SPA
-        // catch-all hosts and duplicated security.security_txt findings.
-        assert!(
-            !SENSITIVE_PATHS
-                .iter()
-                .any(|(path, _, _)| path.contains("security.txt")),
-            "security.txt must not be probed by exposed_files; security_txt.rs owns it"
-        );
-    }
-
-    #[test]
-    fn env_body_with_secret_assignments_is_verified_critical_content() {
-        let body =
-            "# prod config\nDATABASE_URL=postgres://admin:pw@db:5432/prod\nSMTP_PASSWORD=hunter2\n";
-        assert_eq!(classify_env_body(body), EnvBodyVerdict::SecretAssignments);
-    }
-
-    #[test]
-    fn env_body_without_secret_keys_is_env_format_only() {
-        let body = "APP_NAME=myapp\nAPP_COLOR=blue\n";
-        assert_eq!(classify_env_body(body), EnvBodyVerdict::EnvFormatOnly);
-    }
-
-    #[test]
-    fn non_env_bodies_are_not_treated_as_exposed_env_files() {
-        // A catch-all route serving prose, JSON, or JS must not produce the
-        // cap-listed Critical ".env exposed" verdict.
-        assert_eq!(
-            classify_env_body("Welcome to our site! Everything is fine."),
-            EnvBodyVerdict::NotEnvContent
-        );
-        assert_eq!(
-            classify_env_body("{\"status\":\"ok\",\"version\":\"1.2.3\"}"),
-            EnvBodyVerdict::NotEnvContent
-        );
-        assert_eq!(classify_env_body(""), EnvBodyVerdict::NotEnvContent);
-    }
-
-    #[test]
-    fn blocked_access_fix_options_actually_block() {
-        let fix = blocked_access_fix("/.git/HEAD");
-        assert!(
-            !fix.contains("x-block"),
-            "header-only advice does not block"
-        );
-        assert!(!fix.contains("<Files"), "Files matches basenames only");
-        assert!(!fix.contains("\\n"), "no literal backslash-n in fix text");
-        assert!(!fix.contains('\u{2014}'), "no em-dashes in fix text");
-        assert!(fix.contains("Redirect 404 /.git/HEAD"));
-    }
-
-    #[test]
-    fn spa_html_shell_is_soft_404_for_medium_paths() {
-        let shell = "<!doctype html><html><head><title>App</title></head><body><div id=\"root\"></div></body></html>";
-        assert!(is_html_soft_404(
-            "/.DS_Store",
-            "text/html; charset=utf-8",
-            shell
-        ));
-        assert!(is_html_soft_404("/error.log", "text/html", shell));
-    }
-
-    #[test]
-    fn real_file_content_is_not_soft_404() {
-        // A genuine.DS_Store or log served as octet-stream/plain must
-        // still count as exposed.
-        assert!(!is_html_soft_404(
-            "/.DS_Store",
-            "application/octet-stream",
-            "Bud1\u{0}\u{0}\u{0}"
-        ));
-        assert!(!is_html_soft_404(
-            "/error.log",
-            "text/plain",
-            "[error] PHP Warning: undefined index"
-        ));
-    }
-
-    #[test]
-    fn phpinfo_html_is_not_soft_404() {
-        assert!(!is_html_soft_404(
-            "/phpinfo.php",
-            "text/html",
-            "<html><body><h1>PHP Version 8.3</h1></body></html>"
-        ));
-    }
 }
+
+#[cfg(test)]
+mod tests;

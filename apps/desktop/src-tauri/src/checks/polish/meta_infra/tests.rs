@@ -197,3 +197,67 @@ fn console_log_clear_with_one() {
     let result = console_log_production(&ctx(html));
     assert!(!result.fired, "Should not fire with just 1 console.log");
 }
+
+#[test]
+fn console_log_sees_an_inline_script_after_an_empty_external_script_tag() {
+    // The `regex-traps.html` fixture head: an empty `<script src>` element
+    // immediately followed by the inline script that carries the calls.
+    let html = concat!(
+        r#"<link rel="stylesheet" href="/css/clean.css">"#,
+        "\n",
+        r#"<script src="/js/app.js"></script><script>"#,
+        "\n",
+        "console.log(\"first\");\n",
+        "console.log(\"second\");\n",
+        "//# sourceMappingURL=trap.js.map\n",
+        "</script>\n",
+    );
+    let result = console_log_production(&ctx(html));
+    assert!(
+        result.fired,
+        "an empty external script tag must not swallow the inline script after it"
+    );
+    assert_eq!(result.data["console_log_count"], 2);
+}
+
+#[test]
+fn console_log_ignores_calls_inside_external_script_elements() {
+    let html = concat!(
+        r#"<script src="/js/app.js">console.log("a"); console.log("b");</script>"#,
+        "\n",
+        r#"<script SRC = "/js/late.js"></script>"#,
+    );
+    let result = console_log_production(&ctx(html));
+    assert!(
+        !result.fired,
+        "a script element with a src attribute is external, whatever its body holds"
+    );
+}
+
+#[test]
+fn console_log_counts_an_inline_script_whose_tag_carries_a_prefixed_src_attribute() {
+    // `data-src` is a data attribute, not a `src`: the script is still inline
+    // and its calls still ship. A `\b` boundary would match at the hyphen.
+    for attribute in ["data-src", "x-src", "data-src-set"] {
+        let html = format!(
+            r#"<script {attribute}="/js/lazy.js">console.log("one"); console.log("two");</script>"#
+        );
+        let result = console_log_production(&ctx(&html));
+        assert!(
+            result.fired,
+            "{attribute} is not a src attribute and must not mark the script external"
+        );
+        assert_eq!(result.data["console_log_count"], 2, "{attribute}");
+    }
+}
+
+#[test]
+fn console_log_counts_an_inline_script_whose_body_mentions_src() {
+    let html = r#"<script>el.src = "/a.png"; console.log("one"); console.log("two");</script>"#;
+    let result = console_log_production(&ctx(html));
+    assert!(
+        result.fired,
+        "a `src=` in the script body must not mark an inline script as external"
+    );
+    assert_eq!(result.data["console_log_count"], 2);
+}

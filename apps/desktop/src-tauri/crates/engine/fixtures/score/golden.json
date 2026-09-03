@@ -4,6 +4,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 0.0,
           "effCritical": 0.0,
           "effHigh": 0.0,
@@ -44,6 +45,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 14.999999999999998,
           "effCritical": 1.0,
           "effHigh": 0.0,
@@ -97,6 +99,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 0.0,
           "effCritical": 0.0,
           "effHigh": 0.5,
@@ -158,6 +161,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 14.999999999999998,
           "effCritical": 1.0,
           "effHigh": 0.0,
@@ -215,6 +219,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 7.697505292422936,
           "effCritical": 0.5,
           "effHigh": 0.0,
@@ -268,6 +273,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 7.697505292422936,
           "effCritical": 0.5,
           "effHigh": 0.0,
@@ -333,6 +339,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 0.0,
           "effCritical": 0.0,
           "effHigh": 20.0,
@@ -614,6 +621,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 97.69823398500002,
           "effCritical": 10.0,
           "effHigh": 0.0,
@@ -775,6 +783,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 14.999999999999998,
           "effCritical": 1.0,
           "effHigh": 0.0,
@@ -829,6 +838,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 0.0,
           "effCritical": 0.0,
           "effHigh": 0.0,
@@ -883,6 +893,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 0.0,
           "effCritical": 0.0,
           "effHigh": 1.0,
@@ -972,6 +983,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 0.0,
           "effCritical": 0.0,
           "effHigh": 1.0,
@@ -1026,6 +1038,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 14.999999999999998,
           "effCritical": 1.0,
           "effHigh": 0.0,
@@ -1074,6 +1087,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 14.999999999999998,
           "effCritical": 1.0,
           "effHigh": 0.0,
@@ -1127,6 +1141,7 @@
       "expected": {
         "breakdown": {
           "base": 100.0,
+          "ceilingApplied": false,
           "criticalPoints": 7.697505292422936,
           "effCritical": 0.5,
           "effHigh": 3.0,
@@ -1323,6 +1338,60 @@
       ],
       "name": "mixed_realistic_site_breakdown",
       "now_ms": 1753000000000
+    },
+    {
+      "expected": {
+        "breakdown": {
+          "base": 100.0,
+          "ceilingApplied": false,
+          "criticalPoints": 0.0,
+          "effCritical": 0.0,
+          "effHigh": 0.0,
+          "effLow": 0.5,
+          "effMedium": 0.0,
+          "floorApplied": false,
+          "highPoints": 0.0,
+          "lowPoints": 0.8038475772933684,
+          "mediumPoints": 0.0
+        },
+        "computedAt": 0,
+        "criticalCount": 0,
+        "exploitableCapped": false,
+        "highCount": 0,
+        "lowCount": 1,
+        "mediumCount": 0,
+        "overall": 99.0,
+        "perCategory": {
+          "accessibility": 100.0,
+          "code_quality": 100.0,
+          "compliance": 99.0,
+          "config": 100.0,
+          "dependencies": 100.0,
+          "infrastructure": 100.0,
+          "operations": 100.0,
+          "performance": 100.0,
+          "polish": 100.0,
+          "security": 100.0,
+          "seo": 100.0,
+          "supply-chain": 100.0
+        }
+      },
+      "groups": [
+        {
+          "category": "compliance",
+          "check_id": "compliance.ccpa_notice",
+          "members": [
+            {
+              "confidence": "needs_review",
+              "severity": "low"
+            }
+          ],
+          "severity": "low",
+          "status": "new"
+        }
+      ],
+      "name": "one_needs_review_low_scores_99_on_its_bar_and_the_overall",
+      "now_ms": 0
     }
   ],
   "comment": "Cross-runtime golden score corpus. Inputs are ScoreInputGroup rows; expected blocks are regenerated by `cargo test -p sitecmd-engine --test golden_score -- --ignored regenerate` and must match on every runtime (native + wasm). Do not edit expected blocks by hand."

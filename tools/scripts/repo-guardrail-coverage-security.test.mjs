@@ -1,7 +1,8 @@
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   GUARDRAIL_TEST_TIMEOUT_MS,
   expectGuardrailFailure,
+  guardrailFailuresFor,
   mustMutate,
   readFixtureFile,
   writeFixtureFile,
@@ -1377,6 +1378,48 @@ describe.concurrent(
           );
         },
         "scanner HTTP bodies must use http_client::read_body_limited/read_text_limited",
+      );
+    });
+
+    it("accepts a run_polish_phase call that rustfmt wrapped across lines", () => {
+      const scannerPath = "apps/desktop/src-tauri/src/core/scanner.rs";
+      const reported = guardrailFailuresFor(desktopScannerBodySafetyFailures, (fixtureRoot) => {
+        const scanner = readFixtureFile(fixtureRoot, scannerPath);
+        if (!/run_polish_phase\(\s*&mut ctx/.test(scanner)) {
+          throw new Error(`no run_polish_phase(&mut ctx call found in ${scannerPath}`);
+        }
+        // rustfmt breaks the call whenever the argument list passes
+        // fn_call_width; the ordering rule must not care.
+        writeFixtureFile(
+          fixtureRoot,
+          scannerPath,
+          scanner.replace(
+            /run_polish_phase\(\s*&mut ctx/,
+            "run_polish_phase(\n            &mut ctx",
+          ),
+        );
+      });
+      expect(reported).not.toContain("site_facts::read_before_polish");
+    });
+
+    it("fails when the pre-polish body read moves below the polish phase", () => {
+      expectGuardrailFailure(
+        desktopScannerBodySafetyFailures,
+        (fixtureRoot) => {
+          const scannerPath = "apps/desktop/src-tauri/src/core/scanner.rs";
+          const scanner = readFixtureFile(fixtureRoot, scannerPath);
+          const moved = mustMutate(
+            scanner,
+            "site_facts::read_before_polish(",
+            "site_facts::read_after_polish_placeholder(",
+          );
+          writeFixtureFile(
+            fixtureRoot,
+            scannerPath,
+            `${moved}\n// site_facts::read_before_polish( now runs after the polish phase\n`,
+          );
+        },
+        "scanner.rs must call site_facts::read_before_polish before run_polish_phase consumes the page body via mem::take",
       );
     });
 

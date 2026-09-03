@@ -312,35 +312,6 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
-SHA-256: 0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7
-Packages: npm:util-deprecate@1.0.2
-Upstream files: LICENSE
-================================================================================
-(The MIT License)
-
-Copyright (c) 2014 Nathan Rajlich <nathan@tootallnate.net>
-
-Permission is hereby granted, free of charge, to any person
-obtaining a copy of this software and associated documentation
-files (the "Software"), to deal in the Software without
-restriction, including without limitation the rights to use,
-copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the
-Software is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-OTHER DEALINGS IN THE SOFTWARE.
-================================================================================
 SHA-256: 01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f
 Packages: cargo:aho-corasick@1.1.5, cargo:byteorder@1.5.0, cargo:globset@0.4.20, cargo:ignore@0.4.33, cargo:jiff-core@0.1.0, cargo:jiff-static@0.2.35, cargo:jiff-tzdb-platform@0.1.3, cargo:jiff-tzdb@0.1.8, cargo:jiff@0.2.35, cargo:memchr@2.8.3, cargo:same-file@1.0.6, cargo:termcolor@1.4.1, cargo:walkdir@2.5.0, cargo:winapi-util@0.1.11
 Upstream files: COPYING
@@ -4155,7 +4126,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ================================================================================
 SHA-256: 257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38
-Packages: npm:content-type@1.0.5, npm:content-type@2.0.0
+Packages: npm:content-type@1.0.5, npm:content-type@2.1.0
 Upstream files: LICENSE
 ================================================================================
 (The MIT License)
@@ -6081,7 +6052,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ================================================================================
 SHA-256: 3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8
-Packages: npm:zod@4.4.3
+Packages: npm:zod@4.5.4
 Upstream files: LICENSE
 ================================================================================
 MIT License
@@ -6105,6 +6076,26 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+================================================================================
+SHA-256: 3f2b18e632f91ec65fe6b649104a410b73e50aaddd04986eaf8b3e14c3826e2e
+Packages: npm:hyphen@1.6.6
+Upstream files: LICENSE
+================================================================================
+ISC License (ISC)
+
+Copyright (c) 2021, Yevhen Tiurin <yevhentiurin@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ================================================================================
 SHA-256: 3f39c032be4639be635da96d77c4d0f4393c3595a164450ffd86f3d17701ec10
 Packages: cargo:webkit2gtk@2.0.2
@@ -8086,7 +8077,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ================================================================================
 SHA-256: 553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b
-Packages: npm:negotiator@1.0.0
+Packages: npm:negotiator@1.1.0
 Upstream files: LICENSE
 ================================================================================
 (The MIT License)
@@ -8757,7 +8748,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ================================================================================
 SHA-256: 6280262da3f2d6a51605f96480cc6433f9764f9cd9c0f80aa570fe0832f75655
-Packages: npm:@react-pdf/pdfkit@6.0.1
+Packages: npm:pdfkit@0.20.1
 Upstream files: LICENSE
 ================================================================================
 MIT LICENSE
@@ -9660,7 +9651,7 @@ This project is licensed under either of
 at your option.
 ================================================================================
 SHA-256: 6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733
-Packages: npm:@hono/node-server@2.1.0
+Packages: npm:@hono/node-server@2.1.1
 Upstream files: LICENSE
 ================================================================================
 MIT License
@@ -11713,7 +11704,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ================================================================================
 SHA-256: 8078b0829d6c3e9ecde2f003e1966e4cad3efc6e7a640efbab0313cc166b1af1
-Packages: npm:jose@6.2.8
+Packages: npm:jose@6.2.10
 Upstream files: LICENSE.md
 ================================================================================
 The MIT License (MIT)
@@ -12082,7 +12073,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ================================================================================
 SHA-256: 835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb
-Packages: npm:eventsource-parser@3.1.0
+Packages: npm:eventsource-parser@3.1.1
 Upstream files: LICENSE
 ================================================================================
 MIT License
@@ -13500,31 +13491,6 @@ PackageDownloadLocation: git+https://github.com/tauri-apps/tao.git
 PackageDownloadLocation: git+ssh://github.com/tauri-apps/tao.git
 Creator: Person: Daniel Thompson-Yvetot
 ================================================================================
-SHA-256: 90021adfb24b0a7af5754cebc6085e2560555f74d29a6d44a7f9a32125f8b348
-Packages: npm:express-rate-limit@8.6.2
-Upstream files: license.md
-================================================================================
-﻿# MIT License
-
-Copyright 2023 Nathan Friedly, Vedant K
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-================================================================================
 SHA-256: 9060d3e477a57e94563100d089ee07a1bf3342f149fd7366913abf2b4b54f04b
 Packages: npm:color-name@2.1.1
 Upstream files: LICENSE
@@ -13537,26 +13503,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-================================================================================
-SHA-256: 90be1a1205349e8540e0132241ebc58e8d21f5f405171b73cc885b5f9eb3fed4
-Packages: npm:hyphen@1.14.1
-Upstream files: LICENSE
-================================================================================
-ISC License (ISC)
-
-Copyright (c) 2026, Yevhen Tiurin <yevhentiurin@gmail.com>
-
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ================================================================================
 SHA-256: 90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5
 Packages: cargo:moxcms@0.8.1, cargo:pxfm@0.1.30
@@ -14268,7 +14214,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ================================================================================
 SHA-256: 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759
-Packages: cargo:tauri-plugin-autostart@2.5.1, cargo:tauri-plugin-clipboard-manager@2.3.2, cargo:tauri-plugin-deep-link@2.4.9, cargo:tauri-plugin-dialog@2.7.2, cargo:tauri-plugin-fs@2.5.1, cargo:tauri-plugin-global-shortcut@2.3.2, cargo:tauri-plugin-log@2.9.0, cargo:tauri-plugin-notification@2.3.3, cargo:tauri-plugin-os@2.3.2, cargo:tauri-plugin-process@2.3.1, cargo:tauri-plugin-single-instance@2.4.3, cargo:tauri-plugin-store@2.4.4, cargo:tauri-plugin-updater@2.10.1, cargo:tauri-plugin-window-state@2.4.1, npm:@tauri-apps/plugin-autostart@2.5.1, npm:@tauri-apps/plugin-clipboard-manager@2.3.2, npm:@tauri-apps/plugin-deep-link@2.4.9, npm:@tauri-apps/plugin-dialog@2.7.2, npm:@tauri-apps/plugin-global-shortcut@2.3.2, npm:@tauri-apps/plugin-os@2.3.2, npm:@tauri-apps/plugin-store@2.4.4
+Packages: cargo:tauri-plugin-autostart@2.5.1, cargo:tauri-plugin-clipboard-manager@2.3.2, cargo:tauri-plugin-deep-link@2.4.9, cargo:tauri-plugin-dialog@2.7.2, cargo:tauri-plugin-fs@2.5.1, cargo:tauri-plugin-global-shortcut@2.3.2, cargo:tauri-plugin-log@2.9.0, cargo:tauri-plugin-notification@2.3.3, cargo:tauri-plugin-os@2.3.2, cargo:tauri-plugin-process@2.3.1, cargo:tauri-plugin-single-instance@2.4.3, cargo:tauri-plugin-store@2.4.4, cargo:tauri-plugin-updater@2.10.1, cargo:tauri-plugin-window-state@2.4.1, npm:@tauri-apps/plugin-autostart@2.5.1, npm:@tauri-apps/plugin-clipboard-manager@2.3.3, npm:@tauri-apps/plugin-deep-link@2.4.10, npm:@tauri-apps/plugin-dialog@2.7.3, npm:@tauri-apps/plugin-global-shortcut@2.3.2, npm:@tauri-apps/plugin-os@2.3.2, npm:@tauri-apps/plugin-store@2.4.4
 Upstream files: LICENSE.spdx
 ================================================================================
 SPDXVersion: SPDX-2.1
@@ -14795,7 +14741,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ================================================================================
 SHA-256: a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7
-Packages: npm:@tanstack/query-core@5.101.4, npm:@tanstack/react-query@5.101.4
+Packages: npm:@tanstack/query-core@5.102.8, npm:@tanstack/react-query@5.102.8
 Upstream files: LICENSE
 ================================================================================
 MIT License
@@ -15263,7 +15209,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ================================================================================
 SHA-256: a6ab98e5c77b9070c443eaff2ff81034a6f8cc05a7524d5098eb0f24defa0115
-Packages: npm:hono@4.13.1
+Packages: npm:hono@4.13.5
 Upstream files: LICENSE
 ================================================================================
 MIT License
@@ -15722,6 +15668,32 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+================================================================================
+SHA-256: a752c164b45840ef677e68c738aefabfd665ee9f112ada4538761301a97118b0
+Packages: npm:express-rate-limit@8.7.0
+Upstream files: license
+================================================================================
+MIT License
+
+Copyright 2023 Nathan Friedly, Vedant K
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ================================================================================
 SHA-256: a7996721249a136fbcfc1c201bcb5f414f38a701d4a24f28abe65e16cfcce813
 Packages: npm:etag@1.8.1, npm:proxy-addr@2.0.7
@@ -16595,31 +16567,6 @@ SOFTWARE.
 This project contains portions of code and architectural concepts originally
 derived from the "nipper" project (https://github.com/importcjj/nipper),
 developed by Chen Jiaju, licensed under the MIT License and the Apache License 2.0 (dual licensed).
-================================================================================
-SHA-256: ac52bd3e7b6e3155c416a6d875c5738fa2c315015fca5a70b21b6863662abd67
-Packages: npm:js-md5@0.8.3
-Upstream files: LICENSE.txt
-================================================================================
-Copyright 2014-2023 Chen, Yi-Cyuan
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ================================================================================
 SHA-256: ae3ead0b640a2ee59f9789a9af84e65e631cfa3b13254f3f99a9ed73e0472239
 Packages: cargo:postgres-protocol@0.6.12, cargo:postgres-types@0.2.14, cargo:postgres@0.19.14, cargo:tokio-postgres@0.7.18
@@ -17672,7 +17619,7 @@ Upstream files: LICENSE-APACHE, LICENSE-Apache
    limitations under the License.
 ================================================================================
 SHA-256: b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57
-Packages: npm:lucide-react@1.33.0
+Packages: npm:lucide-react@1.39.0
 Upstream files: LICENSE
 ================================================================================
 ISC License
@@ -18991,32 +18938,6 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
-================================================================================
-SHA-256: c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac
-Packages: npm:safe-buffer@5.2.1
-Upstream files: LICENSE
-================================================================================
-The MIT License (MIT)
-
-Copyright (c) Feross Aboukhadijeh
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
 ================================================================================
 SHA-256: c962ee4d1d05ddc138b202b2540219ebc57893fcf97b364852094a9a94ce1365
 Packages: cargo:siphasher@1.0.3
@@ -20866,7 +20787,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ================================================================================
 SHA-256: dc6d4961d8b6ee747231582ae9c53ce1d66bf76bc9f5a28f554c0e97210953bf
-Packages: npm:@ungap/structured-clone@1.3.3
+Packages: npm:@ungap/structured-clone@1.4.0
 Upstream files: LICENSE
 ================================================================================
 ISC License
@@ -20995,7 +20916,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ================================================================================
 SHA-256: df7464922225c9b286167fa692d305e5ba98bf71613525d4d031649a344a3f3f
-Packages: npm:fast-uri@3.1.5
+Packages: npm:fast-uri@3.1.6
 Upstream files: LICENSE
 ================================================================================
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
@@ -21676,7 +21597,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 ================================================================================
 SHA-256: e7dc37bf662d7f786efcb46c545615e70c1daf458a38385521c63cf6607cdfe1
-Packages: npm:qs@6.15.3
+Packages: npm:qs@6.16.0
 Upstream files: LICENSE.md
 ================================================================================
 BSD 3-Clause License
@@ -21865,58 +21786,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-================================================================================
-SHA-256: ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54
-Packages: npm:string_decoder@1.3.0, npm:vite-compatible-readable-stream@3.6.1
-Upstream files: LICENSE
-================================================================================
-Node.js is licensed for use as follows:
-
-"""
-Copyright Node.js contributors. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to
-deal in the Software without restriction, including without limitation the
-rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-sell copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-IN THE SOFTWARE.
-"""
-
-This license applies to parts of Node.js originating from the
-https://github.com/joyent/node repository:
-
-"""
-Copyright Joyent, Inc. and other Node contributors. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to
-deal in the Software without restriction, including without limitation the
-rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-sell copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-IN THE SOFTWARE.
-"""
 ================================================================================
 SHA-256: ecc269ef87fd38a1d98e30bfac9ba964a9dbd9315c3770fed98d4d7cb5882055
 Packages: cargo:indexmap@1.9.3, cargo:indexmap@2.14.0
@@ -22736,7 +22605,7 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ================================================================================
 SHA-256: f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a
-Packages: npm:ip-address@10.5.0
+Packages: npm:ip-address@10.7.0
 Upstream files: LICENSE
 ================================================================================
 Copyright (C) 2011 by Beau Gunderson

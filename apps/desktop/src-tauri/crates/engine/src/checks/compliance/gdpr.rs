@@ -1,6 +1,10 @@
 //! Static review for visible data-controller or privacy contact details.
 //! Applicability and external policy content remain out of scope.
 
+use crate::checks::compliance::trackers::{
+    consent_relevant_trackers, cookieless_trackers, name_list,
+};
+use crate::checks::compliance::{content_text_lower, executable_text_lower};
 use crate::checks::{Check, CheckResult, CheckStatus, PageContext, ScanCategory, Severity};
 use std::sync::LazyLock;
 
@@ -31,23 +35,25 @@ impl Check for DataControllerContactCheck {
         ScanCategory::Compliance
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
-        let lower = ctx.body_lower();
+        // Contact details a visitor cannot read are not disclosure, so the
+        // markers are matched against delivered content only.
+        let content = content_text_lower(ctx.body_lower());
 
-        let has_controller = lower.contains("data controller")
-            || lower.contains("data protection officer")
-            || lower.contains("dpo@")
-            || lower.contains("privacy@")
-            || lower.contains("gdpr@")
-            || lower.contains("data-controller")
-            || lower.contains("data protection");
+        let has_controller = content.contains("data controller")
+            || content.contains("data protection officer")
+            || content.contains("dpo@")
+            || content.contains("privacy@")
+            || content.contains("gdpr@")
+            || content.contains("data-controller")
+            || content.contains("data protection");
 
         // Check for contact email near privacy terms
-        let has_privacy_email = if let Some(pos) = lower.find("privacy") {
+        let has_privacy_email = if let Some(pos) = content.find("privacy") {
             let window_start = pos.saturating_sub(500);
-            let window_end = (pos + 500).min(lower.len());
-            let window_start = crate::checks::floor_char_boundary(&ctx.body, window_start);
-            let window_end = crate::checks::ceil_char_boundary(&ctx.body, window_end);
-            let window = &ctx.body[window_start..window_end];
+            let window_end = (pos + 500).min(content.len());
+            let window_start = crate::checks::floor_char_boundary(&content, window_start);
+            let window_end = crate::checks::ceil_char_boundary(&content, window_end);
+            let window = &content[window_start..window_end];
             EMAIL_RE.is_match(window)
         } else {
             false
@@ -56,7 +62,7 @@ impl Check for DataControllerContactCheck {
         // A privacy-policy link is sufficient because controller details may
         // live on that dedicated page.
         let links_to_privacy_policy =
-            PRIVACY_LINK_RE.is_match(lower) || super::has_privacy_policy_link(lower);
+            PRIVACY_LINK_RE.is_match(&content) || super::has_privacy_policy_link(&content);
 
         let (status, title, description) = if has_controller || has_privacy_email {
             (
@@ -232,27 +238,47 @@ impl Check for DntRespectCheck {
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
         let lower = ctx.body_lower();
+        // Disclosure prose must be readable content; the signal APIs below are
+        // legitimately script-hosted, so those keep script text (minus
+        // comments, which nothing executes or displays).
+        let content = content_text_lower(lower);
+        let executable = executable_text_lower(lower);
 
-        let has_dnt_mention = lower.contains("do not track") || lower.contains("do-not-track");
+        let has_dnt_mention = content.contains("do not track") || content.contains("do-not-track");
 
-        let has_tracking = lower.contains("google-analytics.com")
-            || lower.contains("googletagmanager.com")
-            || lower.contains("facebook.com/tr")
-            || lower.contains("connect.facebook.net")
-            || lower.contains("analytics.tiktok.com");
+        // One shared signature list, minus the cookieless providers: this check
+        // must not report "no tracking" where compliance.trackers names a
+        // provider, and must not demand a privacy-signal notice for a service
+        // that stores no visitor identifier.
+        let tracking_providers = consent_relevant_trackers(&executable);
+        let cookieless_providers = cookieless_trackers(&executable);
+        let has_tracking = !tracking_providers.is_empty();
 
-        // This can observe disclosure text, not whether the site honors DNT or
-        // GPC. Require specific GPC terms rather than a substring.
-        let has_gpc_mention = lower.contains("global privacy control")
-            || lower.contains("globalprivacycontrol")
-            || lower.contains("sec-gpc")
-            || GPC_WORD_RE.is_match(lower);
+        // This can observe disclosure text or a signal-reading API, not
+        // whether the site honors DNT or GPC. Require specific GPC terms
+        // rather than a substring.
+        let has_gpc_mention = content.contains("global privacy control")
+            || GPC_WORD_RE.is_match(&content)
+            || executable.contains("globalprivacycontrol")
+            || executable.contains("sec-gpc");
 
         let (status, title, desc) = if !has_tracking {
             (
                 CheckStatus::Pass,
                 "Privacy signal disclosure (DNT / GPC)",
-                "No third-party tracking scripts detected.".to_string(),
+                if cookieless_providers.is_empty() {
+                    "No third-party tracking scripts detected.".to_string()
+                } else {
+                    let (marker, subject, object) = if cookieless_providers.len() == 1 {
+                        ("marker is", "it is", "it")
+                    } else {
+                        ("markers are", "they are", "them")
+                    };
+                    format!(
+                        "The only detected measurement {marker} {}, which SiteCMD classifies as cookieless: {subject} documented to store no visitor identifier, so no Do Not Track or Global Privacy Control disclosure is expected for {object}.",
+                        name_list(&cookieless_providers)
+                    )
+                },
             )
         } else if has_dnt_mention || has_gpc_mention {
             (
@@ -290,6 +316,8 @@ impl Check for DntRespectCheck {
             },
             raw_data: Some(serde_json::json!({
                 "tracking_marker_detected": has_tracking,
+                "consent_relevant_trackers": tracking_providers,
+                "cookieless_trackers": cookieless_providers,
                 "dnt_marker_detected": has_dnt_mention,
                 "gpc_marker_detected": has_gpc_mention,
                 "separate_privacy_policy_inspected": false,
@@ -401,6 +429,100 @@ mod tests {
             crate::checks::IssueConfidence::NeedsReview
         );
         assert!(results[0].description.contains("scanned page source"));
+    }
+
+    #[test]
+    fn tracking_detection_agrees_with_the_shared_tracker_list() {
+        // A comScore beacon is tracking; claiming "no third-party tracking
+        // scripts detected" here would contradict compliance.trackers.
+        let body = r#"<html><body><img alt="" height="1" width="1" src="https://sb.scorecardresearch.com/p?c1=2"></body></html>"#;
+        let results = DntRespectCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["tracking_marker_detected"],
+            true
+        );
+    }
+
+    #[test]
+    fn a_cookieless_analytics_service_needs_no_privacy_signal_disclosure() {
+        let body = r#"<html><head><script src="https://plausible.io/js/script.js" defer></script></head><body></body></html>"#;
+        let results = DntRespectCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert!(
+            results[0].description.contains("Plausible Analytics")
+                && results[0].description.contains("cookieless"),
+            "the pass must name what it found: {}",
+            results[0].description
+        );
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["tracking_marker_detected"],
+            false
+        );
+    }
+
+    #[test]
+    fn a_cookieless_provider_beside_a_cookie_setting_one_still_needs_a_disclosure() {
+        let body = r#"<html><head>
+            <script src="https://cdn.usefathom.com/script.js" data-site="X" defer></script>
+            <script src="https://www.googletagmanager.com/gtag/js?id=G-XYZ"></script>
+        </head><body><h1>Widgets</h1></body></html>"#;
+        let results = DntRespectCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        let evidence = results[0].raw_data.as_ref().expect("evidence");
+        assert_eq!(evidence["tracking_marker_detected"], true);
+        assert_eq!(
+            evidence["cookieless_trackers"],
+            serde_json::json!(["Fathom Analytics"])
+        );
+    }
+
+    #[test]
+    fn two_cookieless_providers_read_as_plural() {
+        let body = r#"<html><head>
+            <script src="https://plausible.io/js/script.js" defer></script>
+            <script src="https://cdn.usefathom.com/script.js" defer></script>
+        </head><body></body></html>"#;
+        let results = DntRespectCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert!(
+            results[0].description.contains(
+                "The only detected measurement markers are Plausible Analytics and Fathom Analytics"
+            ) && results[0].description.contains("they are documented")
+                && results[0].description.contains("expected for them."),
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn a_commented_out_tag_is_not_live_tracking() {
+        let body = r#"<html><body><!-- <script src="https://www.googletagmanager.com/gtag.js"></script> --><p>Nothing here.</p></body></html>"#;
+        let results = DntRespectCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["tracking_marker_detected"],
+            false
+        );
+    }
+
+    #[test]
+    fn a_gpc_mention_inside_an_html_comment_is_not_a_disclosure() {
+        let body = r#"<html><body><script src="https://www.googletagmanager.com/gtag.js"></script><!-- GPC review pending. --></body></html>"#;
+        let results = DntRespectCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["gpc_marker_detected"],
+            false
+        );
+    }
+
+    #[test]
+    fn a_privacy_link_inside_an_html_comment_is_not_controller_disclosure() {
+        let body =
+            r#"<html><body><!-- <a href="/privacy-policy">Privacy Policy</a> --></body></html>"#;
+        let results = DataControllerContactCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
     }
 
     #[test]

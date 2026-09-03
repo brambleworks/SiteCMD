@@ -662,6 +662,42 @@ fn csp_blocks_unsafe_inline_in_style_src() {
     );
 }
 
+/// The main window renders scanned-site and repository text as Markdown. A
+/// remote `img-src` allowance would let `![x](https://attacker/p.png)` in a
+/// page title beacon out the moment an issue is expanded, which contradicts
+/// the enumerated-egress promise on the trust page.
+#[test]
+fn csp_img_src_never_allows_remote_origins() {
+    for (name, source) in [
+        ("tauri.conf.json", include_str!("../tauri.conf.json")),
+        (
+            "tauri.dev.conf.json",
+            include_str!("../tauri.dev.conf.json"),
+        ),
+    ] {
+        let conf: serde_json::Value = serde_json::from_str(source).expect("config must parse");
+        let csp = conf
+            .pointer("/app/security/csp")
+            .and_then(|v| v.as_str())
+            .expect("CSP must be defined");
+        let img_src = csp
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("img-src "))
+            .expect("CSP must declare img-src");
+        for token in img_src.split_whitespace().skip(1) {
+            let remote = token == "*"
+                || token == "https:"
+                || token == "http:"
+                || (token.starts_with("http") && !token.contains("localhost"));
+            assert!(
+                !remote,
+                "{name} img-src must not allow remote origins, got {token:?} in {img_src:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn dev_csp_is_defined_and_blocks_unsafe_eval() {
     let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.dev.conf.json"))
@@ -1362,6 +1398,258 @@ fn tracing_instrument_fields_do_not_record_raw_or_secretish_values() {
     );
 }
 
+/// Whole words in a parameter name that mark it as a secret. Deliberately
+/// tighter than `tracing_field_assignment_is_unsafe`: `environment_scope_key`,
+/// `idempotency_key`, and `project_key` are identifiers, so a bare `key` is
+/// only a secret in the compound forms listed in
+/// `SECRET_PARAMETER_COMPOUNDS`.
+const SECRET_PARAMETER_WORDS: &[&str] = &[
+    "password",
+    "passwd",
+    "passphrase",
+    "secret",
+    "secrets",
+    "token",
+    "apikey",
+    "credential",
+    "credentials",
+    "authorization",
+    "bearer",
+];
+
+const SECRET_PARAMETER_COMPOUNDS: &[&str] =
+    &["api_key", "private_key", "license_key", "signing_key"];
+
+/// A name that ends in one of these refers to a secret without carrying it.
+const IDENTIFIER_SUFFIXES: &[&str] = &["_id", "_ids", "_hash", "_fingerprint", "_kind", "_count"];
+
+fn parameter_names_a_secret(parameter: &str) -> bool {
+    let lower = parameter.to_ascii_lowercase();
+    if IDENTIFIER_SUFFIXES
+        .iter()
+        .any(|suffix| lower.ends_with(suffix))
+    {
+        return false;
+    }
+    lower
+        .split('_')
+        .any(|word| SECRET_PARAMETER_WORDS.contains(&word))
+        || SECRET_PARAMETER_COMPOUNDS
+            .iter()
+            .any(|compound| lower.contains(compound))
+}
+
+/// Parameter names listed in the attribute's `skip(...)` clause.
+fn instrument_skipped_parameters(attribute: &str) -> Vec<String> {
+    let Some(start) = attribute.find("skip(") else {
+        return Vec::new();
+    };
+    let inner = &attribute[start + "skip(".len()..];
+    let Some(end) = inner.find(')') else {
+        return Vec::new();
+    };
+    inner[..end]
+        .split(',')
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// Parameter names of the `fn` signature that follows the attribute ending at
+/// byte offset `attribute_end`. Balances parentheses so closure and tuple
+/// types do not end the list early, and splits only on top-level commas.
+fn instrumented_fn_parameters(source: &str, attribute_end: usize) -> Vec<String> {
+    let rest = &source[attribute_end..];
+    let Some(fn_at) = rest.find("fn ") else {
+        return Vec::new();
+    };
+    let after_fn = &rest[fn_at + "fn ".len()..];
+
+    let mut angle_depth = 0i32;
+    let mut list_start = None;
+    let mut previous = ' ';
+    for (index, ch) in after_fn.char_indices() {
+        match ch {
+            '<' => angle_depth += 1,
+            '>' if previous != '-' => angle_depth -= 1,
+            '(' if angle_depth == 0 => {
+                list_start = Some(index + 1);
+                break;
+            }
+            '{' | ';' => break,
+            _ => {}
+        }
+        previous = ch;
+    }
+    let Some(list_start) = list_start else {
+        return Vec::new();
+    };
+
+    let mut depth = 0i32;
+    let mut list_end = None;
+    for (index, ch) in after_fn[list_start..].char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' if depth > 0 => depth -= 1,
+            ')' => {
+                list_end = Some(list_start + index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(list_end) = list_end else {
+        return Vec::new();
+    };
+
+    let list = &after_fn[list_start..list_end];
+    let mut parameters = Vec::new();
+    let mut depth = 0i32;
+    let mut current = String::new();
+    let mut previous = ' ';
+    for ch in list.chars() {
+        match ch {
+            '(' | '[' | '<' => depth += 1,
+            ')' | ']' => depth -= 1,
+            '>' if previous != '-' => depth -= 1,
+            ',' if depth == 0 => {
+                parameters.push(std::mem::take(&mut current));
+                previous = ch;
+                continue;
+            }
+            _ => {}
+        }
+        current.push(ch);
+        previous = ch;
+    }
+    parameters.push(current);
+
+    parameters
+        .iter()
+        .filter_map(|parameter| {
+            let pattern = parameter.split(':').next().unwrap_or("").trim();
+            let name = pattern.trim_start_matches("mut ").trim();
+            if name.is_empty()
+                || name
+                    .trim_start_matches('&')
+                    .trim_start_matches("mut ")
+                    .trim()
+                    == "self"
+            {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn secret_parameter_guardrail_reads_signatures() {
+    let source = concat!(
+        "#[",
+        "tracing::instrument(skip(url), fields(strategy = %strategy))]\n",
+        "pub async fn fetch_report<F: Fn(&str) -> bool>(\n",
+        "    url: &str,\n",
+        "    strategy: &str,\n",
+        "    api_key: Option<&str>,\n",
+        "    on_retry: F,\n",
+        ") -> Result<(), String> {\n",
+        "    Ok(())\n",
+        "}\n",
+    );
+    let (_, attribute) = tracing_instrument_attributes(source)[0];
+    let end = attribute.as_ptr() as usize - source.as_ptr() as usize + attribute.len();
+    assert_eq!(
+        instrumented_fn_parameters(source, end),
+        ["url", "strategy", "api_key", "on_retry"]
+    );
+    assert_eq!(instrument_skipped_parameters(attribute), ["url"]);
+    assert_eq!(
+        instrument_skipped_parameters(concat!(
+            "#[",
+            "tracing::instrument(skip(app, db, installation_token))]"
+        )),
+        ["app", "db", "installation_token"]
+    );
+    assert!(instrument_skipped_parameters(concat!("#[", "tracing::instrument]")).is_empty());
+
+    let method = concat!(
+        "#[",
+        "tracing::instrument(skip(self))]\nfn run(&mut self, mut token: String) {}\n"
+    );
+    let (_, attribute) = tracing_instrument_attributes(method)[0];
+    let end = attribute.as_ptr() as usize - method.as_ptr() as usize + attribute.len();
+    assert_eq!(instrumented_fn_parameters(method, end), ["token"]);
+
+    for secret in [
+        "api_key",
+        "installation_token",
+        "passphrase",
+        "client_secret",
+        "license_key",
+    ] {
+        assert!(
+            parameter_names_a_secret(secret),
+            "{secret} must count as a secret"
+        );
+    }
+    for identifier in [
+        "environment_scope_key",
+        "idempotency_key",
+        "project_key",
+        "max_tokens",
+        "token_id",
+        "token_hash",
+        "url",
+    ] {
+        assert!(
+            !parameter_names_a_secret(identifier),
+            "{identifier} is not a secret"
+        );
+    }
+}
+
+/// `tracing::instrument` records every parameter it does not skip as a span
+/// field. tracing's `log` bridge forwards span creation to the log sink, so a
+/// secret parameter left off `skip(...)` is one log-level change away from a
+/// rotating log file. Companion to
+/// `tracing_instrument_fields_do_not_record_raw_or_secretish_values`, which
+/// covers explicit `fields(...)` but not implicit parameter capture.
+#[test]
+fn tracing_instrument_skips_secret_shaped_parameters() {
+    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_source_files(&src_dir, &mut files);
+
+    let mut findings = Vec::new();
+    for file in files {
+        let source = std::fs::read_to_string(&file).expect("read Rust source file");
+        for (line, attribute) in tracing_instrument_attributes(&source) {
+            if attribute.contains("skip_all") {
+                continue;
+            }
+            let skipped = instrument_skipped_parameters(attribute);
+            let end = attribute.as_ptr() as usize - source.as_ptr() as usize + attribute.len();
+            for parameter in instrumented_fn_parameters(&source, end) {
+                if parameter_names_a_secret(&parameter) && !skipped.contains(&parameter) {
+                    let relative = file
+                        .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                        .unwrap_or(&file)
+                        .display();
+                    findings.push(format!("{}:{} records `{}`", relative, line, parameter));
+                }
+            }
+        }
+    }
+
+    assert!(
+        findings.is_empty(),
+        "tracing::instrument must skip secret-shaped parameters (add them to skip(...)): {:?}",
+        findings,
+    );
+}
+
 /// Empty by design: every response body is read through the limited readers.
 /// Adding an entry here is a regression, not a migration step.
 const UNCAPPED_BODY_READ_FILES: &[&str] = &[];
@@ -1759,4 +2047,40 @@ fn broker_threat_model_names_every_scope_and_its_sensitive_commands() {
         doc.contains("compromised renderer"),
         "the document must state the boundary the broker does not defend"
     );
+}
+
+/// The reverse direction of the test above: every command the threat model's
+/// scope table calls sensitive must actually be gated in code. Without this,
+/// a command documented as needing native intent (update_project_path was
+/// one) can silently ship with no dialog.
+#[test]
+fn broker_scope_table_sensitive_commands_are_gated_in_code() {
+    let doc = include_str!("../../../../docs/engineering/privileged-broker-threat-model.md");
+    for scope in crate::commands::privileged_command_broker_scopes() {
+        let row = doc
+            .lines()
+            .find(|line| {
+                line.starts_with('|') && line.contains(&format!("`{}`", scope.broker_command))
+            })
+            .unwrap_or_else(|| panic!("scope table row missing for {}", scope.broker_command));
+        let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+        let sensitive_cell = cells
+            .get(3)
+            .unwrap_or_else(|| panic!("sensitive column missing for {}", scope.broker_command));
+        let documented: Vec<&str> = sensitive_cell.split('`').skip(1).step_by(2).collect();
+        for command in documented {
+            assert!(
+                scope.sensitive.contains(&command),
+                "threat model lists {command} as sensitive for {} but code does not gate it",
+                scope.broker_command
+            );
+        }
+        if scope.sensitive.is_empty() {
+            assert_eq!(
+                *sensitive_cell, "none",
+                "{} has no sensitive commands in code; the doc must say none",
+                scope.broker_command
+            );
+        }
+    }
 }

@@ -418,3 +418,67 @@ fn page_coverage_does_not_resolve_the_other_trailing_slash_identity() {
         "a clean /checkout observation cannot verify /checkout/"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_async_persist_writes_the_same_run_without_blocking_the_worker() {
+    let db = temp_db();
+    let project_id = db
+        .upsert_project("p", "/tmp/canonical-async-persistence", None)
+        .expect("project");
+    let url = "https://example.com";
+    let site_id = db.get_or_create_site(url).expect("site");
+    let execution_id = execution(&db, project_id, url, "persist-async");
+    let batch = normalize_web_scan(
+        &result(url, "security.headers.csp", CheckStatus::Fail),
+        execution_id,
+        None,
+        Some(project_id),
+        site_id,
+        ScanRunKind::Single,
+        100,
+    )
+    .expect("normalize");
+
+    // A timer on the same single-threaded runtime only fires if the async
+    // persist yields instead of parking the worker on the database thread.
+    let ticked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ticker = {
+        let ticked = ticked.clone();
+        tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            ticked.store(true, std::sync::atomic::Ordering::SeqCst);
+        })
+    };
+    let run_id = db
+        .persist_normalized_scan_run_async(batch)
+        .await
+        .expect("async persist");
+    assert!(
+        ticked.load(std::sync::atomic::Ordering::SeqCst),
+        "the async persist must yield the runtime worker to other tasks"
+    );
+    ticker.await.expect("ticker task");
+
+    let (run_count, finding_count) = db
+        .execute(move |conn| {
+            let run_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM scan_runs WHERE id = ?1",
+                    [run_id],
+                    |row| row.get(0),
+                )
+                .expect("run count");
+            let finding_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM scan_findings WHERE run_id = ?1",
+                    [run_id],
+                    |row| row.get(0),
+                )
+                .expect("finding count");
+            (run_count, finding_count)
+        })
+        .expect("read back");
+    assert_eq!(run_count, 1, "the async path must commit the run row");
+    assert_eq!(finding_count, 1, "the async path must commit its findings");
+    assert_eq!(open_checks(&db), vec!["security.csp".to_string()]);
+}

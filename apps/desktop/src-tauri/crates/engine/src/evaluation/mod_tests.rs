@@ -36,6 +36,44 @@ fn request(body: &str) -> EvaluationRequest {
     }
 }
 
+#[test]
+fn the_resolver_plan_gathers_every_selector_an_spf_include_can_derive() {
+    // The plan is authored before the apex TXT answer exists, so it must
+    // cover both the common defaults and any provider selector the SPF
+    // derivation can later ask for. Planning only the common list left every
+    // derived selector ungathered on this path.
+    use crate::checks::security::dns_email::dkim;
+
+    let plan = external_fact_plan(
+        &artifact("<html><body>hi</body></html>")
+            .page_context()
+            .expect("artifact converts"),
+    );
+    let resolver = plan.resolver.expect("a public domain has a resolver plan");
+    let planned: Vec<&str> = resolver
+        .dkim_txt_names
+        .iter()
+        .map(|question| question.selector.as_str())
+        .collect();
+
+    for selector in dkim::COMMON_SELECTORS {
+        assert!(planned.contains(&selector), "{selector} is not planned");
+    }
+    for selector in dkim::all_provider_selectors() {
+        assert!(
+            planned.contains(&selector),
+            "derivable selector {selector} is not planned"
+        );
+    }
+    assert!(
+        resolver
+            .dkim_txt_names
+            .iter()
+            .all(|question| question.name.ends_with("._domainkey.example.com")),
+        "every planned selector question names the registrable domain"
+    );
+}
+
 fn browser_facts() -> BrowserFacts {
     BrowserFacts {
         axe_report: crate::browser::AxeReport {

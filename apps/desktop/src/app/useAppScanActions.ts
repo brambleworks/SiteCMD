@@ -112,7 +112,7 @@ export function useAppScanActions({
         activeUrl: activeEnv?.url ?? null,
         activeProjectId: activeProject?.id ?? null,
         projectFolder,
-        axeEnabled: config?.axeEnabled ?? false,
+        axeEnabled: config?.axeEnabled ?? true,
       });
       const validationError = actions.find((action) => action.kind === "error");
       if (validationError?.kind === "error") {
@@ -152,7 +152,7 @@ export function useAppScanActions({
         urls,
         enabledCategories,
         timeoutSecs: prefs.timeout,
-        axeEnabled: config?.axeEnabled ?? false,
+        axeEnabled: config?.axeEnabled ?? true,
         inspectLocalDatabases: config?.inspectLocalDatabases ?? false,
         projectPath: projectFolder,
         retention: prefs.retentionLimit,

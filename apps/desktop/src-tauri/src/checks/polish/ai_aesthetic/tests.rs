@@ -264,3 +264,45 @@ fn is_gray_rgb_detects_grays() {
     assert!(is_gray_rgb(0, 0, 0));
     assert!(!is_gray_rgb(139, 92, 246)); // purple
 }
+
+#[test]
+fn html_comments_do_not_add_class_or_colour_matches() {
+    // The polish fixture declares its defects in a comment naming the very
+    // classes these signals count.
+    let comment = "<!-- FIXTURE polish. Declared defects: rounded-2xl cards, \
+                   shadow-purple-500 glow, class=\"glow-orb\" blobs; ratio > 0.5 -->";
+
+    // Border radius: 21 real usages, over the >20 threshold.
+    let cards = "<div class=\"rounded-2xl\">Card</div>".repeat(21);
+    let radius_with = excessive_border_radius(&ctx(&format!("{comment}{cards}")));
+    let radius_without = excessive_border_radius(&ctx(&cards));
+    assert!(radius_without.fired, "{}", radius_without.detail);
+    assert_eq!(radius_without.data["tailwind_large_radius"], 21);
+    assert_eq!(
+        radius_with.data["tailwind_large_radius"], radius_without.data["tailwind_large_radius"],
+        "a comment must not add a rounded-2xl usage"
+    );
+
+    // Colored shadows: three real usages, at the >=3 threshold.
+    let glows = "<div class=\"shadow-purple-500\">Card</div>".repeat(3);
+    let glow_with = glow_shadows(&ctx(&format!("{comment}{glows}")));
+    let glow_without = glow_shadows(&ctx(&glows));
+    assert!(glow_without.fired, "{}", glow_without.detail);
+    assert_eq!(glow_without.data["tailwind_colored_shadows"], 3);
+    assert_eq!(
+        glow_with.data["tailwind_colored_shadows"], glow_without.data["tailwind_colored_shadows"],
+        "a comment must not add a colored shadow"
+    );
+
+    // Blob classes: two real usages, at the >=2 threshold. The comment holds a
+    // class attribute of its own.
+    let blobs = "<div class=\"blob\"></div><div class=\"orb\"></div>";
+    let blob_with = floating_blobs(&ctx(&format!("{comment}{blobs}")));
+    let blob_without = floating_blobs(&ctx(blobs));
+    assert!(blob_without.fired, "{}", blob_without.detail);
+    assert_eq!(blob_without.data["blob_class_matches"], 2);
+    assert_eq!(
+        blob_with.data["blob_class_matches"], blob_without.data["blob_class_matches"],
+        "a comment must not add a blob class"
+    );
+}

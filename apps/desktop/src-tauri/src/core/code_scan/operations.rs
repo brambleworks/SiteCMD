@@ -18,6 +18,41 @@ mod typescript_config;
 use runtime_eol::collect_runtime_eol_issues;
 use typescript_config::collect_typescript_config_issues;
 
+/// Whether this file is a first-party Drupal `.install` that actually declares
+/// a schema-change hook. Drupal applies schema changes through `hook_update_N()`
+/// and `hook_post_update_NAME()`, run by `drush updb`; an `.install` holding
+/// only `hook_install()` sets a module up and establishes no update workflow,
+/// so the path alone is not the signal.
+fn drupal_install_file_declares_update_hook(file: &ProjectFile) -> bool {
+    const MAX_INSTALL_FILE_BYTES: u64 = 250_000;
+    let path = file.relative_path.to_ascii_lowercase().replace('\\', "/");
+    if !path.ends_with(".install") || !(path.contains("/modules/") || path.contains("/profiles/")) {
+        return false;
+    }
+    let Some(bytes) = read_project_file(file, MAX_INSTALL_FILE_BYTES) else {
+        return false;
+    };
+    let Ok(content) = String::from_utf8(bytes) else {
+        return false;
+    };
+    declares_drupal_update_hook(&content)
+}
+
+/// `<module>_update_<number>()` and `<module>_post_update_<name>()` are the two
+/// schema-change hook forms Drupal's updater runs.
+fn declares_drupal_update_hook(content: &str) -> bool {
+    content.lines().any(|line| {
+        let Some(rest) = line.trim_start().strip_prefix("function ") else {
+            return false;
+        };
+        rest.contains("_post_update_")
+            || rest
+                .split("_update_")
+                .skip(1)
+                .any(|tail| tail.starts_with(|c: char| c.is_ascii_digit()))
+    })
+}
+
 /// `summaries` is parallel to `files` (same order, same length): the per-file
 /// predicates were computed during the parallel analyze phase so this serial
 /// phase never re-scans file content for corpus-level booleans.
@@ -159,22 +194,25 @@ pub(super) fn analyze_operations(
         path.contains("/migrations/")
             || path.contains("/supabase/migrations/")
             || path.contains("/alembic/versions/")
-    }) || manifests.iter().any(|manifest| {
-        serde_json::from_str::<Value>(&manifest.content)
-            .ok()
-            .and_then(|json| json.get("scripts").and_then(Value::as_object).cloned())
-            .is_some_and(|scripts| {
-                scripts.keys().any(|key| {
-                    let key = key.to_ascii_lowercase();
-                    key == "migrate"
-                        || key.starts_with("migrate:")
-                        || key == "db:migrate"
-                        || key.starts_with("db:migrate:")
-                        || key == "db:push"
-                        || key.starts_with("db:push:")
+    }) || project_files
+        .iter()
+        .any(drupal_install_file_declares_update_hook)
+        || manifests.iter().any(|manifest| {
+            serde_json::from_str::<Value>(&manifest.content)
+                .ok()
+                .and_then(|json| json.get("scripts").and_then(Value::as_object).cloned())
+                .is_some_and(|scripts| {
+                    scripts.keys().any(|key| {
+                        let key = key.to_ascii_lowercase();
+                        key == "migrate"
+                            || key.starts_with("migrate:")
+                            || key == "db:migrate"
+                            || key.starts_with("db:migrate:")
+                            || key == "db:push"
+                            || key.starts_with("db:push:")
+                    })
                 })
-            })
-    });
+        });
     let has_recovery_notes = project_has_path_or_text_signal(
         project_files,
         &[
@@ -365,4 +403,31 @@ fn looks_like_ops_note_path(relative_path: &str) -> bool {
         || relative_path.contains("/docs/")
         || relative_path.contains("/runbooks/")
         || relative_path.contains("/ops/")
+}
+
+#[cfg(test)]
+mod drupal_update_hook_tests {
+    use super::declares_drupal_update_hook;
+
+    #[test]
+    fn only_schema_change_hooks_count_as_an_update_workflow() {
+        assert!(declares_drupal_update_hook(
+            "<?php\nfunction acme_core_update_10001() {\n  return 'done';\n}\n"
+        ));
+        assert!(declares_drupal_update_hook(
+            "<?php\n  function acme_core_post_update_rebuild_index(&$sandbox) {\n}\n"
+        ));
+
+        // Setup and uninstall hooks establish no schema-change workflow, and a
+        // mention outside a declaration is not one either.
+        assert!(!declares_drupal_update_hook(
+            "<?php\nfunction acme_core_install() {\n}\nfunction acme_core_uninstall() {\n}\n"
+        ));
+        assert!(!declares_drupal_update_hook(
+            "<?php\n// See acme_core_update_10001() in the release notes.\n"
+        ));
+        assert!(!declares_drupal_update_hook(
+            "<?php\nfunction acme_core_update_status() {\n}\n"
+        ));
+    }
 }

@@ -79,6 +79,14 @@ impl DetectedStack {
     }
 }
 
+/// `ng-app` or `ng-version` as a real attribute, in either the bare or the
+/// HTML-valid `data-` form. A bare substring test read `ng-app` out of
+/// `<meta name="govuk:publishing-app">`.
+static ANGULAR_ATTRIBUTE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r#"[\s"'](?:data-)?ng-(?:app|version)(?:[\s=>"'/]|$)"#)
+        .expect("static angular attribute regex") // allow-expect: compile-time literal regex
+});
+
 /// Detect the stack from headers and HTML; `lower` is the ASCII-lowercased body.
 #[tracing::instrument(skip(headers, body, lower), fields(body_len = body.len()))]
 pub fn detect_stack(
@@ -182,14 +190,16 @@ fn detect_from_headers(headers: &reqwest::header::HeaderMap, stack: &mut Detecte
     {
         stack.cdn = Some("Cloudflare".into());
     }
+    // `Server: GitHub.com` is sent by github.com itself as well as by Pages,
+    // so the observable fact is GitHub, not the Pages product.
     if headers.contains_key("x-github-request-id")
         || headers
             .get("server")
             .and_then(|v| v.to_str().ok())
-            .map(|s| s.contains("GitHub"))
+            .map(|s| s.to_ascii_lowercase().contains("github"))
             .unwrap_or(false)
     {
-        stack.cdn = Some("GitHub Pages".into());
+        stack.cdn = Some("GitHub".into());
     }
     if (headers.contains_key("x-amz-cf-id") || headers.contains_key("x-amz-request-id"))
         && stack.cdn.is_none()
@@ -208,18 +218,23 @@ fn detect_cms(lower: &str, stack: &mut DetectedStack) {
         return;
     }
 
-    if lower.contains("wp-content") || lower.contains("wp-includes") || lower.contains("wordpress")
-    {
+    // Structural markers only: a brand word in copy, a customer logo, or a
+    // link to a vendor is not evidence that this site runs on it.
+    if lower.contains("wp-content/") || lower.contains("wp-includes/") {
         stack.cms = Some("WordPress".into());
         if stack.framework.is_none() {
             stack.framework = Some("PHP".into());
         }
-    } else if lower.contains("/sites/default/files") || lower.contains("drupal") {
+    } else if lower.contains("/sites/default/files")
+        || lower.contains("drupal-settings-json")
+        || lower.contains("data-drupal")
+        || lower.contains("/core/misc/")
+    {
         stack.cms = Some("Drupal".into());
         if stack.framework.is_none() {
             stack.framework = Some("PHP".into());
         }
-    } else if lower.contains("shopify") || lower.contains("cdn.shopify.com") {
+    } else if lower.contains("cdn.shopify.com") || lower.contains("shopifycdn.com") {
         stack.cms = Some("Shopify".into());
     } else if lower.contains("squarespace") || lower.contains("sqsp.") {
         stack.cms = Some("Squarespace".into());
@@ -227,9 +242,12 @@ fn detect_cms(lower: &str, stack: &mut DetectedStack) {
         stack.cms = Some("Wix".into());
     } else if lower.contains("ghost.org") || lower.contains("ghost.io") {
         stack.cms = Some("Ghost".into());
-    } else if lower.contains("webflow.com") || lower.contains("wf-") {
+    } else if lower.contains("data-wf-page")
+        || lower.contains("data-wf-site")
+        || lower.contains("website-files.com")
+    {
         stack.cms = Some("Webflow".into());
-    } else if lower.contains("contentful") {
+    } else if lower.contains("ctfassets.net") || lower.contains("cdn.contentful.com") {
         stack.cms = Some("Contentful".into());
     }
 }
@@ -255,7 +273,7 @@ fn detect_js_framework(lower: &str, stack: &mut DetectedStack) {
         if stack.framework.is_none() {
             stack.framework = Some("SvelteKit".into());
         }
-    } else if lower.contains("ng-version") || lower.contains("ng-app") {
+    } else if ANGULAR_ATTRIBUTE_RE.is_match(lower) {
         stack.js_framework = Some("Angular".into());
     } else if lower.contains("data-reactroot")
         || lower.contains("data-react")
@@ -425,6 +443,112 @@ mod tests {
         </body></html>"#;
         let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
         assert_eq!(stack.css_framework, Some("Tailwind CSS".into()));
+    }
+
+    #[test]
+    fn a_brand_word_in_page_copy_is_not_a_cms() {
+        // astro.build lists a WordPress logo; tailwindcss.com and github.com
+        // link Shopify as a customer.
+        let headers = HeaderMap::new();
+        let body = r#"<html><body><p class="heading-3">WordPress</p>
+            <a aria-label="Shopify logo" href="https://shopify.com/">Shopify</a>
+            <p>Built for Drupal, WordPress, and Shopify teams.</p>
+            <symbol id="ai:local:logos/wordpress"></symbol></body></html>"#;
+        let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
+        assert_eq!(stack.cms, None);
+        assert_eq!(stack.framework, None, "PHP was inferred from a logo label");
+    }
+
+    #[test]
+    fn a_real_drupal_page_keeps_its_label() {
+        let headers = HeaderMap::new();
+        for body in [
+            r#"<html><body><script type="application/json" data-drupal-selector="drupal-settings-json">{}</script></body></html>"#,
+            r#"<html><body><script src="/core/misc/drupal.js"></script></body></html>"#,
+            r#"<html><body><img src="/sites/default/files/hero.png"></body></html>"#,
+        ] {
+            let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
+            assert_eq!(stack.cms, Some("Drupal".into()), "{body}");
+            assert_eq!(stack.framework, Some("PHP".into()));
+        }
+    }
+
+    #[test]
+    fn a_vendor_link_or_payload_key_is_not_a_headless_cms() {
+        // tailwindcss.com links developers.webflow.com; github.com carries
+        // "contentfulRawJsonResponse" in an embedded payload.
+        let headers = HeaderMap::new();
+        for body in [
+            r#"<html><body><a href="https://developers.webflow.com/?utm_source=x">Webflow</a></body></html>"#,
+            r#"<html><body><script type="application/json">{"contentfulRawJsonResponse":null}</script></body></html>"#,
+        ] {
+            let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
+            assert_eq!(stack.cms, None, "{body} must not name a CMS");
+        }
+    }
+
+    #[test]
+    fn published_webflow_and_contentful_markers_are_still_detected() {
+        let headers = HeaderMap::new();
+        let webflow = r#"<html data-wf-page="abc" data-wf-site="def"><body></body></html>"#;
+        assert_eq!(
+            detect_stack(&headers, webflow, &webflow.to_ascii_lowercase()).cms,
+            Some("Webflow".into())
+        );
+        let contentful =
+            r#"<html><body><img src="https://images.ctfassets.net/x/y/hero.png"></body></html>"#;
+        assert_eq!(
+            detect_stack(&headers, contentful, &contentful.to_ascii_lowercase()).cms,
+            Some("Contentful".into())
+        );
+    }
+
+    #[test]
+    fn a_shopify_cdn_asset_is_still_a_shopify_site() {
+        let headers = HeaderMap::new();
+        let body = r#"<html><body><img src="https://cdn.shopify.com/s/files/1/0000/hero.png"></body></html>"#;
+        let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
+        assert_eq!(stack.cms, Some("Shopify".into()));
+    }
+
+    #[test]
+    fn an_app_name_ending_in_ng_app_is_not_angular() {
+        let headers = HeaderMap::new();
+        let body = r#"<html><head><meta name="govuk:publishing-app" content="frontend">
+            <meta name="govuk:rendering-app" content="frontend"></head><body></body></html>"#;
+        let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
+        assert_eq!(stack.js_framework, None);
+    }
+
+    #[test]
+    fn real_angular_attributes_are_still_detected() {
+        let headers = HeaderMap::new();
+        for body in [
+            r#"<html><body><div ng-app="shop"></div></body></html>"#,
+            r#"<html><body><div data-ng-app="shop"></div></body></html>"#,
+            r#"<html><body><app-root ng-version="17.0.2"></app-root></body></html>"#,
+            r#"<html><body><app-root data-ng-version="17.0.2"></app-root></body></html>"#,
+        ] {
+            let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
+            assert_eq!(
+                stack.js_framework,
+                Some("Angular".into()),
+                "{body} must read as Angular"
+            );
+        }
+    }
+
+    #[test]
+    fn the_github_server_header_is_reported_as_github() {
+        let mut headers = HeaderMap::new();
+        headers.insert("server", HeaderValue::from_static("github.com"));
+        headers.insert(
+            "x-github-request-id",
+            HeaderValue::from_static("DFF7:79BB9:1557076"),
+        );
+        let body = "<html><body>Hello</body></html>";
+        let stack = detect_stack(&headers, body, &body.to_ascii_lowercase());
+        assert_eq!(stack.cdn, Some("GitHub".into()));
     }
 
     #[test]

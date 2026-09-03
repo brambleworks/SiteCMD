@@ -137,8 +137,51 @@ fn result_targets() -> LinkTargets {
         internal: Vec::new(),
         external: Vec::new(),
         excluded_target_count: 1,
+        excluded_reserved_path_count: 0,
         effective_base_url: "https://example.com/base/?token=secret".into(),
     }
+}
+
+#[test]
+fn cloudflare_reserved_paths_are_never_sampled_on_either_host() {
+    let body = r#"
+        <a href="/cdn-cgi/l/email-protection#4b2a2f2a0b2a2f2a">contact</a>
+        <a href="https://other.example/CDN-CGI/l/email-protection">partner contact</a>
+        <a href="/about">about</a>
+        <a href="https://other.example/team">team</a>
+    "#;
+    let targets = resolve_link_targets(&ctx(body), |_| true);
+    assert_eq!(targets.excluded_reserved_path_count, 2);
+    assert_eq!(targets.excluded_target_count, 0);
+    assert_eq!(
+        targets.internal.iter().map(Url::as_str).collect::<Vec<_>>(),
+        vec!["https://example.com/about"]
+    );
+    assert_eq!(
+        targets.external.iter().map(Url::as_str).collect::<Vec<_>>(),
+        vec!["https://other.example/team"]
+    );
+
+    let result = no_link_targets_result(
+        INTERNAL_CHECK_ID,
+        Severity::High,
+        LinkScope::Internal,
+        &targets,
+        BROKEN_LINK_INTERNAL_SAMPLE,
+    );
+    assert_eq!(
+        result.raw_data.as_ref().unwrap()["excluded_reserved_paths"],
+        2
+    );
+}
+
+#[test]
+fn reserved_path_detection_is_prefix_bound() {
+    assert!(is_reserved_path("/cdn-cgi/l/email-protection"));
+    assert!(is_reserved_path("/cdn-cgi/scripts/x.js"));
+    assert!(!is_reserved_path("/cdn-cgi"));
+    assert!(!is_reserved_path("/blog/cdn-cgi/"));
+    assert!(!is_reserved_path("/"));
 }
 
 #[test]

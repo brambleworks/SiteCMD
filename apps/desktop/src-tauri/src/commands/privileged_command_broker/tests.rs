@@ -331,6 +331,19 @@ fn privileged_command_tokens_only_issue_for_registered_brokers() {
 }
 
 #[test]
+fn launching_a_coding_agent_handoff_needs_no_native_intent() {
+    // The handoff only opens the agent's app with a prompt staged in its
+    // composer; nothing runs until the person sends it there. A system
+    // dialog here was pure friction, so the command must stay off the
+    // sensitive list and out of the native-intent manifest.
+    assert!(!privileged_token_issue_requires_user_intent(
+        "run_filesystem_access_command",
+        "launch_agent_handoff",
+    ));
+    assert!(privileged_action_sentence("launch_agent_handoff", &json!({})).is_none());
+}
+
+#[test]
 fn sensitive_privileged_token_issuance_requires_user_intent() {
     for command in SENSITIVE_CONNECTOR_COMMANDS {
         assert!(
@@ -443,11 +456,18 @@ fn sensitive_privileged_token_issuance_requires_user_intent() {
 }
 
 #[test]
-fn updating_a_project_path_does_not_require_native_confirmation() {
-    assert!(!privileged_token_issue_requires_user_intent(
-        "run_filesystem_access_command",
-        "update_project_path",
-    ));
+fn updating_a_project_path_requires_native_confirmation() {
+    // Repointing a project chooses which folder every non-sensitive read
+    // (run_code_scan_audit, resolve_project_files, get_git_status,
+    // read_recent_logs) exposes next. Without this gate a compromised main
+    // renderer could silently aim a project at ~/.ssh and read it back.
+    assert!(
+        privileged_token_issue_requires_user_intent(
+            "run_filesystem_access_command",
+            "update_project_path",
+        ),
+        "update_project_path decides what the non-sensitive reads expose and must prompt",
+    );
 }
 
 #[test]

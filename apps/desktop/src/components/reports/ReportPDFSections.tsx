@@ -76,7 +76,7 @@ export function ExecutiveSummaryPage({ data }: { data: ReportData }) {
           ? ` ${data.resolvedCount} issue${data.resolvedCount > 1 ? "s" : ""} were resolved during this period.`
           : ""}
         {codeScan
-          ? ` Linked code issues add ${codeScan.criticalCount} critical and ${codeScan.highCount} high issues, led by ${codeScan.topDomain || "Code Scan"}.${codeScan.domainTrend ? ` ${codeScan.domainTrend}.` : ""}`
+          ? ` Code issues add ${codeScan.criticalCount} critical and ${codeScan.highCount} high issues, led by ${codeScan.topDomain || "Code Scan"}.${codeScan.domainTrend ? ` ${codeScan.domainTrend}.` : ""}`
           : ""}
       </Text>
       {codeScan ? <CodeScanSnapshot codeScan={codeScan} /> : null}

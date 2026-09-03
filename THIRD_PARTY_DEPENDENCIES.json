@@ -428,6 +428,19 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "async-compression",
+      "version": "0.4.41",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Nullus157/async-compression",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "scopes": [
+        "cli-rust",
+        "desktop-rust"
+      ],
+      "licenseFiles": []
+    },
+    {
+      "ecosystem": "cargo",
       "name": "async-executor",
       "version": "1.14.0",
       "license": "Apache-2.0 OR MIT",
@@ -1475,6 +1488,32 @@
           "sha256": "09f1f9643769494262b9cacec3852201242b9c819f7d5316c7530be1c9855f75"
         }
       ]
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "compression-codecs",
+      "version": "0.4.37",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Nullus157/async-compression",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "scopes": [
+        "cli-rust",
+        "desktop-rust"
+      ],
+      "licenseFiles": []
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "compression-core",
+      "version": "0.4.31",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Nullus157/async-compression",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "scopes": [
+        "cli-rust",
+        "desktop-rust"
+      ],
+      "licenseFiles": []
     },
     {
       "ecosystem": "cargo",
@@ -14516,7 +14555,7 @@
     {
       "ecosystem": "npm",
       "name": "@hono/node-server",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "license": "MIT",
       "repository": "git+https://github.com/honojs/node-server.git",
       "source": "npm",
@@ -14630,7 +14669,19 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/font",
-      "version": "4.0.10",
+      "version": "4.1.2",
+      "license": "MIT",
+      "repository": "https://github.com/diegomura/react-pdf.git",
+      "source": "npm",
+      "scopes": [
+        "desktop-javascript"
+      ],
+      "licenseFiles": []
+    },
+    {
+      "ecosystem": "npm",
+      "name": "@react-pdf/hyphenate",
+      "version": "0.1.0",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14642,7 +14693,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/image",
-      "version": "3.1.1",
+      "version": "3.1.2",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14654,7 +14705,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/layout",
-      "version": "4.7.1",
+      "version": "5.2.0",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14665,25 +14716,20 @@
     },
     {
       "ecosystem": "npm",
-      "name": "@react-pdf/pdfkit",
-      "version": "6.0.1",
+      "name": "@react-pdf/paginate",
+      "version": "1.0.1",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
       "scopes": [
         "desktop-javascript"
       ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "6280262da3f2d6a51605f96480cc6433f9764f9cd9c0f80aa570fe0832f75655"
-        }
-      ]
+      "licenseFiles": []
     },
     {
       "ecosystem": "npm",
       "name": "@react-pdf/primitives",
-      "version": "4.3.0",
+      "version": "4.4.0",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14707,7 +14753,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/render",
-      "version": "4.6.1",
+      "version": "4.7.0",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14719,7 +14765,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/renderer",
-      "version": "4.6.1",
+      "version": "4.9.0",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14731,7 +14777,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/stylesheet",
-      "version": "6.2.3",
+      "version": "6.3.2",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14743,7 +14789,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/svg",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14755,7 +14801,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/textkit",
-      "version": "6.4.1",
+      "version": "7.0.1",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14767,7 +14813,7 @@
     {
       "ecosystem": "npm",
       "name": "@react-pdf/types",
-      "version": "2.11.3",
+      "version": "2.14.0",
       "license": "MIT",
       "repository": "https://github.com/diegomura/react-pdf.git",
       "source": "npm",
@@ -14796,7 +14842,7 @@
     {
       "ecosystem": "npm",
       "name": "@tanstack/query-core",
-      "version": "5.101.4",
+      "version": "5.102.8",
       "license": "MIT",
       "repository": "git+https://github.com/TanStack/query.git",
       "source": "npm",
@@ -14813,7 +14859,7 @@
     {
       "ecosystem": "npm",
       "name": "@tanstack/react-query",
-      "version": "5.101.4",
+      "version": "5.102.8",
       "license": "MIT",
       "repository": "git+https://github.com/TanStack/query.git",
       "source": "npm",
@@ -14868,7 +14914,7 @@
     {
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-clipboard-manager",
-      "version": "2.3.2",
+      "version": "2.3.3",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "source": "npm",
@@ -14885,7 +14931,7 @@
     {
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-deep-link",
-      "version": "2.4.9",
+      "version": "2.4.10",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "source": "npm",
@@ -14902,7 +14948,7 @@
     {
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-dialog",
-      "version": "2.7.2",
+      "version": "2.7.3",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "source": "npm",
@@ -15106,7 +15152,7 @@
     {
       "ecosystem": "npm",
       "name": "@ungap/structured-clone",
-      "version": "1.3.3",
+      "version": "1.4.0",
       "license": "ISC",
       "repository": "git+https://github.com/ungap/structured-clone.git",
       "source": "npm",
@@ -15538,7 +15584,7 @@
     {
       "ecosystem": "npm",
       "name": "content-type",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "license": "MIT",
       "repository": "jshttp/content-type",
       "source": "npm",
@@ -15908,7 +15954,7 @@
     {
       "ecosystem": "npm",
       "name": "eventsource-parser",
-      "version": "3.1.0",
+      "version": "3.1.1",
       "license": "MIT",
       "repository": "git+ssh://git@github.com/rexxars/eventsource-parser.git",
       "source": "npm",
@@ -15942,7 +15988,7 @@
     {
       "ecosystem": "npm",
       "name": "express-rate-limit",
-      "version": "8.6.2",
+      "version": "8.7.0",
       "license": "MIT",
       "repository": "git+https://github.com/express-rate-limit/express-rate-limit.git",
       "source": "npm",
@@ -15951,8 +15997,8 @@
       ],
       "licenseFiles": [
         {
-          "name": "license.md",
-          "sha256": "90021adfb24b0a7af5754cebc6085e2560555f74d29a6d44a7f9a32125f8b348"
+          "name": "license",
+          "sha256": "a752c164b45840ef677e68c738aefabfd665ee9f112ada4538761301a97118b0"
         }
       ]
     },
@@ -16011,7 +16057,7 @@
     {
       "ecosystem": "npm",
       "name": "fast-uri",
-      "version": "3.1.5",
+      "version": "3.1.6",
       "license": "BSD-3-Clause",
       "repository": "git+https://github.com/fastify/fast-uri.git",
       "source": "npm",
@@ -16329,7 +16375,7 @@
     {
       "ecosystem": "npm",
       "name": "hono",
-      "version": "4.13.1",
+      "version": "4.13.5",
       "license": "MIT",
       "repository": "git+https://github.com/honojs/hono.git",
       "source": "npm",
@@ -16404,7 +16450,7 @@
     {
       "ecosystem": "npm",
       "name": "hyphen",
-      "version": "1.14.1",
+      "version": "1.6.6",
       "license": "ISC",
       "repository": "git+https://github.com/ytiurin/hyphen",
       "source": "npm",
@@ -16414,7 +16460,7 @@
       "licenseFiles": [
         {
           "name": "LICENSE",
-          "sha256": "90be1a1205349e8540e0132241ebc58e8d21f5f405171b73cc885b5f9eb3fed4"
+          "sha256": "3f2b18e632f91ec65fe6b649104a410b73e50aaddd04986eaf8b3e14c3826e2e"
         }
       ]
     },
@@ -16473,7 +16519,7 @@
     {
       "ecosystem": "npm",
       "name": "ip-address",
-      "version": "10.5.0",
+      "version": "10.7.0",
       "license": "MIT",
       "repository": "https://github.com/beaugunderson/ip-address.git",
       "source": "npm",
@@ -16660,7 +16706,7 @@
     {
       "ecosystem": "npm",
       "name": "jose",
-      "version": "6.2.8",
+      "version": "6.2.10",
       "license": "MIT",
       "repository": "panva/jose",
       "source": "npm",
@@ -16671,23 +16717,6 @@
         {
           "name": "LICENSE.md",
           "sha256": "8078b0829d6c3e9ecde2f003e1966e4cad3efc6e7a640efbab0313cc166b1af1"
-        }
-      ]
-    },
-    {
-      "ecosystem": "npm",
-      "name": "js-md5",
-      "version": "0.8.3",
-      "license": "MIT",
-      "repository": "https://github.com/emn178/js-md5.git",
-      "source": "npm",
-      "scopes": [
-        "desktop-javascript"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE.txt",
-          "sha256": "ac52bd3e7b6e3155c416a6d875c5738fa2c315015fca5a70b21b6863662abd67"
         }
       ]
     },
@@ -16813,7 +16842,7 @@
     {
       "ecosystem": "npm",
       "name": "lucide-react",
-      "version": "1.33.0",
+      "version": "1.39.0",
       "license": "ISC",
       "repository": "https://github.com/lucide-icons/lucide.git",
       "source": "npm",
@@ -16983,9 +17012,9 @@
     {
       "ecosystem": "npm",
       "name": "media-engine",
-      "version": "1.0.3",
+      "version": "2.0.0",
       "license": "MIT",
-      "repository": null,
+      "repository": "https://github.com/diegomura/media-engine.git",
       "source": "npm",
       "scopes": [
         "desktop-javascript"
@@ -17438,7 +17467,7 @@
     {
       "ecosystem": "npm",
       "name": "negotiator",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "license": "MIT",
       "repository": "jshttp/negotiator",
       "source": "npm",
@@ -17642,6 +17671,23 @@
     },
     {
       "ecosystem": "npm",
+      "name": "pdfkit",
+      "version": "0.20.1",
+      "license": "MIT",
+      "repository": "https://github.com/foliojs/pdfkit.git",
+      "source": "npm",
+      "scopes": [
+        "desktop-javascript"
+      ],
+      "licenseFiles": [
+        {
+          "name": "LICENSE",
+          "sha256": "6280262da3f2d6a51605f96480cc6433f9764f9cd9c0f80aa570fe0832f75655"
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
       "name": "pkce-challenge",
       "version": "5.0.1",
       "license": "MIT",
@@ -17745,7 +17791,7 @@
     {
       "ecosystem": "npm",
       "name": "qs",
-      "version": "6.15.3",
+      "version": "6.16.0",
       "license": "BSD-3-Clause",
       "repository": "https://github.com/ljharb/qs.git",
       "source": "npm",
@@ -18000,23 +18046,6 @@
     },
     {
       "ecosystem": "npm",
-      "name": "safe-buffer",
-      "version": "5.2.1",
-      "license": "MIT",
-      "repository": "git://github.com/feross/safe-buffer.git",
-      "source": "npm",
-      "scopes": [
-        "desktop-javascript"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac"
-        }
-      ]
-    },
-    {
-      "ecosystem": "npm",
       "name": "safer-buffer",
       "version": "2.1.2",
       "license": "MIT",
@@ -18250,23 +18279,6 @@
         {
           "name": "LICENSE",
           "sha256": "512cfa4d5e7a7569c7ae4dd95241cb6ae2aaf648ef9ebd080c01bd24868d26e9"
-        }
-      ]
-    },
-    {
-      "ecosystem": "npm",
-      "name": "string_decoder",
-      "version": "1.3.0",
-      "license": "MIT",
-      "repository": "git://github.com/nodejs/string_decoder.git",
-      "source": "npm",
-      "scopes": [
-        "desktop-javascript"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54"
         }
       ]
     },
@@ -18612,23 +18624,6 @@
     },
     {
       "ecosystem": "npm",
-      "name": "util-deprecate",
-      "version": "1.0.2",
-      "license": "MIT",
-      "repository": "git://github.com/TooTallNate/util-deprecate.git",
-      "source": "npm",
-      "scopes": [
-        "desktop-javascript"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7"
-        }
-      ]
-    },
-    {
-      "ecosystem": "npm",
       "name": "vary",
       "version": "1.1.2",
       "license": "MIT",
@@ -18675,23 +18670,6 @@
         {
           "name": "license",
           "sha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
-        }
-      ]
-    },
-    {
-      "ecosystem": "npm",
-      "name": "vite-compatible-readable-stream",
-      "version": "3.6.1",
-      "license": "MIT",
-      "repository": "git://github.com/TechInSite/readable-stream",
-      "source": "npm",
-      "scopes": [
-        "desktop-javascript"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE",
-          "sha256": "ec62dc96da0099b87f4511736c87309335527fb7031639493e06c95728dc8c54"
         }
       ]
     },
@@ -18761,7 +18739,7 @@
     {
       "ecosystem": "npm",
       "name": "zod",
-      "version": "4.4.3",
+      "version": "4.5.4",
       "license": "MIT",
       "repository": "git+https://github.com/colinhacks/zod.git",
       "source": "npm",

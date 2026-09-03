@@ -34,7 +34,6 @@ impl Check for DevDependenciesCheck {
             ("hot-update.js", "HMR update script"),
             ("__webpack_hmr", "Webpack HMR"),
             ("vite/client", "Vite HMR client"),
-            ("@vite/client", "Vite HMR client"),
             ("react-refresh", "React Fast Refresh"),
             ("_next/webpack-hmr", "Next.js HMR"),
             ("turbopack-hmr", "Turbopack HMR"),
@@ -42,8 +41,10 @@ impl Check for DevDependenciesCheck {
             ("browsersync", "BrowserSync"),
         ];
 
+        // Several patterns describe the same runtime (browser-sync/browsersync),
+        // so the label list is deduplicated before it reaches the description.
         for (pattern, label) in patterns {
-            if body_lower.contains(pattern) {
+            if body_lower.contains(pattern) && !found.contains(&label) {
                 found.push(label);
             }
         }

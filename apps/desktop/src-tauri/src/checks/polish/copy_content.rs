@@ -4,6 +4,8 @@
 
 use super::{PolishContext, PolishResult, SignalCategory, SignalWeight};
 use regex::Regex;
+use sitecmd_engine::checks::html_attrs::{attr_value, tag_slices};
+use sitecmd_engine::checks::security::dns_email::{registrable_domain_for_url, DomainTarget};
 use std::sync::LazyLock;
 
 const CATEGORY: SignalCategory = SignalCategory::CopyContent;
@@ -20,18 +22,18 @@ static SENTENCE_RE: LazyLock<Regex> =
 static HEADING_TEXT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<h[1-6][^>]*>(.*?)</h[1-6]>").expect("heading text regex"));
 
+/// The document title, whose site-name segment can name the brand.
+static TITLE_TEXT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title>").expect("title text regex"));
+
+/// Separators between a title's page segment and its site-name segment.
+const TITLE_SEPARATORS: &[char] = &[
+    '|', '-', '\u{2013}', '\u{2014}', '\u{00b7}', '\u{2022}', ':',
+];
+
 /// Strips HTML tags to get plain text
 static HTML_TAG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<[^>]+>").expect("html tag regex"));
-
-/// A `<script>...</script>` block, removed whole so JS is never read as prose.
-static SCRIPT_BLOCK_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<script\b[^>]*>.*?</script>").expect("script block regex"));
-
-/// A `<style>...</style>` block, removed whole so CSS declarations (e.g.
-/// `transform:`) are never counted as marketing buzzwords.
-static STYLE_BLOCK_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<style\b[^>]*>.*?</style>").expect("style block regex"));
 
 /// Matches "whether you're a" or "whether you are a" patterns
 static INCLUSIVE_FRAMING_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -43,6 +45,22 @@ static EMOJI_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[\x{1F300}-\x{1F3FA}\x{1F400}-\x{1F9FF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}\x{1FA00}-\x{1FA6F}\x{1FA70}-\x{1FAFF}]")
         .expect("emoji regex")
 });
+
+/// An `<h2>`/`<h3>` element, optionally preceded by one short inline element
+/// (the `<span>emoji</span><h3>Title</h3>` shape feature cards use). Group 1 is
+/// that element's text, group 2 the heading's inner HTML.
+static EMOJI_CARD_HEADING_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?is)(?:<(?:span|div|p|em|strong|i|b)(?-u:\b)[^>]*>([^<]{0,80})</(?:span|div|p|em|strong|i|b)>\s*)?<h[23](?-u:\b)[^>]*>(.*?)</h[23]>",
+    )
+    .expect("emoji card heading regex")
+});
+
+/// A three-column grid utility class, in the Tailwind spelling or the spaced
+/// variant some generators emit. Case-insensitive, so the caller does not have
+/// to allocate a lowercase copy of the stripped markup.
+static THREE_COLUMN_CLASS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)grid[- ]cols-3").expect("three column class regex"));
 
 /// Heading and list text used for feature-section emoji detection.
 static FEATURE_H2_RE: LazyLock<Regex> =
@@ -68,8 +86,16 @@ static AI_HEADER_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         // "Reimagine/Revolutionize/Transform Your [Noun]"
         Regex::new(r"(?i)^(reimagine|revolutionize|transform|redefine|reinvent)\s+your\s+")
             .unwrap(),
-        // "Why [Product/Feature]?"
-        Regex::new(r"(?i)^why\s+[A-Za-z0-9_]+.*\?$").unwrap(),
+        // "Why X matters". A bare "Why ...?" matched ordinary question
+        // headlines - "Why did Courteeners frontman buy tickets to his own
+        // gig?" is journalism, not a marketing formula - so the fixed
+        // "matters" tail is what makes the shape a formula.
+        Regex::new(r"(?i)^why\s+.{1,60}?\s+matters(?-u:\b)").unwrap(),
+        // "The ultimate guide to X"
+        Regex::new(r"(?i)^the\s+(?:ultimate|complete|definitive|essential)\s+guide\s+to(?-u:\b)")
+            .unwrap(),
+        // "N ways to X", "7 simple ways to X"
+        Regex::new(r"(?i)^\d+\s+(?:[A-Za-z0-9_-]+\s+)?ways\s+to(?-u:\b)").unwrap(),
         // "[Noun]: Reimagined/Redefined/Reinvented"
         Regex::new(r"(?i):\s*(reimagined|redefined|reinvented)\s*$").unwrap(),
         // "The Future of [Noun]"
@@ -128,11 +154,13 @@ const TIER_3_WORDS: &[&str] = &[
     "stunning",
 ];
 
-/// Extract prose from HTML without script or style content.
+/// Extract prose from HTML. Comments, scripts, and styles are removed whole:
+/// none of them is rendered copy, and a comment that carries a `>` used to leak
+/// its tail into the prose these signals count.
 fn strip_html(html: &str) -> String {
-    let without_script = SCRIPT_BLOCK_RE.replace_all(html, " ");
-    let without_code = STYLE_BLOCK_RE.replace_all(&without_script, " ");
-    let text = HTML_TAG_RE.replace_all(&without_code, " ");
+    let without_non_content =
+        crate::checks::seo::headings::NON_CONTENT_BLOCK_RE.replace_all(html, " ");
+    let text = HTML_TAG_RE.replace_all(&without_non_content, " ");
     text.replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
@@ -141,10 +169,155 @@ fn strip_html(html: &str) -> String {
         .replace("&nbsp;", " ")
 }
 
-/// Extract heading text content from HTML.
-fn extract_heading_text(html: &str) -> Vec<String> {
-    HEADING_TEXT_RE
+/// The page markup with comments, scripts, and styles removed, tags intact.
+/// Headings, list items, and card structure are rendered content: a heading
+/// inside a comment or a JS template string is not on the page, so no signal
+/// may count it. `strip_html` removes the same blocks before flattening to
+/// prose; this keeps the tags the structural signals match on.
+fn rendered_markup(html: &str) -> std::borrow::Cow<'_, str> {
+    crate::checks::seo::headings::NON_CONTENT_BLOCK_RE.replace_all(html, " ")
+}
+
+/// Lowercase words of a site name, split at punctuation, spaces, and
+/// camel-case boundaries ("SmartHomeU" gives smart, home, u).
+fn brand_words(name: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut previous_lower = false;
+    for ch in name.chars() {
+        if ch.is_alphanumeric() {
+            if ch.is_uppercase() && previous_lower && !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            current.extend(ch.to_lowercase());
+            previous_lower = ch.is_lowercase();
+        } else {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            previous_lower = false;
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// Lowercase alphanumerics only, so "Smart Home U" and "smarthomeu" compare equal.
+fn alphanumeric_key(text: &str) -> String {
+    text.chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Words that name the site rather than sell it. The registrable domain's
+/// label is matched as a substring because labels concatenate words
+/// (smarthomeu contains "smart"). `og:site_name`, and any `<title>` segment
+/// that repeats the site name, contribute whole words; the rest of the title
+/// is page copy and must not exempt its own buzzwords.
+struct BrandTerms {
+    domain_label: Option<String>,
+    words: Vec<String>,
+    /// Hyphen-joined site names, so a hyphenated dictionary entry such as
+    /// "cutting-edge" matches a brand like "Cutting Edge Tools".
+    phrases: Vec<String>,
+}
+
+impl BrandTerms {
+    fn from_page(ctx: &PolishContext) -> Self {
+        let domain_label = match registrable_domain_for_url(&ctx.url) {
+            DomainTarget::Registrable(domain) => domain
+                .split('.')
+                .next()
+                .map(|label| label.to_ascii_lowercase()),
+            DomainTarget::LocalOrIp => None,
+        };
+        // Open Graph specifies `property`, but enough generators and CMS
+        // templates emit `name` that reading only one of them loses the site
+        // name on real pages. Either spelling identifies the same tag.
+        let site_name = tag_slices(&ctx.html, ctx.html_lower(), "meta")
+            .into_iter()
+            .find(|tag| {
+                ["property", "name"].iter().any(|attribute| {
+                    attr_value(tag, attribute)
+                        .is_some_and(|value| value.eq_ignore_ascii_case("og:site_name"))
+                })
+            })
+            .and_then(|tag| attr_value(tag, "content"))
+            .map(|content| strip_html(&content).trim().to_string())
+            .filter(|content| !content.is_empty());
+        let mut names: Vec<String> = site_name.into_iter().collect();
+        if let Some(title) = TITLE_TEXT_RE
+            .captures(&ctx.html)
+            .map(|cap| strip_html(&cap[1]))
+        {
+            for segment in title.split(TITLE_SEPARATORS) {
+                let key = alphanumeric_key(segment);
+                if key.is_empty() {
+                    continue;
+                }
+                let repeats_site_name = names.iter().any(|name| alphanumeric_key(name) == key)
+                    || domain_label.as_deref() == Some(key.as_str());
+                if repeats_site_name {
+                    names.push(segment.trim().to_string());
+                }
+            }
+        }
+        let mut words = Vec::new();
+        let mut phrases = Vec::new();
+        for name in &names {
+            let name_words = brand_words(name);
+            phrases.push(name_words.join("-"));
+            words.extend(name_words);
+        }
+        Self {
+            domain_label,
+            words,
+            phrases,
+        }
+    }
+
+    fn exempts(&self, word: &str) -> bool {
+        self.domain_label
+            .as_deref()
+            .is_some_and(|label| label.contains(word))
+            || self.words.iter().any(|brand_word| brand_word == word)
+            || (word.contains('-') && self.phrases.iter().any(|phrase| phrase.contains(word)))
+    }
+}
+
+/// The dictionary tier a scoring weight belongs to. The raw data reports both,
+/// so "tier" always means the tier number and never the weight.
+fn tier_for_weight(weight: u32) -> u32 {
+    match weight {
+        3 => 1,
+        2 => 2,
+        _ => 3,
+    }
+}
+
+/// Count `<h2>`/`<h3>` headings whose own text, or the short inline element
+/// immediately before them, carries an emoji. Matching "emoji ... next
+/// heading" instead never counted the last card of a section, and used a
+/// narrower emoji class than `emoji_as_icons`.
+fn emoji_heading_count(html: &str) -> usize {
+    EMOJI_CARD_HEADING_RE
         .captures_iter(html)
+        .filter(|caps| {
+            let preceding = caps.get(1).map_or("", |m| m.as_str());
+            EMOJI_RE.is_match(preceding) || EMOJI_RE.is_match(&strip_html(&caps[2]))
+        })
+        .count()
+}
+
+/// Extract heading text content from HTML, ignoring comments, scripts, and
+/// styles: a commented-out `<h2>` is not a heading on the page.
+fn extract_heading_text(html: &str) -> Vec<String> {
+    let rendered = rendered_markup(html);
+    HEADING_TEXT_RE
+        .captures_iter(&rendered)
         .map(|cap| strip_html(&cap[1]).trim().to_string())
         .filter(|t| !t.is_empty())
         .collect()
@@ -225,6 +398,11 @@ pub fn ai_buzzword_dictionary(ctx: &PolishContext) -> PolishResult {
     let mut total_score = 0.0f64;
     let mut found_words: Vec<(String, usize, u32)> = Vec::new(); // (word, count, tier_weight)
 
+    // A dictionary word that names the site (SmartHomeU, "smart") is the
+    // product category, not marketing filler.
+    let brand = BrandTerms::from_page(ctx);
+    let mut brand_words_excluded: Vec<&str> = Vec::new();
+
     let check_word = |word: &str, tier_weight: u32| -> (usize, f64) {
         let heading_count = count_word(&heading_text, word);
         let body_count = count_word(&body_text, word);
@@ -235,25 +413,21 @@ pub fn ai_buzzword_dictionary(ctx: &PolishContext) -> PolishResult {
         (total_count, score)
     };
 
-    for word in TIER_1_WORDS {
-        let (count, score) = check_word(word, 3);
-        if count > 0 {
+    for (words, tier_weight) in [(TIER_1_WORDS, 3), (TIER_2_WORDS, 2), (TIER_3_WORDS, 1)] {
+        for word in words {
+            // Count first, so the exclusion list names only words the page
+            // actually uses. A brand that happens to contain a dictionary word
+            // must not report suppressing copy that was never written.
+            let (count, score) = check_word(word, tier_weight);
+            if count == 0 {
+                continue;
+            }
+            if brand.exempts(word) {
+                brand_words_excluded.push(word);
+                continue;
+            }
             total_score += score;
-            found_words.push((word.to_string(), count, 3));
-        }
-    }
-    for word in TIER_2_WORDS {
-        let (count, score) = check_word(word, 2);
-        if count > 0 {
-            total_score += score;
-            found_words.push((word.to_string(), count, 2));
-        }
-    }
-    for word in TIER_3_WORDS {
-        let (count, score) = check_word(word, 1);
-        if count > 0 {
-            total_score += score;
-            found_words.push((word.to_string(), count, 1));
+            found_words.push((word.to_string(), count, tier_weight));
         }
     }
 
@@ -280,17 +454,27 @@ pub fn ai_buzzword_dictionary(ctx: &PolishContext) -> PolishResult {
                 "total_score": total_score.round() as u32,
                 "words_found": found_words.len(),
                 "top_words": found_words.iter().take(10)
-                    .map(|(w, c, t)| serde_json::json!({"word": w, "count": c, "tier": t}))
+                    .map(|(w, c, weight)| serde_json::json!({
+                        "word": w,
+                        "count": c,
+                        "weight": weight,
+                        "tier": tier_for_weight(*weight),
+                    }))
                     .collect::<Vec<_>>(),
+                "brand_words_excluded": brand_words_excluded,
             }),
         )
     } else {
-        PolishResult::clear(
+        let mut result = PolishResult::clear(
             "ai-buzzword-dictionary",
             "High Marketing Buzzword Density",
             SignalWeight::High,
             CATEGORY,
-        )
+        );
+        if !brand_words_excluded.is_empty() {
+            result.data = serde_json::json!({ "brand_words_excluded": brand_words_excluded });
+        }
+        result
     }
 }
 
@@ -361,10 +545,11 @@ pub fn inclusive_framing(ctx: &PolishContext) -> PolishResult {
 
 /// Flag three or more emoji in feature headings and lists (Medium, 8).
 pub fn emoji_as_icons(ctx: &PolishContext) -> PolishResult {
+    let rendered = rendered_markup(&ctx.html);
     let mut emoji_count = 0usize;
 
     for re in [&*FEATURE_H2_RE, &*FEATURE_H3_RE, &*FEATURE_LI_RE] {
-        for cap in re.captures_iter(&ctx.html) {
+        for cap in re.captures_iter(&rendered) {
             let content = &cap[1];
             emoji_count += EMOJI_RE.find_iter(content).count();
         }
@@ -390,35 +575,35 @@ pub fn emoji_as_icons(ctx: &PolishContext) -> PolishResult {
 }
 /// Detect a three-column feature grid only when emoji headings add a second signal.
 pub fn three_column_grid(ctx: &PolishContext) -> PolishResult {
-    let html_lower = ctx.html_lower();
-    let has_grid_container = html_lower.contains("grid-cols-3")
-        || html_lower.contains("grid cols-3")
+    // All three conditions describe rendered markup, so all three read the
+    // comment-, script-, and style-free view. A commented-out card section is
+    // not a layout the visitor sees.
+    let rendered = rendered_markup(&ctx.html);
+    // A generic grid does not prove a three-column layout, so the specific
+    // class is tracked separately and reused in the detail copy below.
+    let has_three_col_class = THREE_COLUMN_CLASS_RE.is_match(&rendered);
+    let has_grid_container = has_three_col_class
         || Regex::new(r#"(?i)class\s*=\s*["'][^"']*\bgrid\b[^"']*["']"#)
             .ok()
-            .map(|r| r.is_match(&ctx.html))
+            .map(|r| r.is_match(&rendered))
             .unwrap_or(false);
 
     // Count h2/h3 tags that are immediately followed (within 200 chars) by a <p>
     let heading_p_pattern =
         Regex::new(r"(?is)<h[23][^>]*>.*?</h[23]>\s*(?:.{0,200}?)<p(?-u:\b)").ok();
     let heading_p_count = heading_p_pattern
-        .map(|r| r.find_iter(&ctx.html).count())
+        .map(|r| r.find_iter(&rendered).count())
         .unwrap_or(0);
 
-    // Check for emoji before headings (emoji + heading pattern repeated 3 times)
-    let emoji_heading_count = Regex::new(r"(?s)[\x{1F300}-\x{1F9FF}\x{2600}-\x{26FF}].*?<h[23]")
-        .ok()
-        .map(|r| r.find_iter(&ctx.html).count())
-        .unwrap_or(0);
+    // Count card headings that carry an emoji, in the heading itself or in the
+    // inline element immediately before it.
+    let emoji_heading_count = emoji_heading_count(&rendered);
 
     // Require grid, repeated cards, and emoji headings together; grid alone is
     // too common to be meaningful.
     let detected = has_grid_container && heading_p_count >= 3 && emoji_heading_count >= 3;
 
     if detected {
-        // A generic grid does not prove a three-column layout.
-        let has_three_col_class =
-            html_lower.contains("grid-cols-3") || html_lower.contains("grid cols-3");
         let detail = if has_three_col_class {
             "3-column feature grid with emoji headings and heading + paragraph cards detected"
         } else {

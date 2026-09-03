@@ -96,6 +96,8 @@ pub(in crate::core::code_scan) static SUPPLY_CHAIN_UNUSED_IGNORE_EXACT: &[&str] 
     "serve",
     "http-server",
     "browser-sync",
+    // Loaded by Laravel Mix's browserSync() component, never imported directly.
+    "browser-sync-webpack-plugin",
     "live-server",
     // Git hooks
     "turbo",

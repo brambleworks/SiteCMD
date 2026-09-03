@@ -267,3 +267,69 @@ fn skips_sensitive_server_action_findings_when_guarded_and_validated() {
         .iter()
         .any(|issue| issue.id.starts_with("stripe-user-controlled-price:")));
 }
+
+const SINGLE_WRITE_ACTIONS: &str = r#""use server";
+
+import { createClient } from "@/lib/supabase/server";
+
+export async function submitTip(formData: FormData) {
+  const supabase = await createClient();
+  await supabase.from("tips").insert({ text: formData.get("text") });
+  return { success: true };
+}
+
+export async function approveTip(tipId: string) {
+  const supabase = await createClient();
+  await supabase.from("tips").update({ status: "approved" }).eq("id", tipId);
+  return { success: true };
+}
+
+export async function rejectTip(tipId: string) {
+  const supabase = await createClient();
+  await supabase.from("tips").update({ status: "rejected" }).eq("id", tipId);
+  return { success: true };
+}
+"#;
+
+#[test]
+fn skips_multi_write_finding_when_each_handler_performs_one_write() {
+    let temp = TempDir::new().unwrap();
+    write_file(temp.path(), "lib/actions/tips.ts", SINGLE_WRITE_ACTIONS);
+
+    let report = audit_project(temp.path()).unwrap();
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("multi-write-no-transaction:")),
+        "one write per exported handler shares no invariant, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_multi_write_inside_one_handler_among_single_write_siblings() {
+    let temp = TempDir::new().unwrap();
+    let mut content = SINGLE_WRITE_ACTIONS.to_string();
+    content.push_str(
+        r#"
+export async function mergeTips(keepId: string, dropId: string) {
+  const supabase = await createClient();
+  await supabase.from("tips").update({ merged_into: keepId }).eq("id", dropId);
+  await supabase.from("tips").delete().eq("id", dropId);
+  return { success: true };
+}
+"#,
+    );
+    write_file(temp.path(), "lib/actions/tips.ts", &content);
+
+    let report = audit_project(temp.path()).unwrap();
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.id == "multi-write-no-transaction:lib/actions/tips.ts"),
+        "negative control: two writes in one handler keep the finding, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}

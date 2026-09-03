@@ -85,31 +85,38 @@ pub async fn refresh_sitemap(
         crate::core::sitemap::discover_sitemap(&client, &url, is_strict_local).await
     };
 
-    if result.status == crate::core::sitemap::SitemapStatus::Found && !result.urls.is_empty() {
-        let source = if sitemap_url.is_some() {
-            "manual"
-        } else {
-            "auto"
-        };
-        let urls = result.urls.clone();
-        let source_url = result.source_url.clone();
-        run_blocking(move || {
-            if let Err(e) = db.clear_pages(site_id) {
-                tracing::warn!("Failed to clear pages: {}", e);
-            }
-            if let Err(e) = db.save_pages(site_id, &urls, source) {
-                tracing::warn!("Failed to save sitemap pages: {}", e);
-            }
-            if let Some(ref src_url) = source_url {
-                if let Err(e) = db.set_sitemap_url(site_id, Some(src_url)) {
-                    tracing::warn!("Failed to save sitemap URL: {}", e);
-                }
-            }
-        })
-        .await?;
-    }
+    persist_refreshed_sitemap(db, site_id, &result, sitemap_url.is_some()).await?;
 
     Ok(result)
+}
+
+/// Persist a refreshed sitemap: the discovered pages replace the stored ones
+/// in one transaction, and the stored sitemap URL follows.
+///
+/// Every failure is reported. A refresh that cannot be stored must not answer
+/// with the fetched result while the site is left holding a wiped or stale
+/// page list.
+async fn persist_refreshed_sitemap(
+    db: Arc<Database>,
+    site_id: i64,
+    result: &crate::core::sitemap::SitemapResult,
+    from_stored_url: bool,
+) -> Result<(), String> {
+    if result.status != crate::core::sitemap::SitemapStatus::Found || result.urls.is_empty() {
+        return Ok(());
+    }
+    let source = if from_stored_url { "manual" } else { "auto" };
+    let urls = result.urls.clone();
+    let source_url = result.source_url.clone();
+    run_blocking(move || {
+        db.replace_pages(site_id, &urls, source)?;
+        if let Some(ref src_url) = source_url {
+            db.set_sitemap_url(site_id, Some(src_url))?;
+        }
+        Ok::<(), crate::db::DbError>(())
+    })
+    .await?
+    .map_err(sanitize_error)
 }
 
 /// Set or clear the stored sitemap URL for a site.
@@ -145,3 +152,7 @@ pub async fn get_or_create_site_id(
     .await?
     .map_err(sanitize_error)
 }
+
+#[cfg(test)]
+#[path = "sitemap_tests.rs"]
+mod tests;

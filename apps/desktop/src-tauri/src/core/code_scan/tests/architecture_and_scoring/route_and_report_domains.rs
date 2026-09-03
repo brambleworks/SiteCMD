@@ -114,7 +114,7 @@ fn detects_unexpected_registry_host_and_direct_url_dependency() {
                     },
                     "node_modules/axios": {
                       "version": "1.7.2",
-                      "resolved": "https://registry.npmjs.org/axios/-/axios-1.7.2.tgz"
+                      "resolved": "https://npm.mirror.example/axios/-/axios-1.7.2.tgz"
                     }
                   }
                 }
@@ -126,10 +126,20 @@ fn detects_unexpected_registry_host_and_direct_url_dependency() {
         .issues
         .iter()
         .any(|issue| issue.id.starts_with("direct-url-dependency:")));
+    // A dependency declared as a direct URL resolves from that URL by
+    // definition, so only the direct-url review applies to it.
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.id == "registry-host-mismatch:package.json:left-pad"),
+        "a URL spec names its own source, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
     let registry_issue = report
         .issues
         .iter()
-        .find(|issue| issue.id.starts_with("registry-host-mismatch:"))
+        .find(|issue| issue.id == "registry-host-mismatch:package.json:axios")
         .expect("registry-host-mismatch issue"); // allow-expect: test assertion
     assert_eq!(registry_issue.severity, Severity::High);
     assert_eq!(

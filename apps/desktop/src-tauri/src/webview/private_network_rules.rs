@@ -3,10 +3,32 @@
 //! The top-level navigation gate in `analyzer.rs` covers the page itself;
 //! these rules cover what the page loads: images, scripts, stylesheets,
 //! fetch, XHR, and WebSocket targets. IP literals and local names are
-//! decided here. A public hostname that resolves to a private address is not
-//! covered by either platform filter, WebRTC gathers candidates outside the
-//! resource loader that both filters sit on, and Linux has no filter at all;
-//! all three are documented gaps the privacy copy must keep stating.
+//! decided here. WebRTC and WebTransport open connections outside the
+//! resource loader both filters sit on, so `WEBRTC_LOCKDOWN_SCRIPT` removes
+//! those interfaces from every frame before page scripts run. Linux has no
+//! filter yet, so the analyzer fails the browser layer closed there instead
+//! of loading the page with the user's LAN reachable. The gap that remains on
+//! every platform is a public hostname that resolves to a private address:
+//! the public privacy copy states it, and the product-facts generator pins
+//! this paragraph so that copy cannot drift.
+
+/// Injected into every frame at document start; see the file for what it
+/// removes and why the subresource rules cannot cover it.
+pub(crate) const WEBRTC_LOCKDOWN_SCRIPT: &str = include_str!("webrtc_lockdown.js");
+
+/// What the scan record says when the browser layer refuses to run because
+/// the platform gave it no private-network filter.
+#[cfg(any(target_os = "macos", windows))]
+pub(crate) fn rules_unavailable_reason() -> &'static str {
+    "Analyzer private-network rules are unavailable"
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+pub(crate) fn rules_unavailable_reason() -> &'static str {
+    "Browser analysis is not available on Linux yet: the platform webview offers no \
+     private-network subresource filter, so SiteCMD skipped the browser layer rather \
+     than load the page with your local network reachable. Transport checks still ran."
+}
 
 use std::sync::{Arc, Mutex};
 
@@ -312,22 +334,73 @@ pub(crate) fn install_private_network_rules(
 /// Linux: webkit2gtk-rs 2.0 does not bind `WebKitUserContentFilterStore`
 /// (the `webkit2gtk-sys` crate exposes `webkit_user_content_filter_store_new`
 /// and `webkit_user_content_manager_add_filter` for a later raw-FFI task).
-/// Until then the top-level navigation gate is the only subresource control
-/// on Linux, and the privacy copy says so.
+/// Until that lands the browser layer fails closed here: the top-level
+/// navigation gate alone would leave the page free to reach the LAN, and
+/// `analyze_url` treats a `false` signal as "do not navigate".
 #[cfg(not(any(target_os = "macos", windows)))]
 pub(crate) fn install_private_network_rules(
     _webview: &tauri::WebviewWindow,
     _rules: PrivateNetworkRules,
     ready: RulesReady,
 ) -> Result<(), String> {
-    tracing::info!("Analyzer private-network subresource rules are unavailable on this platform");
-    ready.signal(true);
+    tracing::warn!("{}", rules_unavailable_reason());
+    ready.signal(false);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::PrivateNetworkRules;
+    use super::{PrivateNetworkRules, WEBRTC_LOCKDOWN_SCRIPT};
+
+    const THIS_FILE: &str = include_str!("private_network_rules.rs");
+
+    /// The platform arm without a real installer must refuse, not proceed:
+    /// `analyze_url` only navigates on `true`, so a `true` here would load
+    /// the page with the LAN reachable. The generator behind product-facts
+    /// reads the same arm, so the public copy fails alongside this test.
+    #[test]
+    fn fallback_platform_arm_fails_closed() {
+        let marker = "#[cfg(not(any(target_os = \"macos\", windows)))]\npub(crate) fn install_private_network_rules";
+        let start = THIS_FILE
+            .find(marker)
+            .expect("fallback installer arm present");
+        let arm = &THIS_FILE[start..];
+        // The arm runs up to the test module attribute; searching for a closing
+        // brace would put a brace inside a string literal, which the repo's
+        // test-module walker counts.
+        let end = arm
+            .find("#[cfg(test)]")
+            .expect("test module follows the arm");
+        let arm = &arm[..end];
+        assert!(
+            arm.contains("ready.signal(false)"),
+            "fallback arm must signal false"
+        );
+        assert!(
+            !arm.contains("ready.signal(true)"),
+            "fallback arm must never signal true"
+        );
+    }
+
+    #[test]
+    fn webrtc_lockdown_script_removes_every_out_of_loader_interface() {
+        for name in [
+            "RTCPeerConnection",
+            "webkitRTCPeerConnection",
+            "WebTransport",
+        ] {
+            assert!(
+                WEBRTC_LOCKDOWN_SCRIPT.contains(&format!("\"{name}\"")),
+                "{name} missing"
+            );
+        }
+        assert!(WEBRTC_LOCKDOWN_SCRIPT.contains("delete owner[name]"));
+        assert!(WEBRTC_LOCKDOWN_SCRIPT.contains("configurable: false"));
+        assert!(
+            WEBRTC_LOCKDOWN_SCRIPT.starts_with("//"),
+            "script must open with its rationale"
+        );
+    }
 
     fn webkit_blocks(rules: PrivateNetworkRules, url: &str) -> bool {
         rules.url_filters().iter().any(|filter| {

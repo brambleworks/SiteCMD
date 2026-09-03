@@ -156,6 +156,11 @@ function projectionFailures(read, failures) {
   if (resolver && !resolver.includes("batch.coverage.successful")) {
     failures.push(`${PROJECTION} must refuse to resolve anything from an unsuccessful run.`);
   }
+  if (resolver && !resolver.includes("load_open_candidates(")) {
+    failures.push(
+      `${PROJECTION} must read its candidates through load_open_candidates, which bounds the query to the routes the claim can cover. An inlined SELECT decodes every open finding on the site for every page that finishes.`,
+    );
+  }
   for (const dead of ["limit_pages", "filter_kind", "producer_ids"]) {
     if (projection.includes(dead)) {
       failures.push(

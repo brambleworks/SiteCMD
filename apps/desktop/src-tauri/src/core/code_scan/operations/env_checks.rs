@@ -154,7 +154,7 @@ fn closest_env_example_index(source_path: &str, examples: &[&EnvFileSnapshot]) -
 /// Env keys the runtime or deploy platform injects (never supplied by
 /// developers), so their absence from `.env.example` is not a documentation
 /// gap. Exact names cover Node/CI conventions; prefixes cover the common
-/// hosting platforms.
+/// hosting platforms and the local PHP development environments.
 fn is_platform_injected_env_key(key: &str) -> bool {
     const EXACT: &[&str] = &[
         "NODE_ENV",
@@ -173,6 +173,7 @@ fn is_platform_injected_env_key(key: &str) -> bool {
         "MODE",
         "VITE_APP_VERSION",
         "VITE_SOURCE_COMMIT",
+        "IS_DDEV_PROJECT",
     ];
     const PREFIXES: &[&str] = &[
         "VERCEL_",
@@ -189,6 +190,10 @@ fn is_platform_injected_env_key(key: &str) -> bool {
         "ACTIONS_ID_TOKEN_",
         "CARGO_PKG_",
         "DENO_DEPLOYMENT_",
+        "DDEV_",
+        "PLATFORM_",
+        "LANDO_",
+        "PANTHEON_",
     ];
     let upper = key.to_ascii_uppercase();
     EXACT.contains(&upper.as_str()) || PREFIXES.iter().any(|prefix| upper.starts_with(prefix))
@@ -212,6 +217,13 @@ mod tests {
         assert!(is_platform_injected_env_key("APPDATA"));
         assert!(is_platform_injected_env_key("VITE_APP_VERSION"));
         assert!(is_platform_injected_env_key("CARGO_PKG_VERSION"));
+        // Local and hosted PHP platforms inject their own markers.
+        assert!(is_platform_injected_env_key("IS_DDEV_PROJECT"));
+        assert!(is_platform_injected_env_key("DDEV_HOSTNAME"));
+        assert!(is_platform_injected_env_key("PLATFORM_APPLICATION"));
+        assert!(is_platform_injected_env_key("PLATFORM_BRANCH"));
+        assert!(is_platform_injected_env_key("LANDO_INFO"));
+        assert!(is_platform_injected_env_key("PANTHEON_ENVIRONMENT"));
 
         // Developer-supplied config must still be documented.
         assert!(!is_platform_injected_env_key("DATABASE_URL"));

@@ -49,19 +49,27 @@ impl Check for CookieConsentCheck {
 
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
         let lower = ctx.body_lower();
+        // A CMP loader legitimately lives in a script tag, but nothing runs a
+        // commented-out one.
+        let executable = super::executable_text_lower(lower);
 
         // Check for known consent platforms
         let mut detected_platforms: Vec<String> = Vec::new();
         for (signature, name) in CONSENT_SIGNATURES {
-            if lower.contains(signature) {
+            if executable.contains(signature) {
                 detected_platforms.push(name.to_string());
             }
         }
 
-        // Check for common cookie consent HTML patterns
+        // Check for common cookie consent HTML patterns. A banner that only
+        // exists inside a comment, script, or stylesheet is not a control the
+        // visitor can use, so those blocks are stripped first; the platform
+        // signatures above still read the whole body because a CMP loader
+        // legitimately lives in a script tag.
+        let consent_markup = super::content_text_lower(lower);
         let mut has_generic_consent = false;
         for re in CONSENT_PATTERNS.iter() {
-            if re.is_match(&ctx.body) {
+            if re.is_match(&consent_markup) {
                 has_generic_consent = true;
                 break;
             }
@@ -70,14 +78,13 @@ impl Check for CookieConsentCheck {
         // Check if the site uses cookies (via Set-Cookie header)
         let sets_cookies = ctx.response_headers.get_all("set-cookie").iter().count() > 0;
 
-        // Check for tracking scripts that typically require consent
-        let has_tracking = lower.contains("google-analytics")
-            || lower.contains("googletagmanager")
-            || lower.contains("gtag(")
-            || lower.contains("facebook.net/")
-            || lower.contains("fbevents")
-            || lower.contains("hotjar")
-            || lower.contains("segment.com");
+        // Tracking that typically requires consent: the shared signature list
+        // minus the cookieless providers, plus the inline gtag call a page can
+        // carry without a vendor host. A cookieless analytics service stores
+        // nothing to gate, so it must not manufacture a consent finding.
+        let tracking_providers = super::trackers::consent_relevant_trackers(&executable);
+        let cookieless_providers = super::trackers::cookieless_trackers(&executable);
+        let has_tracking = !tracking_providers.is_empty() || executable.contains("gtag(");
 
         let has_consent = !detected_platforms.is_empty() || has_generic_consent;
         let needs_consent = sets_cookies || has_tracking;
@@ -124,7 +131,19 @@ impl Check for CookieConsentCheck {
                 CheckStatus::Pass,
                 Severity::Low,
                 "Cookie consent",
-                "No cookie consent banner detected, but no cookies or tracking scripts found either.".into()
+                if cookieless_providers.is_empty() {
+                    "No cookie consent banner detected, but no cookies or tracking scripts found either.".to_string()
+                } else {
+                    let marker = if cookieless_providers.len() == 1 {
+                        "marker is"
+                    } else {
+                        "markers are"
+                    };
+                    format!(
+                        "No cookie consent banner detected. The initial response sets no cookies, and the detected measurement {marker} {}, which SiteCMD classifies as cookieless: nothing observed here stores a visitor identifier to gate. Runtime storage was not inspected.",
+                        super::trackers::name_list(&cookieless_providers)
+                    )
+                },
             )
         };
         let needs_runtime_review = status == CheckStatus::Warn || has_consent;
@@ -155,6 +174,8 @@ impl Check for CookieConsentCheck {
                 "platforms": detected_platforms,
                 "sets_cookies": sets_cookies,
                 "has_tracking": has_tracking,
+                "consent_relevant_trackers": tracking_providers,
+                "cookieless_trackers": cookieless_providers,
                 "runtime_gating_verified": false,
             })),
             confidence: if needs_runtime_review {
@@ -258,6 +279,114 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("cannot establish technology purpose"));
+    }
+
+    #[test]
+    fn tracking_detection_agrees_with_the_shared_tracker_list() {
+        // www.bbc.co.uk ships a comScore beacon and no consent markup in the
+        // initial HTML; this check must not report "no tracking scripts".
+        let body = r#"<html><body><img alt="" height="1" width="1" src="https://sb.scorecardresearch.com/p?c1=2&amp;c2=17986528"></body></html>"#;
+        let results = CookieConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["has_tracking"],
+            true
+        );
+    }
+
+    #[test]
+    fn a_cookieless_analytics_service_does_not_manufacture_a_consent_finding() {
+        // astro.build ships Fathom and nothing else; recommending a consent
+        // banner there would be a finding about storage that does not exist.
+        let body = r#"<html><head><script src="https://cdn.usefathom.com/script.js" data-site="EZBHTSIG" defer></script></head><body></body></html>"#;
+        let results = CookieConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+        assert!(
+            results[0].description.contains("Fathom Analytics"),
+            "the pass must name what it found rather than claim nothing: {}",
+            results[0].description
+        );
+        assert!(!results[0]
+            .description
+            .contains("no cookies or tracking scripts found"));
+        let evidence = results[0].raw_data.as_ref().expect("evidence");
+        assert_eq!(evidence["has_tracking"], false);
+        assert_eq!(
+            evidence["cookieless_trackers"],
+            serde_json::json!(["Fathom Analytics"])
+        );
+    }
+
+    #[test]
+    fn a_cookieless_provider_beside_a_cookie_setting_one_still_needs_consent() {
+        // laravel.com's shape: Fathom sits beside Google Tag Manager,
+        // RudderStack, and HubSpot. One cookieless provider must never excuse
+        // the tags that do store an identifier.
+        let body = r#"<html><head>
+            <script src="https://cdn.usefathom.com/script.js" data-site="X" defer></script>
+            <script src="https://www.googletagmanager.com/gtag/js?id=G-XYZ"></script>
+            <script src="https://cdn.rudderlabs.com/v3/modern/rsa.min.js"></script>
+            <script src="https://js.hs-scripts.com/45240648.js"></script>
+        </head><body></body></html>"#;
+        let results = CookieConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Warn,
+            "{}",
+            results[0].description
+        );
+        assert_eq!(results[0].severity, Severity::Medium);
+        let evidence = results[0].raw_data.as_ref().expect("evidence");
+        assert_eq!(evidence["has_tracking"], true);
+        assert_eq!(
+            evidence["cookieless_trackers"],
+            serde_json::json!(["Fathom Analytics"]),
+            "the cookieless provider is still reported, just not as a reason"
+        );
+    }
+
+    #[test]
+    fn two_cookieless_providers_read_as_plural() {
+        let body = r#"<html><head>
+            <script src="https://plausible.io/js/script.js" defer></script>
+            <script src="https://cdn.usefathom.com/script.js" defer></script>
+        </head><body></body></html>"#;
+        let results = CookieConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert!(
+            results[0]
+                .description
+                .contains("measurement markers are Plausible Analytics and Fathom Analytics"),
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn a_commented_out_tag_is_not_live_tracking() {
+        let body = r#"<html><body><!-- <script src="https://www.googletagmanager.com/gtag/js?id=G-X"></script> --></body></html>"#;
+        let results = CookieConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["has_tracking"],
+            false
+        );
+    }
+
+    #[test]
+    fn a_commented_out_banner_is_not_a_consent_mechanism() {
+        let body = r#"<html><head><script src="https://www.googletagmanager.com/gtag.js"></script></head><body><!-- <div id="cookie-banner">Accept all cookies</div> --></body></html>"#;
+        let results = CookieConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("evidence")["consent_detected"],
+            false
+        );
     }
 
     #[test]

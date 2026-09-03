@@ -169,6 +169,23 @@ fn missing_record_result_matches_the_missing_copy() {
     assert_eq!(result.status, CheckStatus::Warn);
     assert_eq!(result.severity, Severity::Low);
     assert!(result.description.contains("No TXT record at"));
+    assert!(
+        result
+            .description
+            .contains("publishes no MX records, so it shows no inbound mail setup"),
+        "{}",
+        result.description
+    );
+    assert!(result.description.contains("p=reject"));
+
+    let unknown_mx = dmarc_result(
+        "security.dns.dmarc",
+        "example.com",
+        "_dmarc.example.com",
+        &[],
+        None,
+    );
+    assert!(!unknown_mx.description.contains("MX records"));
 }
 
 #[test]

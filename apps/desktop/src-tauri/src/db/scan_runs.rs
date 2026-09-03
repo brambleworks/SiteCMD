@@ -398,47 +398,63 @@ impl Database {
     #[tracing::instrument(skip(self, batch), fields(execution_id = batch.execution_id, source = batch.source.as_str(), run_kind = batch.run_kind.as_str()))]
     pub fn persist_normalized_scan_run(&self, batch: NormalizedRunBatch) -> Result<i64, DbError> {
         validate_batch(&batch)?;
-        self.execute_mut(move |conn| {
-            let tx = conn.transaction()?;
-            let coverage_json = serde_json::to_string(&batch.coverage)?;
-            let diagnostics_json = serde_json::to_string(&batch.diagnostics)?;
-            let actionable = batch
-                .findings
-                .iter()
-                .filter(|finding| {
-                    matches!(finding.verdict, CheckStatus::Fail | CheckStatus::Warn)
-                })
-                .collect::<Vec<_>>();
-            let count = |severity: crate::checks::Severity| -> i64 {
-                actionable
-                    .iter()
-                    .filter(|finding| finding.severity == severity)
-                    .count() as i64
-            };
-            let passed = batch
-                .findings
-                .iter()
-                .filter(|finding| finding.verdict == CheckStatus::Pass)
-                .count() as i64;
-            let surface = match batch.source {
-                ScanEvidenceSource::WebScan => ObservedSurface::Web,
-                ScanEvidenceSource::CodeScan => ObservedSurface::Code,
-            };
-            let stamp = record_run_stamp(
-                &tx,
-                surface,
-                batch
-                    .diagnostics
-                    .focus
-                    .as_deref()
-                    .or(batch.diagnostics.mode.as_deref()),
-                batch.diagnostics.browser_ran.unwrap_or(false),
-                batch.diagnostics.browser_build.as_deref(),
-                batch.started_at,
-            )?;
-            let run_scope_revision = scope_revision(&tx, batch.site_id);
+        self.execute_mut(move |conn| persist_run_batch(conn, batch))?
+    }
 
-            tx.execute(
+    /// Async twin of [`persist_normalized_scan_run`]. Command paths use this so
+    /// the report write waits on the database worker without parking an async
+    /// runtime worker thread.
+    pub async fn persist_normalized_scan_run_async(
+        &self,
+        batch: NormalizedRunBatch,
+    ) -> Result<i64, DbError> {
+        validate_batch(&batch)?;
+        self.run_mut(move |conn| persist_run_batch(conn, batch))
+            .await?
+    }
+}
+
+/// Insert one normalized run with its findings and reconcile the lifecycle
+/// projection, all inside a single transaction.
+fn persist_run_batch(conn: &mut Connection, batch: NormalizedRunBatch) -> Result<i64, DbError> {
+    let tx = conn.transaction()?;
+    let coverage_json = serde_json::to_string(&batch.coverage)?;
+    let diagnostics_json = serde_json::to_string(&batch.diagnostics)?;
+    let actionable = batch
+        .findings
+        .iter()
+        .filter(|finding| matches!(finding.verdict, CheckStatus::Fail | CheckStatus::Warn))
+        .collect::<Vec<_>>();
+    let count = |severity: crate::checks::Severity| -> i64 {
+        actionable
+            .iter()
+            .filter(|finding| finding.severity == severity)
+            .count() as i64
+    };
+    let passed = batch
+        .findings
+        .iter()
+        .filter(|finding| finding.verdict == CheckStatus::Pass)
+        .count() as i64;
+    let surface = match batch.source {
+        ScanEvidenceSource::WebScan => ObservedSurface::Web,
+        ScanEvidenceSource::CodeScan => ObservedSurface::Code,
+    };
+    let stamp = record_run_stamp(
+        &tx,
+        surface,
+        batch
+            .diagnostics
+            .focus
+            .as_deref()
+            .or(batch.diagnostics.mode.as_deref()),
+        batch.diagnostics.browser_ran.unwrap_or(false),
+        batch.diagnostics.browser_build.as_deref(),
+        batch.started_at,
+    )?;
+    let run_scope_revision = scope_revision(&tx, batch.site_id);
+
+    tx.execute(
                 "INSERT INTO scan_runs (
                     execution_id, parent_run_id, project_id, site_id,
                     environment_url, environment_scope_key, source, run_kind,
@@ -522,13 +538,11 @@ impl Database {
                     ":scope_revision": run_scope_revision,
                 },
             )?;
-            let run_id = tx.last_insert_rowid();
-            insert_findings(&tx, run_id, &batch)?;
-            reconcile_scan_projection(&tx, run_id, &batch)?;
-            tx.commit()?;
-            Ok(run_id)
-        })?
-    }
+    let run_id = tx.last_insert_rowid();
+    insert_findings(&tx, run_id, &batch)?;
+    reconcile_scan_projection(&tx, run_id, &batch)?;
+    tx.commit()?;
+    Ok(run_id)
 }
 
 #[cfg(test)]

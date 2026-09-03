@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ScanJobContext } from "@/app/useScanShellStatus";
@@ -129,7 +129,7 @@ interface RenderCompletionHookOptions {
   scanJobContext?: ScanJobContext | null;
 }
 
-function renderCompletionHook({
+async function renderCompletionHook({
   scanRunStep,
   result = webResult,
   codeResult: scanCodeResult = null,
@@ -173,6 +173,11 @@ function renderCompletionHook({
       toast,
     }),
   );
+  // The completion handlers arrive through a dynamic import, so let it settle
+  // before the test asserts on them.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
   return { ...rendered, loadHistory, toast };
 }
 
@@ -181,13 +186,13 @@ describe("useScanCompletionEffects", () => {
     vi.clearAllMocks();
   });
 
-  it("completes a unified full scan even when its presentation step is stale", () => {
+  it("completes a unified full scan even when its presentation step is stale", async () => {
     handleWebScanCompletionMock.mockReset();
     handleCodeScanCompletionMock.mockReset();
     handleFullScanCompletionMock.mockReset();
     handleMultiScanCompletionMock.mockReset();
 
-    renderCompletionHook({
+    await renderCompletionHook({
       result: webResult,
       codeResult,
       scanRunStep: {
@@ -204,13 +209,13 @@ describe("useScanCompletionEffects", () => {
     expect(handleMultiScanCompletionMock).not.toHaveBeenCalled();
   });
 
-  it("uses full scan completion when both scan phases have completed", () => {
+  it("uses full scan completion when both scan phases have completed", async () => {
     handleWebScanCompletionMock.mockReset();
     handleCodeScanCompletionMock.mockReset();
     handleFullScanCompletionMock.mockReset();
     handleMultiScanCompletionMock.mockReset();
 
-    renderCompletionHook({
+    await renderCompletionHook({
       result: webResult,
       codeResult,
       scanRunStep: {
@@ -227,14 +232,14 @@ describe("useScanCompletionEffects", () => {
     expect(handleMultiScanCompletionMock).not.toHaveBeenCalled();
   });
 
-  it("reports a Full Scan (not a Code Scan) when the web portion was multi-page", () => {
+  it("reports a Full Scan (not a Code Scan) when the web portion was multi-page", async () => {
     handleWebScanCompletionMock.mockReset();
     handleCodeScanCompletionMock.mockReset();
     handleFullScanCompletionMock.mockReset();
     handleFullMultiScanCompletionMock.mockReset();
     handleMultiScanCompletionMock.mockReset();
 
-    renderCompletionHook({
+    await renderCompletionHook({
       result: null,
       multiResult,
       codeResult,
@@ -253,11 +258,11 @@ describe("useScanCompletionEffects", () => {
     expect(handleWebScanCompletionMock).not.toHaveBeenCalled();
   });
 
-  it("keeps plain multi-page completion when there is no code result", () => {
+  it("keeps plain multi-page completion when there is no code result", async () => {
     handleFullMultiScanCompletionMock.mockReset();
     handleMultiScanCompletionMock.mockReset();
 
-    renderCompletionHook({
+    await renderCompletionHook({
       result: null,
       multiResult,
       codeResult: null,
@@ -268,13 +273,13 @@ describe("useScanCompletionEffects", () => {
     expect(handleFullMultiScanCompletionMock).not.toHaveBeenCalled();
   });
 
-  it("keeps code-only completion for standalone code scans", () => {
+  it("keeps code-only completion for standalone code scans", async () => {
     handleWebScanCompletionMock.mockReset();
     handleCodeScanCompletionMock.mockReset();
     handleFullScanCompletionMock.mockReset();
     handleMultiScanCompletionMock.mockReset();
 
-    renderCompletionHook({
+    await renderCompletionHook({
       result: null,
       codeResult,
       scanRunStep: {
@@ -291,8 +296,8 @@ describe("useScanCompletionEffects", () => {
     expect(handleMultiScanCompletionMock).not.toHaveBeenCalled();
   });
 
-  it("runs web completion with the active scan context", () => {
-    renderCompletionHook({
+  it("runs web completion with the active scan context", async () => {
+    await renderCompletionHook({
       scanRunStep: null,
       scanJobContext: {
         projectId: 1,
@@ -304,8 +309,8 @@ describe("useScanCompletionEffects", () => {
     expect(handleWebScanCompletionMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the app-level error toast and jobs-tray failure for normal scan errors", () => {
-    const { toast } = renderCompletionHook({
+  it("keeps the app-level error toast and jobs-tray failure for normal scan errors", async () => {
+    const { toast } = await renderCompletionHook({
       scanRunStep: null,
       state: "error",
       error: "DNS lookup failed",
@@ -316,8 +321,8 @@ describe("useScanCompletionEffects", () => {
     expect(failJobMock).toHaveBeenCalledTimes(1);
   });
 
-  it("reports incomplete results without running a successful completion path", () => {
-    const { toast } = renderCompletionHook({
+  it("reports incomplete results without running a successful completion path", async () => {
+    const { toast } = await renderCompletionHook({
       scanRunStep: null,
       executionIncompleteDetail: "Web Scan: Browser analysis failed: unavailable",
     });
@@ -337,8 +342,8 @@ describe("useScanCompletionEffects", () => {
     );
   });
 
-  it("keeps a partial Full Scan labeled as a Full Scan when one result is missing", () => {
-    const { toast } = renderCompletionHook({
+  it("keeps a partial Full Scan labeled as a Full Scan when one result is missing", async () => {
+    const { toast } = await renderCompletionHook({
       scanRunStep: null,
       currentExecutionMode: "full",
       result: null,
@@ -352,8 +357,8 @@ describe("useScanCompletionEffects", () => {
     );
   });
 
-  it("does not replay foreground completion effects for a background code refresh", () => {
-    const { toast } = renderCompletionHook({
+  it("does not replay foreground completion effects for a background code refresh", async () => {
+    const { toast } = await renderCompletionHook({
       scanRunStep: null,
       currentExecutionMode: "full",
       result: webResult,

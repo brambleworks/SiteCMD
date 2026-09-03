@@ -13,7 +13,14 @@ import {
   BookOpen,
 } from "lucide-react";
 import { ExtLink } from "@/components/ui/external-link";
+import { Pager } from "@/components/ui/pager";
 import { LoadingRegion, Skeleton } from "@/components/ui/skeleton";
+import { useResetOnChange } from "@/hooks/useResetOnChange";
+import { pageWindow } from "@/lib/pagination";
+
+// A sitemap can list thousands of routes; the review list mounts one page of
+// them and the pager reveals the rest, as the Issues list does.
+const SITEMAP_PAGE_SIZE = 50;
 
 interface SitemapSectionProps {
   siteUrl?: string;
@@ -276,6 +283,7 @@ function PagesList({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const filtered = search
     ? pages.filter(
@@ -284,6 +292,9 @@ function PagesList({
           p.url.toLowerCase().includes(search.toLowerCase()),
       )
     : pages;
+  // A new search changes what the first page holds.
+  useResetOnChange(search, () => setPage(1));
+  const pagedRows = pageWindow(filtered, page, SITEMAP_PAGE_SIZE);
 
   return (
     <section className="card card--spacious">
@@ -326,18 +337,23 @@ function PagesList({
               />
             ) : null}
             <div className="settings-page-list">
-              {filtered.map((page) => (
-                <div key={page.id} className="settings-page-row">
+              {pagedRows.rows.map((row) => (
+                <div key={row.id} className="settings-page-row">
                   <FileText className="icon-xs text-muted-foreground" />
-                  <span className="sitemap-page-path text-muted-foreground">
-                    {page.path || "/"}
-                  </span>
+                  <span className="sitemap-page-path text-muted-foreground">{row.path || "/"}</span>
                 </div>
               ))}
               {search && filtered.length === 0 ? (
                 <p className="muted-text sitemap-no-match">No pages match "{search}"</p>
               ) : null}
             </div>
+            <Pager
+              page={pagedRows.page}
+              totalPages={pagedRows.totalPages}
+              onChange={setPage}
+              label="Sitemap pages"
+              itemLabel="sitemap"
+            />
           </div>
         )}
       </div>

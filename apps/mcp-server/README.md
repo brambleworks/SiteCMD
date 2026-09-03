@@ -67,28 +67,33 @@ package metadata, and SiteCMD release are bumped together.
 
 ## Tools
 
-| Tool                   | Description                                                                                               |
-| ---------------------- | --------------------------------------------------------------------------------------------------------- |
-| `get_projects`         | List projects with ids, URLs, frameworks, and linked folders                                              |
-| `get_scan_score`       | SiteCMD Score, open issue counts, and the latest web scan breakdown                                       |
-| `get_issues`           | Open issues with id, check id, confidence, and location; filter by min_severity, category, min_confidence |
-| `get_issue`            | One check with evidence, occurrences, fix prompt, causes, and attempt                                     |
-| `get_fix_prompts`      | Fix prompts (default 5, max 20), or one by check_id                                                       |
-| `get_scan_history`     | Get scan artifact score history over time                                                                 |
-| `get_dismissed_issues` | List issues dismissed in SiteCMD or suppressed by .sitecmd/config.json                                    |
-| `compare_scans`        | Compare two web scans by id (default: the two most recent)                                                |
-| `how_to_rescan`        | Explain the CLI and desktop steps that produce a fresh scan; does not queue one                           |
-| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria                                             |
-| `start_fix`            | Ask SiteCMD to open a fix attempt for one check; requires the app to be running                           |
-| `get_fix_status`       | Read a fix attempt's status, verify timing, and failure detail                                            |
-| `run_scan`             | Queue a SiteCMD scan for a project; requires the app to be running                                        |
-| `get_scan_status`      | Read a queued scan request's status and, once fulfilled, its execution id                                 |
-| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify                                          |
-| `list_fix_attempts`    | List open fix attempts (include_settled for verified and failed ones)                                     |
+| Tool                   | Description                                                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `get_projects`         | List projects with ids, URLs, frameworks, and linked folders                                                      |
+| `get_scan_score`       | SiteCMD Score, open issue counts, and the latest web scan breakdown                                               |
+| `get_issues`           | Open issues with id, check id, source, confidence, and location; filter by min_severity, category, min_confidence |
+| `get_issue`            | One check with evidence, occurrences, fix prompt, causes, and attempt                                             |
+| `get_fix_prompts`      | Fix prompts (default 5, max 20), or one by check_id                                                               |
+| `get_scan_history`     | Get scan artifact score history over time                                                                         |
+| `get_dismissed_issues` | List issues dismissed in SiteCMD or suppressed by .sitecmd/config.json                                            |
+| `compare_scans`        | Compare two web scans by id (default: the two most recent)                                                        |
+| `how_to_rescan`        | Explain the CLI and desktop steps that produce a fresh scan; does not queue one                                   |
+| `get_fix_brief`        | Get the fix brief for a fix attempt, with acceptance criteria                                                     |
+| `start_fix`            | Ask SiteCMD to open a fix attempt for one check; requires the app to be running                                   |
+| `get_fix_status`       | Read a fix attempt's status, verify timing, and failure detail                                                    |
+| `run_scan`             | Queue a SiteCMD scan for a project; requires the app to be running                                                |
+| `get_scan_status`      | Read a queued scan request's status and, once fulfilled, its execution id                                         |
+| `request_verification` | Tell SiteCMD a fix is done so it can re-run the check and verify                                                  |
+| `list_fix_attempts`    | List open fix attempts (include_settled for verified and failed ones)                                             |
 
 `request_scan` is a deprecated alias of `how_to_rescan`; it will be removed in the next major release.
 
 `get_issues` no longer accepts `severity` (exact match) or `status`; use `min_severity`.
+
+`get_issues` lists every open finding the SiteCMD Score counts, so dependency
+and integration findings appear beside web and code scan findings. Each issue
+names its source, and the counts add up to the open-issue total in
+`get_scan_score`.
 
 ### Correlation tools
 

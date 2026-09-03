@@ -27,7 +27,10 @@ import {
   subscribeActiveSelection,
 } from "@/lib/active-selection-store";
 import { queryKeys } from "@/lib/query/query-keys";
-import { clearProjectSignalSnapshotCache } from "@/lib/project-summary-signals";
+import {
+  clearProjectSignalSnapshotCache,
+  invalidateLatestCodeScanSnapshot,
+} from "@/lib/project-summary-signals";
 
 export interface EnvironmentRecord {
   id: number;
@@ -171,6 +174,10 @@ function invalidateChangedProjectCaches(
     ) {
       continue;
     }
+    // Drop the primed full code scan report on any project change, including
+    // deletion. It has no environment URL, so it cannot be swept by the
+    // per-URL loop below (and a deleted project may have zero environments).
+    invalidateLatestCodeScanSnapshot(projectId);
     const urls = new Set([
       ...(before?.environments.map((environment) => environment.url) ?? []),
       ...(after?.environments.map((environment) => environment.url) ?? []),

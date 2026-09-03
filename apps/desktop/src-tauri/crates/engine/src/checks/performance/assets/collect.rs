@@ -1,6 +1,6 @@
 //! Policy-gated, deduplicated asset URL collection with bounded samples.
 
-use crate::checks::html_attrs::{attr_value, tag_slices};
+use crate::checks::html_attrs::{attr_value, tag_slices, url_attr_value};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -92,7 +92,7 @@ pub fn collect_assets(
         next_group += 1;
     }
     for tag in tag_slices(body, lower, "script") {
-        if let Some(src) = attr_value(tag, "src") {
+        if let Some(src) = url_attr_value(tag, "src") {
             refs.push((AssetKind::Script, src, false, next_group));
             next_group += 1;
         }
@@ -103,7 +103,7 @@ pub fn collect_assets(
                 .any(|token| token.eq_ignore_ascii_case("stylesheet"))
         });
         if is_stylesheet {
-            if let Some(href) = attr_value(tag, "href") {
+            if let Some(href) = url_attr_value(tag, "href") {
                 refs.push((AssetKind::Style, href, false, next_group));
                 next_group += 1;
             }
@@ -180,12 +180,16 @@ pub fn collect_assets(
 /// references from one element share `group` so the weight check counts only
 /// one of them (a browser downloads a single candidate per element).
 fn collect_image_like(tag: &str, refs: &mut Vec<(AssetKind, String, bool, u32)>, group: u32) {
-    let candidates: Vec<String> = attr_value(tag, "srcset")
+    // Attribute values are HTML: `&amp;` there is a single `&` on the wire.
+    // Fetching the raw text asked astro.build and tailwindcss.com for image
+    // URLs their optimizers answered 400, and the sampler reported those as
+    // broken images.
+    let candidates: Vec<String> = url_attr_value(tag, "srcset")
         .as_deref()
         .map(parse_srcset)
         .unwrap_or_default();
     let has_srcset = !candidates.is_empty();
-    if let Some(src) = attr_value(tag, "src") {
+    if let Some(src) = url_attr_value(tag, "src") {
         refs.push((AssetKind::Image, src, has_srcset, group));
     }
     for candidate in candidates {
@@ -395,6 +399,28 @@ mod tests {
         );
         assert!(parse_srcset("").is_empty());
         assert!(parse_srcset("  ,  ").is_empty());
+    }
+
+    #[test]
+    fn character_references_are_decoded_before_the_url_is_fetched() {
+        // astro.build and tailwindcss.com write optimizer URLs with `&amp;`.
+        // Requesting the raw text returns 400 from both optimizers, which the
+        // sampler then reported as broken images.
+        let html = r#"<img src="/_image?href=%2Fhero.png&amp;w=256&amp;f=webp" srcset="/_image?href=%2Fhero.png&amp;w=512 2x">
+            <script src="/app.js?v=1&amp;b=2"></script>
+            <link rel="stylesheet" href="/style.css?v=1&amp;b=2">"#;
+        let collection = collect(html, "https://example.com/", 30);
+        let urls = sampled_urls(&collection);
+        assert!(
+            urls.contains(&"https://example.com/_image?href=%2Fhero.png&w=256&f=webp".to_string()),
+            "{urls:?}"
+        );
+        assert!(
+            urls.contains(&"https://example.com/_image?href=%2Fhero.png&w=512".to_string()),
+            "{urls:?}"
+        );
+        assert!(urls.contains(&"https://example.com/app.js?v=1&b=2".to_string()));
+        assert!(urls.contains(&"https://example.com/style.css?v=1&b=2".to_string()));
     }
 
     #[test]

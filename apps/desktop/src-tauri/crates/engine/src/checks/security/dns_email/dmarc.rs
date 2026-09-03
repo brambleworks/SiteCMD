@@ -141,10 +141,14 @@ fn no_dmarc_result(
     unrelated_records: &[String],
     has_mx: Option<bool>,
 ) -> CheckResult {
-    let mx_note = if has_mx == Some(true) {
-        " This domain publishes MX records, which confirms that it receives mail; this scan does not establish whether it also sends mail."
-    } else {
-        ""
+    let mx_note = match has_mx {
+        Some(true) => {
+            " This domain publishes MX records, which confirms that it receives mail; this scan does not establish whether it also sends mail."
+        }
+        Some(false) => {
+            " This domain publishes no MX records, so it shows no inbound mail setup; a domain that sends no mail can publish `v=DMARC1; p=reject` directly so receivers reject anyone using it as a visible From domain."
+        }
+        None => "",
     };
     let lead = if unrelated_records.is_empty() {
         format!("No TXT record at {}.", dmarc_name)

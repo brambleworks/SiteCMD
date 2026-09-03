@@ -15,6 +15,31 @@ static JS_DIRECT_REQUEST_VALUE: std::sync::LazyLock<regex::Regex> =
             .expect("static JS request value regex") // allow-expect: compile-time literal regex
     });
 
+/// Request-variable names come from the scanned file, so their matcher cannot
+/// be a shared static. Names are grouped into alternations instead, so a file
+/// with thousands of request variables still compiles a bounded number of
+/// patterns rather than one pattern that could exceed the regex size limit.
+const REQUEST_VAR_MATCHER_CHUNK: usize = 256;
+
+/// Compile the request-variable matchers for one file. `\b(?:a|b)\b` accepts
+/// exactly the strings that `\ba\b` or `\bb\b` accept, so grouping the names
+/// does not change which arguments are considered request-derived.
+fn request_var_matchers(names: &std::collections::BTreeSet<String>) -> Vec<regex::Regex> {
+    names
+        .iter()
+        .collect::<Vec<_>>()
+        .chunks(REQUEST_VAR_MATCHER_CHUNK)
+        .filter_map(|chunk| {
+            let alternation = chunk
+                .iter()
+                .map(|name| regex::escape(name))
+                .collect::<Vec<_>>()
+                .join("|");
+            regex::Regex::new(&format!(r"\b(?:{})\b", alternation)).ok()
+        })
+        .collect()
+}
+
 /// Find dynamic evaluation fed directly or locally from parsed request data.
 fn request_derived_dynamic_eval_line(content: &str) -> Option<u32> {
     let structure = super::js_sinks::blank_js(content, true);
@@ -22,19 +47,18 @@ fn request_derived_dynamic_eval_line(content: &str) -> Option<u32> {
     let request_vars = JS_REQUEST_VALUE_ASSIGNMENT
         .captures_iter(&structure)
         .filter_map(|capture| capture.get(1).map(|name| name.as_str().to_string()))
-        .collect::<Vec<_>>();
+        .collect::<std::collections::BTreeSet<_>>();
+    // Compiled once per file: the arguments change per evaluation call, the
+    // variable names do not.
+    let request_var_matchers = request_var_matchers(&request_vars);
 
     for matched in EVAL_EXEC_PATTERNS
         .iter()
         .flat_map(|pattern| pattern.find_iter(&structure))
     {
         let arguments = super::js_sinks::call_arg_window(&scan, matched.end(), 600);
-        let has_request_var = request_vars.iter().any(|name| {
-            regex::Regex::new(&format!(r"\b{}\b", regex::escape(name)))
-                .map(|pattern| pattern.is_match(arguments))
-                .unwrap_or(false)
-        });
-        if JS_DIRECT_REQUEST_VALUE.is_match(arguments) || has_request_var {
+        if JS_DIRECT_REQUEST_VALUE.is_match(arguments) || has_any(arguments, &request_var_matchers)
+        {
             return Some(line_number(&structure, matched.start()));
         }
     }
@@ -47,6 +71,12 @@ pub(super) fn collect_architecture_issues(
 ) {
     let file = ctx.file;
     let content = ctx.content;
+    // `content` is the executable view with comments blanked. A few checks
+    // here are about the comments themselves - assistant narration, a
+    // credential literal left behind in commented-out code, and whether a
+    // catch body says anything at all - so they read the file as written.
+    // Byte offsets match, so line numbers agree either way.
+    let source_text = ctx.file.content.as_str();
     let lower = ctx.signals.lower.as_str();
     let pattern_registry = ctx.signals.pattern_registry;
     let scanner_rule_impl = ctx.signals.scanner_rule_impl;
@@ -58,9 +88,10 @@ pub(super) fn collect_architecture_issues(
     let responsibility_labels = &ctx.responsibility_labels;
 
     if is_next_config_file(&file.relative_path) {
-        let uncommented = super::js_sinks::blank_js(content, false);
-        let ignores_build_errors = NEXTCONFIG_IGNORE_BUILD_ERRORS_PATTERN.is_match(&uncommented);
-        let ignores_lint = NEXTCONFIG_IGNORE_LINT_PATTERN.is_match(&uncommented);
+        // `content` already has comments blanked, so a commented-out override
+        // cannot satisfy either pattern.
+        let ignores_build_errors = NEXTCONFIG_IGNORE_BUILD_ERRORS_PATTERN.is_match(content);
+        let ignores_lint = NEXTCONFIG_IGNORE_LINT_PATTERN.is_match(content);
         if ignores_build_errors || ignores_lint {
             let flags = match (ignores_build_errors, ignores_lint) {
                 (true, true) => {
@@ -84,8 +115,8 @@ pub(super) fn collect_architecture_issues(
                     "This Next.js config contains `eslint.ignoreDuringBuilds: true`. In Next.js versions through 15, that skips the integrated build lint step; Next.js 16 removed the `eslint` next.config option and `next lint`, so the setting may now be legacy no-op configuration. Its presence does not prove the project lacks a separate required ESLint command."
                 },
                 file,
-                first_match_line_single(&uncommented, &NEXTCONFIG_IGNORE_BUILD_ERRORS_PATTERN)
-                    .or_else(|| first_match_line_single(&uncommented, &NEXTCONFIG_IGNORE_LINT_PATTERN)),
+                first_match_line_single(content, &NEXTCONFIG_IGNORE_BUILD_ERRORS_PATTERN)
+                    .or_else(|| first_match_line_single(content, &NEXTCONFIG_IGNORE_LINT_PATTERN)),
                 Some(format!("{} set in {}.", flags, file.relative_path)),
                 Some(if ignores_build_errors {
                     "Confirm the resolved Next config and CI gates. Prefer removing `ignoreBuildErrors`; if a separate required `tsc --noEmit` gate deliberately owns type checking, document and test that ordering. Fix real errors or use a narrow, explained `@ts-expect-error` instead of a project-wide bypass."
@@ -179,9 +210,9 @@ pub(super) fn collect_architecture_issues(
     if !pattern_registry && !scanner_rule_impl {
         if let Some(mat) = HARDCODED_SECRET_PATTERNS
             .iter()
-            .find_map(|pat| pat.find(content))
+            .find_map(|pat| pat.find(source_text))
         {
-            let line = line_number(content, mat.start());
+            let line = line_number(source_text, mat.start());
             let matched = mat.as_str();
             // Persist only a short prefix and mask; never expose a secret suffix.
             let redacted = format!("{}***", matched.chars().take(4).collect::<String>());
@@ -199,7 +230,8 @@ pub(super) fn collect_architecture_issues(
             ));
         } else if let Some(mat) = WEAK_DEFAULT_CREDENTIAL_PATTERNS
             .iter()
-            .find_map(|pat| pat.find(content))
+            .flat_map(|pat| pat.find_iter(content))
+            .find(|mat| !is_hash_call_argument(content, mat.start()))
         {
             let line = line_number(content, mat.start());
             issues.push(build_issue(
@@ -220,11 +252,14 @@ pub(super) fn collect_architecture_issues(
     }
 
     if !pattern_registry && is_js_or_ts_file(&file.relative_path) {
-        let empty_catches = EMPTY_CATCH_PATTERN.find_iter(content).count();
+        // Both catch-block checks read the file as written: a catch body whose
+        // only content is a comment explaining the ignored failure is
+        // documented, not silent, and the rule says so in its own description.
+        let empty_catches = EMPTY_CATCH_PATTERN.find_iter(source_text).count();
         if empty_catches >= 2 {
-            let first_match = EMPTY_CATCH_PATTERN.find(content);
+            let first_match = EMPTY_CATCH_PATTERN.find(source_text);
             let line = first_match
-                .map(|m| line_number(content, m.start()))
+                .map(|m| line_number(source_text, m.start()))
                 .unwrap_or(1);
             issues.push(build_issue(
                 "empty-catch-blocks",
@@ -241,11 +276,11 @@ pub(super) fn collect_architecture_issues(
             ));
         }
 
-        let console_catches = CONSOLE_LOG_CATCH_PATTERN.find_iter(content).count();
+        let console_catches = CONSOLE_LOG_CATCH_PATTERN.find_iter(source_text).count();
         if console_catches >= 3 {
-            let first_match = CONSOLE_LOG_CATCH_PATTERN.find(content);
+            let first_match = CONSOLE_LOG_CATCH_PATTERN.find(source_text);
             let line = first_match
-                .map(|m| line_number(content, m.start()))
+                .map(|m| line_number(source_text, m.start()))
                 .unwrap_or(1);
             issues.push(build_issue(
                 "console-log-error-handling",
@@ -265,12 +300,14 @@ pub(super) fn collect_architecture_issues(
     if !pattern_registry && !scanner_rule_impl {
         let ai_comment_count: usize = AI_COMMENT_PATTERNS
             .iter()
-            .map(|pat| pat.find_iter(content).count())
+            .map(|pat| pat.find_iter(source_text).count())
             .sum();
         if ai_comment_count >= 2 {
-            let first_match = AI_COMMENT_PATTERNS.iter().find_map(|pat| pat.find(content));
+            let first_match = AI_COMMENT_PATTERNS
+                .iter()
+                .find_map(|pat| pat.find(source_text));
             let line = first_match
-                .map(|m| line_number(content, m.start()))
+                .map(|m| line_number(source_text, m.start()))
                 .unwrap_or(1);
             issues.push(build_issue(
                 "ai-conversation-artifacts",
@@ -542,6 +579,20 @@ pub(super) fn collect_architecture_issues(
     }
 }
 
+/// Whether the credential literal at `start` is the value being hashed, as in
+/// `bcrypt.hash("password123", 10)`. A weak literal that only ever reaches a
+/// password hash is seed or fixture input, not a default the app would run on.
+fn is_hash_call_argument(content: &str, start: usize) -> bool {
+    let mut window_start = start.saturating_sub(HASH_CALL_LOOKBACK);
+    while !content.is_char_boundary(window_start) {
+        window_start += 1;
+    }
+    HASH_CALL_ARGUMENT_PREFIX_PATTERN.is_match(&content[window_start..start])
+}
+
+/// How far in front of a credential literal the hash-call check reads, in bytes.
+const HASH_CALL_LOOKBACK: usize = 80;
+
 struct ClientEnvSecretReference {
     start: usize,
     name: String,
@@ -655,3 +706,7 @@ fn index_inside_spans(spans: &[(usize, usize)], index: usize) -> bool {
     let insert = spans.partition_point(|(start, _)| *start <= index);
     insert > 0 && spans[insert - 1].1 > index
 }
+
+#[cfg(test)]
+#[path = "architecture_checks_tests.rs"]
+mod tests;

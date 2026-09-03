@@ -740,9 +740,15 @@ async fn run_polish_phase_moves_body_instead_of_cloning() {
         probe_cache: Default::default(),
     };
     let mut results = Vec::new();
-    super::run_polish_phase(&mut ctx, None, &mut results, None::<&dyn Fn() -> bool>)
-        .await
-        .expect("polish phase should succeed for a stylesheet-free body");
+    super::run_polish_phase(
+        &mut ctx,
+        None,
+        &mut results,
+        None::<&dyn Fn() -> bool>,
+        None,
+    )
+    .await
+    .expect("polish phase should succeed for a stylesheet-free body");
 
     assert!(
         ctx.body.is_empty(),
@@ -913,9 +919,17 @@ fn plain_page_routes(_base_url: &str) -> HashMap<String, TestResponse> {
 
 #[tokio::test]
 async fn run_scan_rejects_invalid_urls() {
-    let result =
-        super::run_scan::<NoCancel>("not a url", None, None, None, ScanType::Health, false, None)
-            .await;
+    let result = super::run_scan::<NoCancel>(
+        "not a url",
+        None,
+        None,
+        None,
+        ScanType::Health,
+        false,
+        None,
+        None,
+    )
+    .await;
     assert!(matches!(result, Err(super::ScanError::InvalidUrl(_))));
 }
 
@@ -930,6 +944,7 @@ async fn run_scan_fetch_failure_is_a_network_error() {
         None,
         ScanType::Health,
         false,
+        None,
         None,
     )
     .await;
@@ -969,6 +984,7 @@ async fn run_scan_uses_the_effective_response_url_as_its_result_identity() {
         ScanType::Polish,
         false,
         None,
+        None,
     )
     .await
     .expect("redirected scan completes");
@@ -987,6 +1003,7 @@ async fn run_scan_honors_cancellation_before_any_work() {
         ScanType::Health,
         false,
         Some(&cancel),
+        None,
     )
     .await;
     assert!(matches!(result, Err(super::ScanError::Cancelled)));
@@ -1003,6 +1020,7 @@ async fn security_scan_type_collects_only_security_checks() {
         None,
         ScanType::Security,
         false,
+        None,
         None,
     )
     .await
@@ -1047,6 +1065,7 @@ async fn polish_scan_type_collects_only_polish_checks() {
         ScanType::Polish,
         false,
         None,
+        None,
     )
     .await
     .expect("polish scan against the local fixture");
@@ -1084,6 +1103,7 @@ async fn enabled_categories_bound_health_scan_collection() {
         None,
         ScanType::Health,
         false,
+        None,
         None,
     )
     .await
@@ -1149,6 +1169,7 @@ async fn skip_origin_checks_drops_origin_scoped_probes() {
         ScanType::Health,
         false,
         None,
+        None,
     )
     .await
     .expect("entry-page scan");
@@ -1161,6 +1182,7 @@ async fn skip_origin_checks_drops_origin_scoped_probes() {
         None,
         ScanType::Health,
         true,
+        None,
         None,
     )
     .await
@@ -1412,4 +1434,232 @@ async fn panicking_async_check_aborts_instead_of_returning_incomplete_results() 
         error.to_string(),
         "Scan error: Web check 'test.async_panicky' crashed; scan aborted to avoid reporting incomplete results"
     );
+}
+
+/// A fixture origin that serves one connection at a time after a fixed delay,
+/// the way a small origin with a shallow accept queue behaves. It records the
+/// path of every request in arrival order.
+struct SerializedServer {
+    base_url: String,
+    arrivals: Arc<std::sync::Mutex<Vec<String>>>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for SerializedServer {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+async fn spawn_serialized_server(handler_delay: std::time::Duration) -> SerializedServer {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind serialized server");
+    let addr = listener.local_addr().expect("local addr");
+    let arrivals: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let server_arrivals = arrivals.clone();
+
+    // No per-connection task: every request waits for the one before it, so a
+    // burst of concurrent fetches queues exactly as it does on a real origin
+    // with a small accept backlog.
+    let handle = tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let mut buffer = [0u8; 8192];
+            let read = match stream.read(&mut buffer).await {
+                Ok(0) | Err(_) => continue,
+                Ok(bytes) => bytes,
+            };
+            let request = String::from_utf8_lossy(&buffer[..read]);
+            let path = request
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("/")
+                .split('?')
+                .next()
+                .unwrap_or("/")
+                .to_string();
+            server_arrivals
+                .lock()
+                .expect("arrivals lock")
+                .push(path.clone());
+
+            tokio::time::sleep(handler_delay).await;
+
+            let body = if path == "/" {
+                "<html><head><title>Fixture</title></head><body></body></html>".to_string()
+            } else {
+                "binary".to_string()
+            };
+            let content_type = if path == "/" {
+                "text/html"
+            } else {
+                "image/png"
+            };
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                content_type,
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(body.as_bytes()).await;
+            let _ = stream.shutdown().await;
+        }
+    });
+
+    SerializedServer {
+        base_url: format!("http://{}", addr),
+        arrivals,
+        handle,
+    }
+}
+
+#[tokio::test]
+async fn ttfb_is_sampled_before_the_scanner_starts_its_own_request_burst() {
+    // 50 ms per request, 30 assets to sample. Sharing the phase with the asset
+    // sampler put the timing request behind that queue and graded the wait as
+    // server time (1 to 6 seconds on loopback fixtures).
+    let handler_delay = std::time::Duration::from_millis(50);
+    let server = spawn_serialized_server(handler_delay).await;
+    // The scanner has already fetched the page by this phase, so the body is
+    // supplied directly and every request the fixture sees comes from the
+    // checks under test.
+    let page: String = format!(
+        "<html><head><title>Fixture</title></head><body>{}</body></html>",
+        (0..30)
+            .map(|index| format!("<img src=\"/asset-{index}.png\" alt=\"a\">"))
+            .collect::<String>()
+    );
+
+    let ctx = crate::checks::CheckContext {
+        page: crate::checks::PageContext {
+            evaluation_time: chrono::Utc::now(),
+            url: url::Url::parse(&server.base_url).expect("fixture url"),
+            response_headers: reqwest::header::HeaderMap::new(),
+            status_code: 200,
+            body: page,
+            is_localhost: true,
+            is_strict_localhost: true,
+            http_version: Some("HTTP/1.1".to_string()),
+            body_lower_cache: std::sync::OnceLock::new(),
+        },
+        client: crate::http_client::for_url(true).clone(),
+        probe_cache: Default::default(),
+    };
+
+    let checks: Vec<Box<dyn crate::checks::AsyncCheck>> = vec![
+        Box::new(crate::checks::performance::assets::AssetSamplerCheck),
+        Box::new(crate::checks::performance::timing::TimingCheck),
+    ];
+    let mut results = Vec::new();
+    let mut done = 0usize;
+    super::run_async_checks::<NoCancel>(
+        &checks,
+        &ctx,
+        false,
+        None,
+        checks.len(),
+        &mut done,
+        &mut results,
+        None,
+    )
+    .await
+    .expect("fixture scan completes");
+
+    let ttfb = results
+        .iter()
+        .find(|result| result.check_id == "performance.ttfb")
+        .expect("timing row");
+    let ttfb_ms = ttfb.raw_data.as_ref().expect("timing evidence")["ttfb_ms"]
+        .as_u64()
+        .expect("ttfb_ms");
+    // The lower bound matters as much as the upper one: the fixture sleeps
+    // `handler_delay` before writing the response head, so a sample below that
+    // is not a measurement of this origin at all.
+    let handler_delay_ms = handler_delay.as_millis() as u64;
+    assert!(
+        (handler_delay_ms..1_000).contains(&ttfb_ms),
+        "TTFB must measure the {handler_delay_ms} ms origin, not the scanner's own queue and not nothing: {ttfb_ms}ms ({})",
+        ttfb.description
+    );
+
+    // The wire order proves the isolation: nothing else may reach the origin
+    // until the timing samples are done.
+    let arrivals = server.arrivals.lock().expect("arrivals lock").clone();
+    let first_asset = arrivals
+        .iter()
+        .position(|path| path.starts_with("/asset-"))
+        .expect("the asset sampler must have run");
+    assert!(
+        arrivals[..first_asset].iter().all(|path| path == "/"),
+        "only timing requests may precede the first asset fetch: {arrivals:?}"
+    );
+    assert!(
+        first_asset >= 2,
+        "both timing samples must complete before the burst starts: {arrivals:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_slow_origin_is_graded_rather_than_timed_out() {
+    // Drives the sampling loop end to end, which the pure-function tests in
+    // `checks::performance::timing` cannot: they would still pass if the loop
+    // went back to giving every request the whole CHECK_TIMEOUT. A 2 s origin
+    // is slow enough to be this check's headline Fail and still leaves room
+    // for the repeat, so both samples must arrive and the row must grade.
+    let handler_delay = std::time::Duration::from_millis(2_000);
+    let server = spawn_serialized_server(handler_delay).await;
+
+    let ctx = crate::checks::CheckContext {
+        page: crate::checks::PageContext {
+            evaluation_time: chrono::Utc::now(),
+            url: url::Url::parse(&server.base_url).expect("fixture url"),
+            response_headers: reqwest::header::HeaderMap::new(),
+            status_code: 200,
+            body: "<html><body></body></html>".to_string(),
+            is_localhost: true,
+            is_strict_localhost: true,
+            http_version: Some("HTTP/1.1".to_string()),
+            body_lower_cache: std::sync::OnceLock::new(),
+        },
+        client: crate::http_client::for_url(true).clone(),
+        probe_cache: Default::default(),
+    };
+
+    let results =
+        crate::checks::AsyncCheck::run(&crate::checks::performance::timing::TimingCheck, &ctx)
+            .await;
+    let ttfb = &results[0];
+
+    assert_eq!(
+        ttfb.status,
+        CheckStatus::Fail,
+        "a 2 s origin is the check's headline finding, not a timeout: {}",
+        ttfb.description
+    );
+    let raw = ttfb.raw_data.as_ref().expect("timing evidence");
+    assert!(
+        raw["ttfb_ms"].as_u64().expect("ttfb_ms") >= handler_delay.as_millis() as u64,
+        "{raw}"
+    );
+    assert_eq!(
+        raw["sample_count"], 2,
+        "2 s leaves most of the budget, so the repeat still runs: {raw}"
+    );
+    assert_eq!(
+        server.arrivals.lock().expect("arrivals lock").len(),
+        2,
+        "both samples must reach the origin"
+    );
+    for sample in raw["samples_ms"].as_array().expect("samples") {
+        assert!(
+            sample.as_u64().expect("sample") >= handler_delay.as_millis() as u64,
+            "every sample measures this origin: {raw}"
+        );
+    }
 }

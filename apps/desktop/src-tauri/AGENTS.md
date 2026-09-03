@@ -148,11 +148,14 @@ reported, not retried against unseen state.
   reviewed, guardrail-marked transport requirement.
 - Validate scan targets, redirects, callbacks, webhooks, and sitemap fetches
   through `network_policy::validate_url` with the correct policy.
-- The webview gate covers targets and top-level navigation. Platform content
-  rules block private-network subresources by IP literal and local name on
-  macOS and Windows only; a public hostname resolving to a private address,
-  WebRTC candidate gathering, and every Linux subresource are not covered.
-  Public privacy copy must preserve those distinctions.
+- The webview gate covers targets and every frame's navigation, not just the
+  main frame: wry passes subframe navigation actions through the same policy
+  hook, so the analyzer distinguishes a redirect hop from a subframe load by
+  main-frame commit state rather than by what the gate is handed. Platform
+  content rules block private-network subresources by IP literal and local
+  name on macOS and Windows only; a public hostname resolving to a private
+  address, WebRTC candidate gathering, and every Linux subresource are not
+  covered. Public privacy copy must preserve those distinctions.
 - Release API keys and OAuth tokens use the credential abstraction. Never add a
   production SQLite credential fallback. A plaintext credential still sitting in
   SQLite is refused and replaced with the keychain placeholder, so the

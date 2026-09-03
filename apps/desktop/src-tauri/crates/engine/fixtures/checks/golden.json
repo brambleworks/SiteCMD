@@ -705,7 +705,7 @@
           "confidence": "high",
           "description": "2 render-blocking resources in <head> (1 script, 1 stylesheet). These delay the first paint of your page.",
           "fixPrompt": null,
-          "manualFix": "Move each blocking resource into one of these buckets:\n• Scripts that don't need to run before paint: add `defer` (preserves order) or `async` (order doesn't matter)\n• Scripts that aren't needed on this page at all: remove the `<script>` or load it from a user gesture\n• CSS that's needed for the above-the-fold render: inline it in `<head>` and ship the rest as a normal `<link rel=\"stylesheet\">`\n• CSS that's not needed for the initial route: code-split it into a per-route bundle your framework loads on demand\nSkip the `media=\"print\" + onload swap` trick - it's brittle and Lighthouse no longer recommends it.",
+          "manualFix": "Move each blocking resource into one of these buckets:\n\u2022 Scripts that don't need to run before paint: add `defer` (preserves order) or `async` (order doesn't matter)\n\u2022 Scripts that aren't needed on this page at all: remove the `<script>` or load it from a user gesture\n\u2022 CSS that's needed for the above-the-fold render: inline it in `<head>` and ship the rest as a normal `<link rel=\"stylesheet\">`\n\u2022 CSS that's not needed for the initial route: code-split it into a per-route bundle your framework loads on demand\nSkip the `media=\"print\" + onload swap` trick - it's brittle and Lighthouse no longer recommends it.",
           "rawData": {
             "blocking_scripts": ["/app.js"],
             "blocking_stylesheets": ["/all.css"],
@@ -920,6 +920,731 @@
         "status_code": 200,
         "url": "http://localhost:3000/"
       }
+    },
+    {
+      "check": "security.email_exposure",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.email_exposure",
+          "confidence": "high",
+          "description": "No address-shaped string was found in the fetched HTML after excluding reserved placeholders, common asset-name lookalikes, and known error-reporting DSN hosts. Runtime-injected content and non-email contact identifiers were not inspected.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": null,
+          "severity": "low",
+          "status": "pass",
+          "title": "Public email addresses in fetched HTML"
+        }
+      ],
+      "name": "placeholder_email_input_is_not_a_published_address",
+      "page": {
+        "body": "<html><body><form><input type=\"email\" name=\"email\" placeholder=\"your@email.com\"></form></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "security.email_exposure",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.email_exposure",
+          "confidence": "high",
+          "description": "No address-shaped string was found in the fetched HTML after excluding reserved placeholders, common asset-name lookalikes, and known error-reporting DSN hosts. Runtime-injected content and non-email contact identifiers were not inspected.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": null,
+          "severity": "low",
+          "status": "pass",
+          "title": "Public email addresses in fetched HTML"
+        }
+      ],
+      "name": "connection_string_userinfo_is_not_a_published_address",
+      "page": {
+        "body": "<html><body><pre>postgres://app:fixturepass@db.internal:5432/app</pre></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "security.email_exposure",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.email_exposure",
+          "confidence": "confirmed",
+          "confidenceReason": "The address-shaped strings are directly observed in fetched HTML, but SiteCMD cannot determine whether they are intentional role inboxes, personal addresses, dead examples, or protected by adequate mailbox filtering and workflow controls.",
+          "description": "The fetched HTML contains 1 address-shaped string (support@acme.dev). Anything delivered to a browser can be collected automatically, but publishing a support, sales, or security inbox may be intentional. Review whether each address is meant to be public and whether its mailbox controls match that role.",
+          "fixPrompt": null,
+          "manualFix": "For an address that should not be public, remove it from the delivered page and route contact through an appropriately secured form or authenticated channel. For an address that should remain public, prefer a dedicated role inbox with filtering, monitoring, and a rotation/escalation plan, and keep an accessible `mailto:` link when email is the intended action. Do not rely on JavaScript obfuscation: browser-delivered text remains collectible and obfuscation can make the contact path less accessible.",
+          "rawData": {
+            "count": 1,
+            "emails": ["support@acme.dev"]
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "Public email address in fetched HTML",
+          "whyItMatters": "A public inbox can receive more unsolicited mail and targeted phishing. The practical risk depends on whether the address is intentionally public, who monitors it, and which filtering, authentication, and incident-handling controls protect it."
+        }
+      ],
+      "name": "a_published_support_address_beside_a_url_is_reported",
+      "page": {
+        "body": "<html><body><script type=\"application/ld+json\">{\"@type\":\"Organization\",\"url\":\"https://acme.dev\",\"email\":\"support@acme.dev\"}</script><footer><a href=\"mailto:support@acme.dev\">Email support</a></footer></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "security.vibe.csrf",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.vibe.csrf",
+          "confidence": "high",
+          "description": "No POST form submitting to this site was found on this page. 1 POST form submits to another site, where a same-site token cannot apply; security.form_action_hijack grades those destinations.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": null,
+          "severity": "medium",
+          "status": "pass",
+          "title": "CSRF Protection"
+        }
+      ],
+      "name": "newsletter_form_posting_cross_origin_is_not_a_csrf_surface",
+      "page": {
+        "body": "<html><body><form action=\"https://buttondown.email/api/emails/embed-subscribe/site\" method=\"post\" target=\"popupwindow\"><input type=\"email\" name=\"email\"><button>Subscribe</button></form></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.trackers",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.trackers",
+          "confidence": "needs_review",
+          "confidenceReason": "SiteCMD found provider strings in static page source. That does not establish whether they execute, collect identifying data, are gated by a consent manager, or are subject to a particular regional rule.",
+          "description": "Detected third-party tracking or analytics script markers: comScore. Static signature matches do not establish whether they execute, collect identifying data, or are already controlled by a regional privacy mechanism.",
+          "fixPrompt": "Inventory what each detected script actually sends, when it executes, and which visitors receive it. Remove unnecessary vendors, document required disclosures, and gate or configure data collection according to the applicable purpose, jurisdiction, and user choice.",
+          "manualFix": "Review which detected scripts are needed, what data they send, and when they execute. Apply the disclosure, consent, opt-out, or configuration required for the actual purpose and jurisdictions rather than assuming every analytics script has the same rule.",
+          "rawData": {
+            "execution_or_data_collection_verified": false,
+            "measurement": "static_script_signature_match",
+            "trackers": ["comScore"]
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "Third-party analytics or tracking scripts detected",
+          "whyItMatters": "Depending on purpose and jurisdiction, third-party collection may require disclosure, consent, or an opt-out. Even when no specific consent rule applies, unnecessary data sharing increases privacy and vendor risk."
+        }
+      ],
+      "name": "comscore_image_beacon_is_a_third_party_tracker",
+      "page": {
+        "body": "<html><body><img alt=\"\" height=\"1\" width=\"1\" src=\"https://sb.scorecardresearch.com/p?c1=2&amp;c2=17986528\"></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "config.analytics",
+      "expected": [
+        {
+          "category": "seo",
+          "checkId": "config.analytics",
+          "confidence": "high",
+          "description": "Analytics detected: Google Analytics 4.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "analytics": ["Google Analytics 4"]
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Analytics"
+        }
+      ],
+      "name": "ga4_data_attributes_are_detected_analytics",
+      "page": {
+        "body": "<html><body><a data-ga4-link='{\"event_name\":\"navigation\"}' href=\"/x\">x</a></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "config.analytics",
+      "expected": [
+        {
+          "category": "seo",
+          "checkId": "config.analytics",
+          "confidence": "needs_review",
+          "confidenceReason": "Only recognized markers in the scanned HTML were evaluated; server-side, infrastructure, consent-gated, and unrecognized analytics were not resolved.",
+          "description": "The scanned HTML does not contain a recognized client-side analytics marker. This does not establish that measurement is absent: server-side analytics, tag managers, consent-gated scripts, reverse-proxy logs, and unrecognized providers may collect equivalent product signals. Analytics is optional and should serve a defined product question.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "analytics": []
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "No recognized client-side analytics detected"
+        }
+      ],
+      "name": "absent_analytics_is_an_informational_pass",
+      "page": {
+        "body": "<html><body><h1>Widgets</h1></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.accessibility_statement",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.accessibility_statement",
+          "confidence": "needs_review",
+          "confidenceReason": "This static page check does not probe a separate statement URL or determine the organization, service scope, contracts, or jurisdiction-specific information duty.",
+          "description": "The page content references WCAG, but no accessibility statement, policy, or link to one was found: a standards reference is not a statement. A statement can document actual conformance, known barriers, and a support path. Some public-sector, procurement, and covered-service regimes require accessibility information, but the required document and content depend on the organization and jurisdiction.",
+          "fixPrompt": "Confirm the accessibility-information duties that apply to the organization and service. If a statement or equivalent information is appropriate, describe the actual conformance assessment, known limitations, review date, and an accessible barrier-reporting contact; do not claim a WCAG level that has not been evaluated.",
+          "manualFix": "Check the applicable regime and choose a statement page, terms section, or equivalent accessible document. Describe the service, evaluated standard and scope, known limitations, review date, and a contact method for reporting barriers. State a conformance level only when an assessment supports it.",
+          "rawData": {
+            "accessibility_statement_marker_detected": false,
+            "applicability_verified": false,
+            "separate_statement_url_probed": false,
+            "wcag_reference_only": true
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "No accessibility statement found",
+          "whyItMatters": "Users need a reliable way to report barriers, and some procurement or regulatory contexts expect a published accessibility commitment."
+        }
+      ],
+      "name": "wcag_prose_alone_is_not_an_accessibility_statement",
+      "page": {
+        "body": "<html><body><p>Our WCAG checklist covers accessibility basics for the kitchen display.</p></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.accessibility_statement",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.accessibility_statement",
+          "confidence": "high",
+          "description": "Accessibility statement or link detected.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "accessibility_statement_marker_detected": true,
+            "applicability_verified": false,
+            "separate_statement_url_probed": false,
+            "wcag_reference_only": false
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Accessibility Statement"
+        }
+      ],
+      "name": "footer_accessibility_link_is_a_statement",
+      "page": {
+        "body": "<html><body><footer><a href=\"/legal/accessibility\">Our commitment</a></footer></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.dnt_respect",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.dnt_respect",
+          "confidence": "needs_review",
+          "confidenceReason": "The scanned page source lacks a recognized marker, but SiteCMD does not inspect every privacy-policy URL or verify server-side and runtime handling. Legal applicability also depends on the business and data practice.",
+          "description": "Recognized tracking markers appear in the scanned page source, but no Do Not Track or Global Privacy Control marker was found there. This check does not inspect a separate privacy policy, geographic logic, or network behavior. DNT is generally voluntary; obligations to honor GPC depend on whether the business and processing are covered by applicable law.",
+          "fixPrompt": "Determine whether privacy signals apply to the business and processing. If GPC or another opt-out signal must be honored, process it at every relevant collection and sharing boundary, persist the choice where appropriate, and explain the behavior in the privacy notice. Treat DNT separately and state accurately whether it is honored.",
+          "manualFix": "Add a short privacy-signal section to your privacy page. State whether you honor Do Not Track or Global Privacy Control, and if you do, conditionally block non-essential tracking when those signals are present.",
+          "rawData": {
+            "consent_relevant_trackers": ["Google Tag Manager", "Google Analytics (gtag)"],
+            "cookieless_trackers": [],
+            "dnt_marker_detected": false,
+            "gpc_marker_detected": false,
+            "runtime_behavior_verified": false,
+            "separate_privacy_policy_inspected": false,
+            "tracking_marker_detected": true
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "No DNT/GPC handling or disclosure marker found",
+          "whyItMatters": "Where a covered opt-out signal applies, failing to honor it can conflict with user choice and regulatory obligations. Even when DNT is voluntary, an accurate disclosure avoids promising behavior the site does not implement."
+        }
+      ],
+      "name": "gpc_mention_inside_a_comment_is_not_a_disclosure",
+      "page": {
+        "body": "<html><body><script src=\"https://www.googletagmanager.com/gtag/js?id=G-XYZ\"></script><!-- GPC review pending. --></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.dnt_respect",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.dnt_respect",
+          "confidence": "high",
+          "description": "Site mentions Global Privacy Control alongside tracking scripts.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "consent_relevant_trackers": ["Google Tag Manager", "Google Analytics (gtag)"],
+            "cookieless_trackers": [],
+            "dnt_marker_detected": false,
+            "gpc_marker_detected": true,
+            "runtime_behavior_verified": false,
+            "separate_privacy_policy_inspected": false,
+            "tracking_marker_detected": true
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Privacy signal disclosure (DNT / GPC)"
+        }
+      ],
+      "name": "visible_gpc_sentence_is_a_disclosure",
+      "page": {
+        "body": "<html><body><script src=\"https://www.googletagmanager.com/gtag/js?id=G-XYZ\"></script><p>We honor Global Privacy Control signals.</p></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.dnt_respect",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.dnt_respect",
+          "confidence": "high",
+          "description": "The only detected measurement marker is Plausible Analytics, which SiteCMD classifies as cookieless: it is documented to store no visitor identifier, so no Do Not Track or Global Privacy Control disclosure is expected for it.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "consent_relevant_trackers": [],
+            "cookieless_trackers": ["Plausible Analytics"],
+            "dnt_marker_detected": false,
+            "gpc_marker_detected": false,
+            "runtime_behavior_verified": false,
+            "separate_privacy_policy_inspected": false,
+            "tracking_marker_detected": false
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Privacy signal disclosure (DNT / GPC)"
+        }
+      ],
+      "name": "a_cookieless_analytics_page_needs_no_privacy_signal_notice",
+      "page": {
+        "body": "<html><head><script src=\"https://plausible.io/js/script.js\" defer></script></head><body><h1>Widgets</h1></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.ccpa_notice",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.ccpa_notice",
+          "confidence": "needs_review",
+          "confidenceReason": "The scanned page lacks a recognized marker, but SiteCMD cannot determine whether the business is covered, whether it sells or shares personal information, or whether the control exists at another URL or in a runtime privacy widget.",
+          "description": "No California privacy opt-out notice found. If your business is subject to CCPA/CPRA and sells or shares personal information, provide a clear opt-out path such as \"Do Not Sell or Share My Personal Information\".",
+          "fixPrompt": "Confirm whether the business is covered by California privacy law and whether any processing qualifies as a sale or sharing. If an opt-out right applies, provide the required method, honor applicable preference signals such as GPC, and make the path discoverable in the notice and interface.",
+          "manualFix": "Confirm whether your business meets CCPA/CPRA applicability thresholds and whether you sell or share personal information. If so, add a clear opt-out link or privacy control path in the footer and privacy policy.",
+          "rawData": {
+            "business_applicability_verified": false,
+            "california_opt_out_marker_detected": false,
+            "sale_or_sharing_verified": false
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "No California privacy opt-out notice found",
+          "whyItMatters": "If the business and processing are covered, an absent or ineffective opt-out path can prevent people from exercising a required right. Applicability must be established before treating this as a violation."
+        }
+      ],
+      "name": "commented_out_do_not_sell_link_is_not_a_california_notice",
+      "page": {
+        "body": "<html><body><!-- <a href=\"/ccpa\">Do Not Sell or Share My Personal Information</a> --></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.ccpa_notice",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.ccpa_notice",
+          "confidence": "high",
+          "description": "CCPA / California privacy notice detected (\"Do Not Sell\" or related language).",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "business_applicability_verified": false,
+            "california_opt_out_marker_detected": true,
+            "sale_or_sharing_verified": false
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "CCPA Notice"
+        }
+      ],
+      "name": "a_visible_do_not_sell_link_is_a_california_notice",
+      "page": {
+        "body": "<html><body><footer><a href=\"/ccpa-opt-out\">Do Not Sell or Share My Personal Information</a></footer></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "security.headers",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.headers.csp",
+          "confidence": "high",
+          "description": "Content-Security-Policy header is set with a useful script policy and key hardening directives.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "current_value": "default-src 'none'; script-src 'self'; base-uri 'self'; frame-ancestors 'self'",
+            "current_values": [
+              "default-src 'none'; script-src 'self'; base-uri 'self'; frame-ancestors 'self'"
+            ],
+            "policy_count": 1,
+            "policy_issues": []
+          },
+          "severity": "medium",
+          "status": "pass",
+          "title": "Content-Security-Policy header"
+        },
+        {
+          "category": "security",
+          "checkId": "security.headers.hsts",
+          "confidence": "high",
+          "description": "No HSTS header was observed. A browser that follows an explicit `http://` URL before it has a cached HSTS policy can make a plaintext request before an HTTPS redirect, where an on-path attacker could interfere. Direct `https://` navigation remains encrypted. HSTS upgrades later HTTP attempts after the browser receives the policy; preload is a separate operational commitment that can cover first contact.",
+          "fixPrompt": null,
+          "manualFix": "Add HSTS at the deployed edge or server after you have confirmed every public route and subdomain already works over HTTPS. A common baseline is `max-age=31536000; includeSubDomains` (1 year). Skip the `preload` directive until you have audited every subdomain and intentionally submitted to hstspreload.org - removal takes months.",
+          "rawData": null,
+          "severity": "medium",
+          "status": "fail",
+          "title": "No Strict-Transport-Security header",
+          "whyItMatters": "HSTS removes the HTTP-to-HTTPS downgrade window for browsers that have cached the policy. Without it, users arriving through an HTTP URL can still be exposed to that first plaintext hop."
+        },
+        {
+          "category": "security",
+          "checkId": "security.headers.x_frame_options",
+          "confidence": "high",
+          "description": "The enforced response-header CSP restricts framing with frame-ancestors. Supporting browsers compare the full ancestor chain with this source list: 'self'.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "csp_frame_ancestor_policies": [["'self'"]],
+            "csp_frame_ancestors": ["'self'"],
+            "csp_takes_precedence": true,
+            "effective_response_restriction": true,
+            "x_frame_options": null
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Clickjacking protection"
+        },
+        {
+          "category": "security",
+          "checkId": "security.headers.x_content_type_options",
+          "confidence": "needs_review",
+          "confidenceReason": "The header posture is directly observed, but exploitability depends on the response types, upload/content controls, and browser request contexts used by the application.",
+          "description": "No `X-Content-Type-Options: nosniff` header was observed. In applicable request contexts, browsers may infer a response type instead of relying only on the declared Content-Type. Exploitation also requires attacker-influenced content to be served with an unsafe or incorrect type/context; the missing header alone does not make an upload executable.",
+          "fixPrompt": null,
+          "manualFix": "Return `X-Content-Type-Options: nosniff` from the server or edge layer that owns response headers, and also serve every asset/upload with the correct Content-Type. Verify representative scripts, styles, downloads, and user-uploaded files after enabling it.",
+          "rawData": null,
+          "severity": "low",
+          "status": "warn",
+          "title": "No X-Content-Type-Options header",
+          "whyItMatters": "`nosniff` reduces content-type confusion. It is most relevant when untrusted files or generated responses could be served with an incorrect MIME type in a script or style context."
+        },
+        {
+          "category": "security",
+          "checkId": "security.headers.referrer_policy",
+          "confidence": "high",
+          "description": "No Referrer-Policy header or meta policy was observed. Modern browsers generally default to strict-origin-when-cross-origin, which keeps paths and query strings out of ordinary cross-origin Referer headers. An explicit policy makes the page's intended default reviewable and lets you choose something stricter, although individual links and requests can define their own referrer policy.",
+          "fixPrompt": null,
+          "manualFix": "Set a referrer policy in your server or edge headers, usually `strict-origin-when-cross-origin` unless you have a stronger privacy requirement. An explicit policy pins the referrer behavior instead of leaving it to browser defaults.",
+          "rawData": null,
+          "severity": "low",
+          "status": "warn",
+          "title": "No Referrer-Policy header",
+          "whyItMatters": "Without an explicit policy, the URL information sent with navigations and subresource requests depends on browser defaults and any per-element or per-request overrides."
+        },
+        {
+          "category": "security",
+          "checkId": "security.headers.permissions_policy",
+          "confidence": "high",
+          "description": "No Permissions-Policy header. Embedded third-party code may be able to request or use powerful browser features when the page or user permissions allow it. Permissions-Policy lets you disable features your site does not need.",
+          "fixPrompt": null,
+          "manualFix": "Declare a Permissions-Policy at the server or CDN layer that disables browser features your site does not need, then open specific features back up only if the app truly uses them. Camera, microphone, and geolocation are good defaults to deny first.",
+          "rawData": {
+            "security_headers_present": ["content-security-policy"]
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "No Permissions-Policy header",
+          "whyItMatters": "Permissions-Policy limits which embedded third-party code may even request powerful features like camera, microphone, or location (users still see a permission prompt either way)."
+        }
+      ],
+      "name": "default_src_none_governs_the_object_src_advisory",
+      "page": {
+        "body": "<html><body><h1>Widgets</h1></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [
+          [
+            "content-security-policy",
+            "default-src 'none'; script-src 'self'; base-uri 'self'; frame-ancestors 'self'"
+          ]
+        ],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.form_consent",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.form_consent",
+          "confidence": "needs_review",
+          "confidenceReason": "Static markup shows no obvious privacy, consent, or checkbox marker anywhere on the page, but it cannot determine the form's purpose, audience, regional legal requirements, runtime-rendered disclosure, or whether separate consent is required.",
+          "description": "The inspected static markup includes an email input but no privacy/consent text or checkbox marker anywhere on the page. SiteCMD does not know the form's purpose or whether consent is the applicable legal basis.",
+          "fixPrompt": "Identify the email collection purpose, audience, jurisdictions, and applicable lawful basis first. Provide the required collection notice at the form or a clear link to it. If consent is the applicable basis or separate marketing consent is required, use specific affirmative language and an unchecked opt-in; do not add a mandatory consent checkbox when the processing instead depends on a contract or another basis.",
+          "manualFix": "Review the form's purpose and applicable privacy rules, then add an accurate collection notice. Add a separate unchecked opt-in only when consent is the basis or is otherwise required.",
+          "rawData": {
+            "checkbox_detected": false,
+            "email_input_count": 1,
+            "form_count": 1,
+            "privacy_or_consent_text_detected": false,
+            "proximity_or_visibility_verified": false
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "No privacy or consent cue detected for email collection",
+          "whyItMatters": "People should be able to understand why their email is collected and how it will be used. The required notice, lawful basis, and any separate consent depend on the purpose and jurisdictions involved."
+        }
+      ],
+      "name": "commented_out_privacy_word_is_not_a_form_consent_cue",
+      "page": {
+        "body": "<html><body><!-- privacy notice pending --><form action=\"/subscribe\" method=\"post\"><input type=\"email\" name=\"email\"><button>Join</button></form></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "compliance.form_consent",
+      "expected": [
+        {
+          "category": "compliance",
+          "checkId": "compliance.form_consent",
+          "confidence": "needs_review",
+          "confidenceReason": "A page-wide privacy/consent text marker or checkbox was found, but this static check does not establish its purpose, visibility, proximity to the email form, default state, or legal sufficiency.",
+          "description": "The page collects an email address and consent-related markup (privacy/consent text or a checkbox) is present on the page. The scan does not verify that the cue is visible or placed near the form.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "checkbox_detected": false,
+            "email_input_count": 1,
+            "form_count": 1,
+            "privacy_or_consent_text_detected": true,
+            "proximity_or_visibility_verified": false
+          },
+          "severity": "medium",
+          "status": "pass",
+          "title": "Form consent"
+        }
+      ],
+      "name": "a_visible_privacy_link_is_a_form_consent_cue",
+      "page": {
+        "body": "<html><body><form action=\"/subscribe\" method=\"post\"><input type=\"email\" name=\"email\"><a href=\"/privacy\">Privacy policy</a><button>Join</button></form></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "accessibility.skip_nav",
+      "expected": [
+        {
+          "category": "accessibility",
+          "checkId": "accessibility.skip_nav",
+          "confidence": "high",
+          "description": "No skip navigation link detected. A 'skip to content' link is the most direct way to let keyboard users bypass repeated navigation; landmarks and headings can also serve that role.",
+          "fixPrompt": null,
+          "manualFix": "Add a skip link as the first focusable element: <a href=\"#main\" class=\"sr-only\">Skip to main content</a>",
+          "rawData": null,
+          "severity": "medium",
+          "status": "warn",
+          "title": "No skip navigation link",
+          "whyItMatters": "Without an effective bypass mechanism, keyboard users may need to traverse repeated navigation before reaching the main content on each page."
+        }
+      ],
+      "name": "prose_that_says_skip_to_is_not_a_skip_link",
+      "page": {
+        "body": "<html><body><nav><a href=\"/chapters\">Chapters</a></nav><p>You can skip to any chapter using the list below.</p><div id=\"chapters\">Chapter list</div></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "check": "accessibility.skip_nav",
+      "expected": [
+        {
+          "category": "accessibility",
+          "checkId": "accessibility.skip_nav",
+          "confidence": "high",
+          "description": "Skip navigation link found. Keyboard users can jump to main content.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": null,
+          "severity": "medium",
+          "status": "pass",
+          "title": "Skip navigation"
+        }
+      ],
+      "name": "a_fragment_anchor_saying_skip_to_content_is_a_skip_link",
+      "page": {
+        "body": "<html><body><a href=\"#main\" class=\"sr-only\">Skip to content</a><nav><a href=\"/chapters\">Chapters</a></nav><main id=\"main\">Body</main></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "headers": [],
+        "http_version": "HTTP/2.0",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "status_code": 200,
+        "url": "https://example.com/"
+      }
+    },
+    {
+      "name": "empty_external_script_before_json_ld_is_not_inline_code",
+      "check": "performance.unminified",
+      "page": {
+        "url": "http://127.0.0.1:8766/clean.html",
+        "status_code": 200,
+        "headers": [],
+        "body": "<html lang=\"en\"><head>\n<link rel=\"stylesheet\" href=\"/css/clean.css\">\n<script defer src=\"/js/app.js\"></script>\n<script type=\"application/ld+json\">{\n  \"@context\": \"https://schema.org\",\n  \"@graph\": [\n    {\"@type\": \"WebSite\", \"name\": \"Fixture Site\", \"url\": \"http://127.0.0.1:8766/\"},\n    {\"@type\": \"Organization\", \"name\": \"Fixture Org\", \"url\": \"http://127.0.0.1:8766/\",\n     \"logo\": \"http://127.0.0.1:8766/img/og.png\", \"sameAs\": [\"http://localhost:8766/clean.html\"]},\n    {\"@type\": \"Article\", \"headline\": \"Clean control page\", \"image\": \"http://127.0.0.1:8766/img/og.png\",\n     \"author\": {\"@type\": \"Person\", \"name\": \"Fixture Author\"},\n     \"datePublished\": \"2026-08-01T10:00:00Z\", \"dateModified\": \"2026-09-01T10:00:00Z\",\n     \"publisher\": {\"@type\": \"Organization\", \"name\": \"Fixture Org\"}}\n  ]\n}</script>\n</head><body><p>Control page body.</p></body></html>",
+        "evaluation_time": "2026-08-05T00:00:00Z",
+        "is_localhost": false,
+        "is_strict_localhost": false,
+        "http_version": "HTTP/1.1"
+      },
+      "expected": [
+        {
+          "checkId": "performance.unminified",
+          "category": "performance",
+          "title": "Inline code formatting",
+          "description": "No executable inline script or style block of at least 500 bytes matched this check's whitespace heuristic.",
+          "status": "pass",
+          "severity": "low",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": null,
+          "confidence": "high"
+        }
+      ]
     }
   ],
   "comment": "Cross-runtime golden check-verdict fixtures: page artifacts paired with the full expected CheckResult rows under a frozen evaluation_time (hosted scanner spec, parity harness). Embedded via include_str! so the SAME bytes run natively in desktop CI and through the wasm artifact in the hosted runner's CI. Regenerate expected blocks after an INTENTIONAL verdict change: cargo test -p sitecmd-engine --test golden_checks -- --ignored regenerate"

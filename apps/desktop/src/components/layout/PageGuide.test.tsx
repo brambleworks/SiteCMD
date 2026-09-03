@@ -27,7 +27,8 @@ async function openGuide(page: NavPage) {
 
   await user.click(screen.getByRole("button", { name: `Open ${title} guide` }));
 
-  return screen.getByRole("dialog", { name: title });
+  // The guide panel is a lazy chunk, so wait for it to resolve.
+  return await screen.findByRole("dialog", { name: title });
 }
 
 describe("PageGuideButton", () => {
@@ -79,7 +80,7 @@ describe("PageGuideButton", () => {
     const trigger = screen.getByRole("button", { name: "Open Issues guide" });
 
     await user.click(trigger);
-    expect(screen.getByRole("dialog", { name: "Issues" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Issues" })).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
 

@@ -189,3 +189,54 @@ fn missing_lang_clear_when_present() {
     let result = missing_lang(&ctx(html));
     assert!(!result.fired, "Should not fire when lang is present");
 }
+
+#[test]
+fn missing_lang_accepts_an_unquoted_attribute_value() {
+    // `links.html` uses `<html lang=en>`: the polish signal fired while
+    // `accessibility.lang` passed on the same attribute.
+    for markup in [
+        "<html lang=en><body>Hi</body></html>",
+        "<html lang=\"en\"><body>Hi</body></html>",
+        "<html lang='en-GB'><body>Hi</body></html>",
+        "<html LANG = en-gb ><body>Hi</body></html>",
+        "<html xml:lang=\"en\"><body>Hi</body></html>",
+    ] {
+        assert!(
+            !missing_lang(&ctx(markup)).fired,
+            "must not fire on {markup}"
+        );
+        assert!(
+            sitecmd_engine::checks::accessibility::html_checks::declares_document_language(markup),
+            "the shared predicate must agree on {markup}"
+        );
+    }
+}
+
+#[test]
+fn missing_lang_still_fires_when_the_attribute_is_absent_or_elsewhere() {
+    for markup in [
+        "<html><body>Hi</body></html>",
+        "<html><body><span lang=en>Hi</span></body></html>",
+        "<html hreflang=en><body>Hi</body></html>",
+    ] {
+        assert!(missing_lang(&ctx(markup)).fired, "must fire on {markup}");
+    }
+}
+
+#[test]
+fn heading_hierarchy_reports_no_h1_on_a_page_with_no_headings() {
+    // `seo-meta-missing.html` has zero headings; the polish signal reported
+    // "Not detected" while seo.headings.h1 warned about the same page.
+    let result = heading_hierarchy(&ctx("<html><body><p>Just prose.</p></body></html>"));
+    assert!(result.fired, "{}", result.detail);
+    assert_eq!(result.data["h1_count"], 0);
+    assert!(result.detail.contains("No h1 element"), "{}", result.detail);
+}
+
+#[test]
+fn heading_hierarchy_stays_clear_on_a_well_ordered_page() {
+    let result = heading_hierarchy(&ctx(
+        "<html><body><h1>Title</h1><h2>Section</h2><h3>Detail</h3></body></html>",
+    ));
+    assert!(!result.fired, "{}", result.detail);
+}

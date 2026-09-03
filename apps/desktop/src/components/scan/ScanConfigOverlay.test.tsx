@@ -115,7 +115,7 @@ describe("ScanConfigOverlay", () => {
     await waitFor(() =>
       expect(onStart).toHaveBeenCalledWith({
         urls: ["https://example.com/"],
-        axeEnabled: false,
+        axeEnabled: true,
         inspectLocalDatabases: false,
         scanType: "full",
       }),
@@ -315,7 +315,7 @@ describe("ScanConfigOverlay", () => {
     await waitFor(() =>
       expect(onStart).toHaveBeenCalledWith({
         urls: ["https://example.com/", "https://example.com/guides"],
-        axeEnabled: false,
+        axeEnabled: true,
         inspectLocalDatabases: false,
         scanType: "full",
       }),
@@ -392,7 +392,7 @@ describe("ScanConfigOverlay", () => {
     await waitFor(() =>
       expect(onStart).toHaveBeenCalledWith({
         urls: ["https://example.com/"],
-        axeEnabled: false,
+        axeEnabled: true,
         inspectLocalDatabases: false,
         scanType: "full",
       }),
@@ -420,7 +420,7 @@ describe("ScanConfigOverlay", () => {
     await waitFor(() =>
       expect(onStart).toHaveBeenCalledWith({
         urls: ["https://example.com/"],
-        axeEnabled: false,
+        axeEnabled: true,
         inspectLocalDatabases: false,
         scanType: "full",
       }),
@@ -472,7 +472,7 @@ describe("ScanConfigOverlay", () => {
     await waitFor(() =>
       expect(onStart).toHaveBeenCalledWith({
         urls: ["http://localhost:4321/"],
-        axeEnabled: false,
+        axeEnabled: true,
         inspectLocalDatabases: false,
         scanType: "full",
       }),
@@ -515,5 +515,173 @@ describe("ScanConfigOverlay", () => {
     // The shared entry, not just this overlay's local state, has to carry the
     // refreshed list - that is what Settings > Site Setup renders from.
     expect(client.getQueryData(queryKeys.settings.sitemapPages(7))).toHaveLength(3);
+  });
+
+  it("runs accessibility analysis by default and the switch turns it off for the run", async () => {
+    const onStart = vi.fn();
+
+    render(
+      <ScanConfigOverlay
+        siteUrl="https://example.com/"
+        siteId={7}
+        onStart={onStart}
+        onCancel={vi.fn()}
+      />,
+      { wrapper: withQueryClient() },
+    );
+
+    await screen.findByText("1 of 3 pages selected");
+    const accessibility = screen.getByRole("switch", { name: "Accessibility analysis" });
+    expect(accessibility).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(accessibility);
+    expect(accessibility).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Run Scan" }));
+
+    await waitFor(() =>
+      expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ axeEnabled: false })),
+    );
+  });
+
+  it("honours a preset that opens the form with accessibility analysis off", async () => {
+    const onStart = vi.fn();
+
+    render(
+      <ScanConfigOverlay
+        siteUrl="https://example.com/"
+        siteId={7}
+        onStart={onStart}
+        onCancel={vi.fn()}
+        initialAxeEnabled={false}
+      />,
+      { wrapper: withQueryClient() },
+    );
+
+    await screen.findByText("1 of 3 pages selected");
+    expect(screen.getByRole("switch", { name: "Accessibility analysis" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run Scan" }));
+
+    await waitFor(() =>
+      expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ axeEnabled: false })),
+    );
+  });
+
+  it("bounds the page checklist to one pager page and reveals the rest on demand", async () => {
+    const manyPages = Array.from({ length: 3000 }, (_, index) => ({
+      id: index + 1,
+      site_id: 7,
+      url: `https://example.com/page-${index + 1}`,
+      path: `/page-${index + 1}`,
+      title: `Page ${index + 1}`,
+      last_seen_at: "2026-04-20T00:00:00Z",
+      source: "sitemap",
+    }));
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_site_pages") return Promise.resolve(manyPages);
+      if (command === "get_scan_scope") return Promise.resolve([]);
+      return Promise.resolve(null);
+    });
+
+    render(
+      <ScanConfigOverlay
+        siteUrl="https://example.com/"
+        siteId={7}
+        onStart={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+      { wrapper: withQueryClient() },
+    );
+
+    await screen.findByText("1 of 3000 pages selected");
+    // The overlay renders through a portal, so the rows live on document.body.
+    // A site with thousands of pages mounts one page of rows, not all of them.
+    expect(document.querySelectorAll(".scan-config-page")).toHaveLength(50);
+    expect(screen.getByText("/page-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next scope page" }));
+
+    expect(document.querySelectorAll(".scan-config-page")).toHaveLength(50);
+    expect(screen.getByText("/page-51")).toBeInTheDocument();
+    expect(screen.queryByText("/page-1")).not.toBeInTheDocument();
+
+    // Select all still covers the whole list, not just the mounted page.
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    expect(screen.getByText("3000 of 3000 pages selected")).toBeInTheDocument();
+  });
+
+  it("keeps filtering and selection working while the checklist is paged", async () => {
+    const manyPages = Array.from({ length: 3000 }, (_, index) => ({
+      id: index + 1,
+      site_id: 7,
+      url: `https://example.com/page-${index + 1}`,
+      path: `/page-${index + 1}`,
+      title: `Page ${index + 1}`,
+      last_seen_at: "2026-04-20T00:00:00Z",
+      source: "sitemap",
+    }));
+    const onStart = vi.fn();
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_site_pages") return Promise.resolve(manyPages);
+      if (command === "get_scan_scope") return Promise.resolve([]);
+      if (command === "set_scan_scope") {
+        return Promise.resolve({ revision: 1, routes: ["/page-1", "/page-2000"] });
+      }
+      return Promise.resolve(null);
+    });
+
+    render(
+      <ScanConfigOverlay
+        siteUrl="https://example.com/"
+        siteId={7}
+        onStart={onStart}
+        onCancel={vi.fn()}
+      />,
+      { wrapper: withQueryClient() },
+    );
+
+    await screen.findByText("1 of 3000 pages selected");
+    fireEvent.click(screen.getByRole("button", { name: "Next scope page" }));
+
+    // A filter reopens the narrowed list on its first page.
+    fireEvent.change(screen.getByPlaceholderText("Filter pages..."), {
+      target: { value: "/page-2000" },
+    });
+    expect(document.querySelectorAll(".scan-config-page")).toHaveLength(1);
+
+    fireEvent.click(screen.getByText("/page-2000"));
+    fireEvent.click(screen.getByRole("button", { name: "Run Scan" }));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("set_scan_scope", {
+        siteId: 7,
+        siteUrl: "https://example.com/",
+        routes: ["/page-1", "/page-2000"],
+      }),
+    );
+    expect(onStart).toHaveBeenCalled();
+  });
+
+  it("offers no accessibility switch and sends none for a code-only run", async () => {
+    const onStart = vi.fn();
+
+    render(
+      <ScanConfigOverlay
+        siteUrl=""
+        projectPath="/tmp/project"
+        onStart={onStart}
+        onCancel={vi.fn()}
+      />,
+      { wrapper: withQueryClient() },
+    );
+
+    expect(screen.queryByRole("switch", { name: "Accessibility analysis" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Run/ }));
+
+    await waitFor(() =>
+      expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ axeEnabled: false })),
+    );
   });
 });

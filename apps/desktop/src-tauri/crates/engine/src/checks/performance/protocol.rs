@@ -41,6 +41,11 @@ impl Check for Http2Check {
 
         let version = ctx.http_version.as_deref().unwrap_or("unknown");
         let is_h2_plus = version.contains("HTTP/2") || version.contains("HTTP/3");
+        // Browsers negotiate h2 and h3 through ALPN during the TLS handshake,
+        // so a page served over plain HTTP cannot reach either one whatever
+        // the server supports. HTTPS is the prerequisite, not a protocol
+        // setting (neverssl.com received h2/h3 advice it could not act on).
+        let plaintext_scheme = ctx.url.scheme() == "http";
         // The scan client negotiates at most HTTP/2, so HTTP/3 support is
         // detected from the Alt-Svc advertisement (h3 / h3-NN tokens).
         let advertises_h3 = ctx
@@ -56,6 +61,8 @@ impl Check for Http2Check {
             category: self.category(),
             title: if is_h2_plus {
                 "Modern HTTP protocol detected".into()
+            } else if plaintext_scheme {
+                "HTTP/1.x over plain HTTP".into()
             } else {
                 "Response used HTTP/1.x".into()
             },
@@ -71,6 +78,8 @@ impl Check for Http2Check {
                         version
                     )
                 }
+            } else if plaintext_scheme {
+                format!("This request used {} over plain HTTP. Browsers negotiate HTTP/2 and HTTP/3 through ALPN during the TLS handshake, so this page cannot reach either protocol until it is served over HTTPS.", version)
             } else {
                 format!("This request used {}. HTTP/2 or HTTP/3 can reduce connection and request-serialization overhead for some pages, but the benefit depends on the resource graph, network, and proxy/CDN path.", version)
             },
@@ -83,16 +92,22 @@ impl Check for Http2Check {
             fix_prompt: None,
             manual_fix: if is_h2_plus {
                 None
+            } else if plaintext_scheme {
+                Some("Serve this hostname over HTTPS first: obtain a certificate, redirect HTTP to HTTPS, and confirm the redirect target answers. HTTP/2 and HTTP/3 follow from the TLS handshake once that is in place, so re-test the protocol only after the site is reachable over HTTPS.".into())
             } else {
                 Some("Identify the browser-facing server, CDN, or proxy that negotiated this response and enable HTTP/2 or HTTP/3 there using its current documentation. Public browser deployments normally negotiate modern protocols over TLS with ALPN. Re-test the public hostname and representative assets; do not change an origin hidden behind an HTTP/1.1-only upstream hop unless that is the visitor-facing bottleneck.".into())
             },
-            raw_data: Some(
-                serde_json::json!({ "http_version": version, "alt_svc_h3": advertises_h3 }),
-            ),
+            raw_data: Some(serde_json::json!({
+                "http_version": version,
+                "alt_svc_h3": advertises_h3,
+                "scheme": ctx.url.scheme(),
+            })),
             confidence: crate::checks::IssueConfidence::High,
             confidence_reason: None,
             why_it_matters: if is_h2_plus {
                 None
+            } else if plaintext_scheme {
+                Some("Without TLS the page also has no transport confidentiality or integrity, and the protocol upgrade is unavailable to every visitor. HTTP/1.x can additionally require more connections and serialize requests per connection.".into())
             } else {
                 Some("HTTP/1.x can require more connections and serialize requests per connection. On a resource-heavy or high-latency page that may add delay, while a small page or an internal upstream hop may see little user impact.".into())
             },
@@ -236,6 +251,31 @@ mod tests {
             .manual_fix
             .as_deref()
             .is_some_and(|fix| fix.contains("browser-facing") && fix.contains("Re-test")));
+    }
+
+    #[test]
+    fn a_plain_http_page_is_told_https_is_the_prerequisite() {
+        // neverssl.com is HTTP-only, so h2/h3 advice names a setting the site
+        // cannot reach: ALPN happens inside the TLS handshake.
+        let mut page = ctx(false, "HTTP/1.1");
+        page.url = url::Url::parse("http://neverssl.com/").unwrap();
+        let results = Http2Check.run(&page);
+
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert!(
+            results[0].description.contains("served over HTTPS"),
+            "{}",
+            results[0].description
+        );
+        assert!(
+            results[0]
+                .manual_fix
+                .as_deref()
+                .is_some_and(|fix| fix.contains("Serve this hostname over HTTPS first")),
+            "{:?}",
+            results[0].manual_fix
+        );
+        assert_eq!(results[0].raw_data.as_ref().unwrap()["scheme"], "http");
     }
 
     #[test]

@@ -196,8 +196,12 @@ struct LegalDocumentInput {
 #[derive(Deserialize)]
 struct HttpsEnforcementInput {
     page_url: String,
-    // A classified outcome for the planned downgrade probe, or absent when
-    // the plan completes without one.
+    // The runtime's own local-environment verdict for the page, the same flag
+    // `PageContext::is_localhost` carries. Absent means a public site.
+    #[serde(default)]
+    page_is_local: bool,
+    // A classified outcome for the planned probe, or absent when the plan
+    // completes without one.
     #[serde(default)]
     outcome: Option<ProbeOutcome>,
 }
@@ -759,7 +763,16 @@ fn run_case(case: &Case) -> Vec<CheckResult> {
             let input: HttpsEnforcementInput =
                 serde_json::from_value(case.input.clone()).expect("https_enforcement input parses");
             let page_url = url::Url::parse(&input.page_url).expect("fixture page url");
-            match https_enforcement::plan_https_enforcement(&page_url) {
+            let step = https_enforcement::plan_https_enforcement(&page_url, input.page_is_local);
+            let planned_outcome = || {
+                input.outcome.clone().unwrap_or_else(|| {
+                    panic!(
+                        "{}: planned probe requires an outcome in the fixture",
+                        case.name
+                    )
+                })
+            };
+            match step {
                 https_enforcement::HttpsEnforcementStep::Done(results) => {
                     assert!(
                         input.outcome.is_none(),
@@ -768,14 +781,11 @@ fn run_case(case: &Case) -> Vec<CheckResult> {
                     );
                     results
                 }
-                https_enforcement::HttpsEnforcementStep::Probe { url } => {
-                    let outcome = input.outcome.unwrap_or_else(|| {
-                        panic!(
-                            "{}: planned probe requires an outcome in the fixture",
-                            case.name
-                        )
-                    });
-                    https_enforcement::evaluate_https_enforcement(url.as_str(), outcome)
+                https_enforcement::HttpsEnforcementStep::ProbeHttpOrigin { url } => {
+                    https_enforcement::evaluate_http_downgrade(url.as_str(), planned_outcome())
+                }
+                https_enforcement::HttpsEnforcementStep::ProbeHttpsOrigin { url } => {
+                    https_enforcement::evaluate_https_availability(url.as_str(), planned_outcome())
                 }
             }
         }
@@ -1158,9 +1168,18 @@ fn headline_verdicts_match_the_documented_checks() {
         CheckStatus::Warn
     );
     assert_eq!(status("bare_404_body_is_a_minimal_warn"), CheckStatus::Warn);
+    // A status that only says the origin refused the probe is not a verdict
+    // about missing pages at all. (Content negotiation is pinned by the unit
+    // test on the request plan, not here: this corpus feeds verdicts an
+    // outcome, so it cannot express one URL answering two ways.)
+    assert_eq!(
+        status("a_rate_limited_404_probe_produces_no_verdict"),
+        CheckStatus::Skipped
+    );
 
     // www/non-www: only BOTH hosts serving the site is a duplicate-content
-    // warning; a redirect or an error status is not.
+    // warning; a redirect or an error status is not. A host the resolver has
+    // no address for is a single-host configuration, not a failed request.
     assert_eq!(
         status("alternate_host_redirecting_passes"),
         CheckStatus::Pass
@@ -1172,6 +1191,10 @@ fn headline_verdicts_match_the_documented_checks() {
     assert_eq!(
         status("alternate_host_error_status_is_not_duplicate_content"),
         CheckStatus::Pass
+    );
+    assert_eq!(
+        status("an_alternate_host_that_does_not_resolve_is_a_single_host_configuration"),
+        CheckStatus::Skipped
     );
 
     assert_eq!(
@@ -1210,6 +1233,14 @@ fn headline_verdicts_match_the_documented_checks() {
     assert_eq!(
         status("a_get_confirmed_404_fails_the_internal_sample"),
         CheckStatus::Fail
+    );
+    // Cloudflare's email-obfuscation anchor is 404 by design and is never a
+    // site route, so it leaves the sample instead of failing it.
+    let reserved = &rows_of("a_cloudflare_email_protection_anchor_is_never_sampled")[0];
+    assert_eq!(reserved.status, CheckStatus::Pass);
+    assert_eq!(
+        reserved.raw_data.as_ref().expect("raw data")["excluded_reserved_paths"],
+        1
     );
     assert_eq!(
         status("a_head_404_that_gets_200_is_not_broken"),
@@ -1288,7 +1319,6 @@ fn headline_verdicts_match_the_documented_checks() {
     for name in [
         "empty_sitemap_document_warns",
         "missing_sitemap_on_wordpress_names_the_core_sitemap",
-        "inconclusive_probe_never_becomes_a_missing_sitemap",
         "cross_origin_declaration_is_reported_unverified",
         // A document the grammar rejects is not a sitemap here, even though
         // page discovery still reads locations out of it.
@@ -1296,6 +1326,12 @@ fn headline_verdicts_match_the_documented_checks() {
     ] {
         assert_eq!(status(name), CheckStatus::Warn, "{name}");
     }
+    // An inconclusive probe establishes nothing, so it is a skip and never a
+    // warning the operator is asked to clear.
+    assert_eq!(
+        status("inconclusive_probe_never_becomes_a_missing_sitemap"),
+        CheckStatus::Skipped
+    );
     assert_eq!(
         status("plain_text_sitemap_passes_as_a_sitemap"),
         CheckStatus::Pass
@@ -1313,6 +1349,17 @@ fn headline_verdicts_match_the_documented_checks() {
     );
     assert_eq!(
         status("malformed_lastmod_values_warn_with_direct_evidence"),
+        CheckStatus::Warn
+    );
+    // The sitemap protocol references the W3C Datetime note: every profile
+    // shape (including minute precision with a zone) is valid, while a
+    // space-separated, impossible, or zone-less value is not.
+    assert_eq!(
+        status("every_w3c_datetime_profile_shape_passes_freshness"),
+        CheckStatus::Pass
+    );
+    assert_eq!(
+        status("space_separated_impossible_and_zoneless_lastmod_values_warn"),
         CheckStatus::Warn
     );
 
@@ -1390,9 +1437,18 @@ fn headline_verdicts_match_the_documented_checks() {
     }
     for name in [
         "unreachable_http_origin_makes_no_enforcement_claim",
-        "an_http_scan_target_reports_that_https_was_untested",
+        // A local preview is the only http scan with nothing to grade.
+        "a_local_http_scan_keeps_the_preview_skip",
     ] {
         assert_eq!(status(name), CheckStatus::Skipped, "{name}");
+    }
+    // A public http scan already observed cleartext delivery, so it fails
+    // either way; the HTTPS probe only decides which defect is reported.
+    for name in [
+        "an_http_scan_of_a_host_that_serves_https_is_a_missing_redirect",
+        "an_http_only_host_fails_instead_of_reporting_https_untested",
+    ] {
+        assert_eq!(status(name), CheckStatus::Fail, "{name}");
     }
 
     assert_eq!(
@@ -1707,10 +1763,16 @@ fn headline_verdicts_match_the_documented_checks() {
         CheckStatus::Skipped
     );
 
+    // A domain with no MX and no SPF shows no mail setup: the selector sweep
+    // is skipped, never graded as a pass or a warning.
+    assert_eq!(
+        status("dkim_gate_skips_non_mail_domains"),
+        CheckStatus::Skipped
+    );
     for name in [
-        "dkim_gate_skips_non_mail_domains",
         "dkim_gate_honors_a_declared_no_mail_posture",
         "dkim_active_selector_passes",
+        "dkim_proton_mail_selector_passes",
         "dkim_empty_sweep_with_null_spf_is_consistent",
     ] {
         assert_eq!(status(name), CheckStatus::Pass, "{name}");
@@ -1882,6 +1944,15 @@ fn headline_verdicts_match_the_documented_checks() {
     );
     assert_eq!(weak_cache.status, CheckStatus::Warn);
     assert_eq!(weak_cache.severity, Severity::Low);
+    // A third-party origin sets its own cache headers: counted, never graded.
+    let third_party = sampler_row(
+        "asset_sample_third_party_weak_cache_is_not_graded",
+        "performance.asset_caching",
+    );
+    assert_eq!(third_party.status, CheckStatus::Pass);
+    let third_party_raw = third_party.raw_data.as_ref().expect("raw data");
+    assert_eq!(third_party_raw["third_party_sampled"], 1);
+    assert_eq!(third_party_raw["weak_count"], 0);
     // Two srcset candidates in one group: the weight counts the largest
     // (2 MB), never the 3 MB sum no navigation transfers.
     let srcset_weight = sampler_row(

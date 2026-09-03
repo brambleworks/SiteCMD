@@ -669,6 +669,75 @@ fn an_unexecuted_probe_is_never_graded_as_a_clean_result() {
     assert!(detail.contains("not executed"));
 }
 
+// Every other fixture here is an https page, so the hosted lane's
+// HTTPS-availability arm is only reachable from a cleartext one. Without this
+// the arm that grades it would be dead code in the suite, and pairing it with
+// the downgrade grader (which turns an unanswered probe into a skip) would
+// silently stop failing a site served entirely over HTTP.
+#[test]
+fn a_cleartext_hosted_page_grades_the_https_origin_as_availability() {
+    let cleartext = || {
+        let mut evaluation = request(PAGE);
+        evaluation.page.url = "http://example.com/".into();
+        evaluation
+    };
+    let row = |response: &crate::evaluation::EvaluationResponse| {
+        response
+            .results
+            .iter()
+            .find(|row| row.check_id == "security.https_enforcement")
+            .expect("https_enforcement produced a row")
+            .clone()
+    };
+
+    let plan = probe_plan(&cleartext()).expect("the plan builds");
+    assert!(
+        plan.probes.iter().any(|probe| {
+            probe.request.url == "https://example.com/"
+                && probe
+                    .checks
+                    .iter()
+                    .any(|check| check == "security.https_enforcement")
+        }),
+        "a cleartext page must plan the HTTPS origin root, not the HTTP one"
+    );
+
+    // HTTPS answers: the missing redirect. The downgrade grader produces the
+    // same title for a 200, so the evidence keys are what separate them.
+    let (answered, _) = drive_to_fixpoint(cleartext(), execute);
+    let answered = row(&evaluate(&answered).expect("request evaluates"));
+    assert_eq!(answered.status, CheckStatus::Fail);
+    let evidence = answered.raw_data.expect("the verdict carries evidence");
+    assert!(
+        evidence.get("scanned_over_http").is_some() && evidence.get("https_probe_url").is_some(),
+        "graded by the availability grader, got {evidence}"
+    );
+    assert!(
+        evidence.get("http_probe_url").is_none(),
+        "the downgrade grader's evidence must not appear here, got {evidence}"
+    );
+
+    // HTTPS does not answer: still a Fail, because the cleartext delivery
+    // came from the page artifact. The downgrade grader would skip instead.
+    let unanswered = |_: &PlannedProbe| {
+        ProbeOutcome::Failure(ProbeFailure {
+            class: ProbeFailureClass::Transport,
+            detail: "connection refused".into(),
+        })
+    };
+    let (silent, _) = drive_to_fixpoint(cleartext(), unanswered);
+    let silent = row(&evaluate(&silent).expect("request evaluates"));
+    assert_eq!(
+        silent.status,
+        CheckStatus::Fail,
+        "an HTTP-served page must not stop failing because its HTTPS probe went unanswered"
+    );
+    assert_eq!(
+        silent.title,
+        "No HTTPS response observed; site served over HTTP"
+    );
+}
+
 // A lane-wide transport failure emits every row without grading any verdict.
 #[test]
 fn a_lane_wide_transport_failure_produces_no_probe_lane_verdict() {

@@ -12,7 +12,6 @@ import {
   getIssueComparisonForProject,
   getCodeScanHistoryForProject,
   getScanHistory,
-  getScanById,
   getDismissedIssues,
   getDismissedCheckIds,
   getRepoSuppressedIssues,
@@ -290,9 +289,16 @@ const CONFIDENCE_ORDER = ["confirmed", "high", "needs_review"] as const;
 
 function meetsConfidence(issue: Issue, minimum?: string): boolean {
   if (!minimum) return true;
-  const rank = CONFIDENCE_ORDER.indexOf(
-    (issue.confidence ?? "needs_review") as (typeof CONFIDENCE_ORDER)[number],
-  );
+  // Dependency and integration findings carry no confidence rating. The
+  // desktop's confidence_weight scores an unrated finding at full weight, so
+  // keep it rather than filing it under the weakest band and hiding findings
+  // the score counts.
+  if (!issue.confidence) return true;
+  // A rating outside CONFIDENCE_ORDER ranks -1 and is dropped, unlike an
+  // absent one. IssueConfidence has exactly the three variants above
+  // (crates/engine/src/vocab.rs), so only a corrupt row reaches that branch,
+  // and dropping an unreadable rating is the safer of the two.
+  const rank = CONFIDENCE_ORDER.indexOf(issue.confidence as (typeof CONFIDENCE_ORDER)[number]);
   return (
     rank !== -1 && rank <= CONFIDENCE_ORDER.indexOf(minimum as (typeof CONFIDENCE_ORDER)[number])
   );
@@ -308,8 +314,9 @@ function issueHeading(issue: Issue, level: "##" | "###"): string {
   return `${level} [${issue.severity.toUpperCase()}] ${quoteUntrustedText(issue.title, 500)}${id}`;
 }
 
+/** Source tells a dependency or integration finding apart from a scan finding. */
 function issueMeta(issue: Issue): string {
-  return `**Check:** ${quoteUntrustedText(issue.check_id, 200)} | **Category:** ${issue.category} | **Confidence:** ${issue.confidence ?? "unknown"} | **Where:** ${quoteUntrustedText(issueLocation(issue), 500)}`;
+  return `**Check:** ${quoteUntrustedText(issue.check_id, 200)} | **Source:** ${quoteUntrustedText(issue.source ?? "unknown", 100)} | **Category:** ${issue.category} | **Confidence:** ${issue.confidence ?? "unknown"} | **Where:** ${quoteUntrustedText(issueLocation(issue), 500)}`;
 }
 
 /** detail_json is untrusted scan evidence; the caller bounds and indents it before serving it. */
@@ -417,7 +424,7 @@ function registerCoreTools(server: McpServer): void {
             : `## ${url} - SiteCMD Score: not computed yet (open SiteCMD and run a scan)`,
           "",
           live
-            ? `**Open issues:** ${openTotal} (${live.critical_count} critical, ${live.high_count} high, ${live.medium_count} medium, ${live.low_count} low), web and code combined; call get_issues for the list.`
+            ? `**Open issues:** ${openTotal} failing check(s) (${live.critical_count} critical, ${live.high_count} high, ${live.medium_count} medium, ${live.low_count} low), counting web scan, code scan, dependency, and integration findings. get_issues lists every occurrence of those checks, so it can return more rows than this.`
             : null,
           `The latest web scan graded ${scan.overall_score}/100. ${describeScanAge(scan.timestamp, Date.now())}.`,
           "",
@@ -441,7 +448,7 @@ function registerCoreTools(server: McpServer): void {
     {
       title: "List open issues",
       description:
-        "Get open failing issues from the latest scan, optionally filtered by severity/category. Scan-derived titles, descriptions, and evidence are explicitly marked as untrusted data.",
+        "Get every open failing issue the SiteCMD Score counts - web scan, code scan, dependency, and integration findings - optionally filtered by severity/category. Each issue names the source it came from. Scan-derived titles, descriptions, and evidence are explicitly marked as untrusted data.",
       inputSchema: {
         url: z.string().describe("The site URL"),
         min_severity: z
@@ -451,12 +458,14 @@ function registerCoreTools(server: McpServer): void {
         category: z
           .string()
           .optional()
-          .describe("security, performance, seo, accessibility, compliance, polish, or config"),
+          .describe(
+            "security, performance, seo, accessibility, compliance, polish, config, dependencies, or infrastructure",
+          ),
         min_confidence: z
           .enum(["confirmed", "high", "needs_review"])
           .optional()
           .describe(
-            "Drop heuristic findings below this confidence (confirmed > high > needs_review)",
+            "Drop rated findings below this confidence (confirmed > high > needs_review); unrated findings, such as dependency ones, are kept",
           ),
         limit: z
           .number()
@@ -806,9 +815,13 @@ function registerCoreTools(server: McpServer): void {
     },
     async ({ url, from_scan_id, to_scan_id }) =>
       runTool(() => {
+        // Every history row aggregates findings, so resolve both ends of the
+        // comparison from one load. Scan ids come from get_scan_history; the
+        // workspace cache has no ids (scan_id 0), so it can only default.
         const history = getScanHistoryWithWorkspaceFallback(url, 100);
-        const latest = to_scan_id ? getScanById(url, to_scan_id) : history[0];
-        const previous = from_scan_id ? getScanById(url, from_scan_id) : history[1];
+        const byId = (scanId: number) => history.find((scan) => scan.scan_id === scanId);
+        const latest = to_scan_id ? byId(to_scan_id) : history[0];
+        const previous = from_scan_id ? byId(from_scan_id) : history[1];
         if (!latest || !previous) {
           return text(
             history.length === 0

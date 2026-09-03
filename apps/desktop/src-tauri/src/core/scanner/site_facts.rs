@@ -23,6 +23,8 @@ pub(crate) async fn read_before_polish(
 ) {
     let signals = crate::core::page_signals::extract_page_signals_with_headers(
         &ctx.url,
+        ctx.requested_url(),
+        ctx.status_code,
         &ctx.body,
         &ctx.response_headers,
     );

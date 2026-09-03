@@ -1,6 +1,9 @@
 import { FileText, Globe } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
+import { useResetOnChange } from "@/hooks/useResetOnChange";
+import { pageWindow } from "@/lib/pagination";
 import { DossierNumberedSection } from "@/components/issues/IssueDossierPanel";
 import type { IssueGroup } from "@/lib/types";
 import { AnomalyBadge } from "@/components/issues/AnomalyBadge";
@@ -35,6 +38,10 @@ export interface IssueAffectedFile {
   locationSuffix?: string | null;
 }
 
+// An issue can hold thousands of locations; each block mounts one page of rows
+// and the pager reveals the rest, as the Issues list does.
+const LOCATION_PAGE_SIZE = 20;
+
 export function IssueWhereLivesSection({
   pages,
   files,
@@ -54,64 +61,123 @@ export function IssueWhereLivesSection({
     <DossierNumberedSection label="Location" tone="neutral">
       <div className="dossier-where">
         {pages.length > 0 ? (
-          <div className="dossier-where-block">
-            <ul className="dossier-where-list">
-              {pages.map((page) => (
-                <li key={page.key} className="dossier-where-row">
-                  <Globe className="dossier-where-icon" aria-hidden="true" />
-                  <span className="dossier-where-label" title={page.label}>
-                    {page.label}
-                  </span>
-                  {page.lastSeen !== undefined && formatLastSeen ? (
-                    <span className="dossier-where-meta">
-                      last seen {formatLastSeen(page.lastSeen)}
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <AffectedPagesBlock pages={pages} formatLastSeen={formatLastSeen} />
         ) : null}
 
         {files.length > 0 ? (
-          <div className="dossier-where-block">
-            {filesPreamble ? <div className="dossier-where-preamble">{filesPreamble}</div> : null}
-            <ul className="dossier-where-list">
-              {files.map((file) => (
-                <li key={file.key} className="dossier-where-row dossier-where-row-file">
-                  <FileText className="dossier-where-icon" aria-hidden="true" />
-                  <div className="dossier-where-file-text">
-                    <p className="dossier-where-file-path" title={file.relativePath}>
-                      {file.relativePath}
-                      {file.locationSuffix ? (
-                        <span className="dossier-where-file-suffix">{file.locationSuffix}</span>
-                      ) : null}
-                    </p>
-                    {file.reason ? (
-                      <p className="dossier-where-file-reason">{file.reason}</p>
-                    ) : null}
-                  </div>
-                  {onOpenFile || onRevealFile ? (
-                    <div className="dossier-where-file-actions">
-                      {onOpenFile ? (
-                        <Button variant="outline" size="sm" onClick={() => onOpenFile(file)}>
-                          Open
-                        </Button>
-                      ) : null}
-                      {onRevealFile ? (
-                        <Button variant="outline" size="sm" onClick={() => onRevealFile(file)}>
-                          Reveal
-                        </Button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <AffectedFilesBlock
+            files={files}
+            filesPreamble={filesPreamble}
+            onOpenFile={onOpenFile}
+            onRevealFile={onRevealFile}
+          />
         ) : null}
       </div>
     </DossierNumberedSection>
+  );
+}
+
+function AffectedPagesBlock({
+  pages,
+  formatLastSeen,
+}: {
+  pages: IssueAffectedPage[];
+  formatLastSeen?: (ts: number) => string;
+}) {
+  const [page, setPage] = useState(1);
+  // A different issue, or a shorter list, changes what the first page holds.
+  // Keyed on content rather than array identity: callers build these inline.
+  useResetOnChange(`${pages.length}:${pages[0]?.key ?? ""}`, () => setPage(1));
+  const bounded = pageWindow(pages, page, LOCATION_PAGE_SIZE);
+
+  return (
+    <div className="dossier-where-block">
+      <ul className="dossier-where-list">
+        {bounded.rows.map((location) => (
+          <li key={location.key} className="dossier-where-row">
+            <Globe className="dossier-where-icon" aria-hidden="true" />
+            <span className="dossier-where-label" title={location.label}>
+              {location.label}
+            </span>
+            {location.lastSeen !== undefined && formatLastSeen ? (
+              <span className="dossier-where-meta">
+                last seen {formatLastSeen(location.lastSeen)}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <Pager
+        page={bounded.page}
+        totalPages={bounded.totalPages}
+        onChange={setPage}
+        label="Affected pages"
+        itemLabel="location"
+        className="dossier-where-pager"
+      />
+    </div>
+  );
+}
+
+function AffectedFilesBlock({
+  files,
+  filesPreamble,
+  onOpenFile,
+  onRevealFile,
+}: {
+  files: IssueAffectedFile[];
+  filesPreamble?: ReactNode;
+  onOpenFile?: (file: IssueAffectedFile) => void;
+  onRevealFile?: (file: IssueAffectedFile) => void;
+}) {
+  const [page, setPage] = useState(1);
+  // A different issue, or a shorter list, changes what the first page holds.
+  // Keyed on content rather than array identity: callers build these inline.
+  useResetOnChange(`${files.length}:${files[0]?.key ?? ""}`, () => setPage(1));
+  const bounded = pageWindow(files, page, LOCATION_PAGE_SIZE);
+
+  return (
+    <div className="dossier-where-block">
+      {filesPreamble ? <div className="dossier-where-preamble">{filesPreamble}</div> : null}
+      <ul className="dossier-where-list">
+        {bounded.rows.map((file) => (
+          <li key={file.key} className="dossier-where-row dossier-where-row-file">
+            <FileText className="dossier-where-icon" aria-hidden="true" />
+            <div className="dossier-where-file-text">
+              <p className="dossier-where-file-path" title={file.relativePath}>
+                {file.relativePath}
+                {file.locationSuffix ? (
+                  <span className="dossier-where-file-suffix">{file.locationSuffix}</span>
+                ) : null}
+              </p>
+              {file.reason ? <p className="dossier-where-file-reason">{file.reason}</p> : null}
+            </div>
+            {onOpenFile || onRevealFile ? (
+              <div className="dossier-where-file-actions">
+                {onOpenFile ? (
+                  <Button variant="outline" size="sm" onClick={() => onOpenFile(file)}>
+                    Open
+                  </Button>
+                ) : null}
+                {onRevealFile ? (
+                  <Button variant="outline" size="sm" onClick={() => onRevealFile(file)}>
+                    Reveal
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <Pager
+        page={bounded.page}
+        totalPages={bounded.totalPages}
+        onChange={setPage}
+        label="Affected files"
+        itemLabel="location"
+        className="dossier-where-pager"
+      />
+    </div>
   );
 }
 

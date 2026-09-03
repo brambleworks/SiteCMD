@@ -58,16 +58,29 @@ fn asset_weight_verdict_thresholds() {
     );
     assert_eq!(
         asset_weight_verdict(ASSET_WEIGHT_WARN_BYTES + 1),
-        (CheckStatus::Warn, Severity::Medium)
+        (CheckStatus::Warn, Severity::Low)
     );
     assert_eq!(
         asset_weight_verdict(ASSET_WEIGHT_FAIL_BYTES),
-        (CheckStatus::Warn, Severity::Medium)
+        (CheckStatus::Warn, Severity::Low)
     );
+    // A sampled, decoded byte sum with needs_review confidence must not be
+    // presented at the severity reserved for measured user-facing cost.
     assert_eq!(
         asset_weight_verdict(ASSET_WEIGHT_FAIL_BYTES + 1),
-        (CheckStatus::Fail, Severity::High)
+        (CheckStatus::Fail, Severity::Medium)
     );
+}
+
+#[test]
+fn a_sampled_byte_sum_never_grades_above_medium() {
+    for bytes in [0, ASSET_WEIGHT_WARN_BYTES + 1, ASSET_WEIGHT_FAIL_BYTES + 1] {
+        let (_, severity) = asset_weight_verdict(bytes);
+        assert!(
+            matches!(severity, Severity::Medium | Severity::Low),
+            "{bytes} graded {severity:?}, but the row's own text says it is not observed navigation transfer"
+        );
+    }
 }
 
 #[test]
@@ -201,7 +214,7 @@ fn asset_weight_marks_incomplete_samples_without_calling_them_a_floor() {
 }
 
 #[test]
-fn asset_weight_fails_high_above_five_megabytes() {
+fn asset_weight_fails_above_five_megabytes() {
     let coll = collection(1, 1, 1);
     let assets = vec![measured(
         "https://example.com/a0.png",
@@ -212,7 +225,7 @@ fn asset_weight_fails_high_above_five_megabytes() {
     )];
     let result = asset_weight_result(4096, &coll, &assets);
     assert_eq!(result.status, CheckStatus::Fail);
-    assert_eq!(result.severity, Severity::High);
+    assert_eq!(result.severity, Severity::Medium);
     assert!(result.manual_fix.is_some());
     assert!(result.why_it_matters.is_some());
 }
@@ -518,7 +531,7 @@ fn fingerprinted_asset_without_durable_cache_warns() {
         ),
         cached("https://example.com/assets/vendor.4f3a2b1c.css", None),
     ];
-    let result = asset_caching_result(&assets, None);
+    let result = asset_caching_result(&assets, Some("https://example.com"));
     assert_eq!(result.status, CheckStatus::Warn);
     assert_eq!(result.severity, Severity::Low);
     assert_eq!(result.confidence, IssueConfidence::NeedsReview);
@@ -546,14 +559,97 @@ fn single_weak_cached_asset_uses_singular_grammar() {
             Some("public, max-age=31536000, immutable"),
         ),
     ];
-    let result = asset_caching_result(&assets, None);
+    let result = asset_caching_result(&assets, Some("https://example.com"));
     assert!(
         result
             .description
-            .contains("1 of 2 sampled assets with fingerprint-like filenames is served"),
+            .contains("1 of 2 sampled same-site assets with fingerprint-like filenames is served"),
         "singular verb expected: {}",
         result.description
     );
+}
+
+#[test]
+fn third_party_fingerprinted_assets_are_counted_but_never_graded() {
+    // plausible.io sets its own cache headers; the scanned site cannot change
+    // them, so a short max-age there is not the site's caching miss.
+    let assets = vec![
+        cached(
+            "https://plausible.io/js/pa-XfHGJa14uHVX9qMr7Gz_g.js",
+            Some("public, max-age=60, no-transform"),
+        ),
+        cached(
+            "https://example.com/assets/index-DkJ8s0aB.js",
+            Some("public, max-age=31536000, immutable"),
+        ),
+    ];
+    let result = asset_caching_result(&assets, Some("https://example.com"));
+    assert_eq!(result.status, CheckStatus::Pass, "{}", result.description);
+    assert_eq!(result.confidence, IssueConfidence::High);
+    assert!(
+        result.description.contains(
+            "1 sampled third-party asset with a fingerprint-like filename was not graded"
+        ),
+        "{}",
+        result.description
+    );
+    let raw = result.raw_data.expect("raw_data");
+    assert_eq!(raw["fingerprinted_sampled"], 2);
+    assert_eq!(raw["third_party_sampled"], 1);
+    assert_eq!(raw["weak_count"], 0);
+    assert!(!raw.to_string().contains("plausible.io"));
+}
+
+#[test]
+fn only_third_party_fingerprints_report_nothing_graded() {
+    let assets = vec![cached(
+        "https://plausible.io/js/pa-XfHGJa14uHVX9qMr7Gz_g.js",
+        Some("public, max-age=60, no-transform"),
+    )];
+    let result = asset_caching_result(&assets, Some("https://example.com"));
+    assert_eq!(result.status, CheckStatus::Pass);
+    assert!(
+        result
+            .description
+            .starts_with("No sampled same-site asset filename matched"),
+        "{}",
+        result.description
+    );
+    assert_eq!(result.raw_data.expect("raw_data")["third_party_sampled"], 1);
+}
+
+#[test]
+fn the_sites_own_cdn_subdomain_is_same_site_and_graded() {
+    let assets = vec![cached(
+        "https://cdn.example.com/assets/index-DkJ8s0aB.js",
+        Some("no-cache"),
+    )];
+    let result = asset_caching_result(&assets, Some("https://www.example.com"));
+    assert_eq!(result.status, CheckStatus::Warn, "{}", result.description);
+    let raw = result.raw_data.expect("raw_data");
+    assert_eq!(raw["third_party_sampled"], 0);
+    assert_eq!(raw["weak_count"], 1);
+}
+
+#[test]
+fn same_site_needs_the_registrable_domain_not_just_the_public_suffix() {
+    assert!(is_same_site(
+        "https://static.example.co.uk/a-DkJ8s0aB.js",
+        Some("https://www.example.co.uk")
+    ));
+    assert!(!is_same_site(
+        "https://other.co.uk/a-DkJ8s0aB.js",
+        Some("https://www.example.co.uk")
+    ));
+    assert!(!is_same_site(
+        "https://example.com.evil.net/a-DkJ8s0aB.js",
+        Some("https://example.com")
+    ));
+    assert!(is_same_site(
+        "http://localhost:5173/a-DkJ8s0aB.js",
+        Some("http://localhost:5173")
+    ));
+    assert!(!is_same_site("https://example.com/a-DkJ8s0aB.js", None));
 }
 
 #[test]
@@ -616,17 +712,24 @@ fn durable_cache_and_unversioned_assets_do_not_warn() {
         cached("https://example.com/js/app.js", Some("no-cache")),
         cached("https://example.com/css/styles.css", None),
     ];
-    let result = asset_caching_result(&assets, None);
+    let result = asset_caching_result(&assets, Some("https://example.com"));
     assert_eq!(
         result.status,
         CheckStatus::Pass,
         "description: {}",
         result.description
     );
+    assert!(
+        result
+            .description
+            .starts_with("All 1 sampled same-site assets"),
+        "{}",
+        result.description
+    );
 }
 
 #[test]
-fn heavy_image_evidence_keeps_the_scanned_sites_own_asset_name() {
+fn heavy_image_evidence_keeps_asset_filenames_but_not_opaque_path_tokens() {
     let own = measured(
         "https://sitecmd.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png",
         AssetKind::Image,
@@ -634,6 +737,8 @@ fn heavy_image_evidence_keeps_the_scanned_sites_own_asset_name() {
         Some(507_000),
         false,
     );
+    // A filename ending in an image extension is build output wherever it is
+    // served from, and the fix needs it verbatim to find the file.
     let foreign = measured(
         "https://cdn.example.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png",
         AssetKind::Image,
@@ -641,98 +746,162 @@ fn heavy_image_evidence_keeps_the_scanned_sites_own_asset_name() {
         Some(507_000),
         false,
     );
-    let result = heavy_images_result(&[own, foreign], Some("https://sitecmd.com"));
+    // An extension-less long segment on a foreign host can be a signed path
+    // token, so it stays redacted.
+    let signed = measured(
+        "https://cdn.example.com/image/upload/s--abcdef0123456789abcdef0123456789--/hero.png",
+        AssetKind::Image,
+        200,
+        Some(507_000),
+        false,
+    );
+    let result = heavy_images_result(&[own, foreign, signed], Some("https://sitecmd.com"));
     assert!(
         result.description.contains("https://sitecmd.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png (507 KB"),
         "{}",
         result.description
     );
     assert!(
+        result.description.contains("https://cdn.example.com/images/screenshots/problem/dashboard-health-score-before-fix-2026.png (507 KB"),
+        "{}",
+        result.description
+    );
+    assert!(
         result
             .description
-            .contains("https://cdn.example.com/images/screenshots/problem/[redacted] (507 KB"),
+            .contains("https://cdn.example.com/image/upload/[redacted]/hero.png (507 KB"),
         "{}",
         result.description
     );
 }
 
 #[test]
-fn asset_weight_result_keeps_same_origin_path_but_strips_it_without_page_origin() {
-    let url = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
-    let asset = measured(url, AssetKind::Script, 200, Some(1024), false);
+fn asset_weight_result_keeps_asset_filenames_but_strips_opaque_segments_off_origin() {
+    // A hashed bundle name is build output; the fix cannot find the file
+    // without it, so it survives with or without a page origin.
+    let bundle = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+    // An extension-less long segment is opaque, and off the scanned origin it
+    // can be a signed path token.
+    let opaque = "https://sitecmd.com/deliver/a1b2c3d4e5f678901234567890abcdef1234/main";
+    let assets = vec![
+        measured(bundle, AssetKind::Script, 200, Some(1024), false),
+        measured(opaque, AssetKind::Script, 200, Some(1024), false),
+    ];
 
     let mut coll = collection(1, 1, 1);
     coll.page_origin = Some("https://sitecmd.com".to_string());
-    let same_origin = asset_weight_result(0, &coll, std::slice::from_ref(&asset));
+    let same_origin = asset_weight_result(0, &coll, &assets);
     let serialized = serde_json::to_string(&same_origin).expect("serialize result");
-    assert!(serialized.contains(url), "{serialized}");
+    assert!(serialized.contains(bundle), "{serialized}");
+    assert!(serialized.contains(opaque), "{serialized}");
 
     coll.page_origin = None;
-    let no_origin = asset_weight_result(0, &coll, std::slice::from_ref(&asset));
+    let no_origin = asset_weight_result(0, &coll, &assets);
     let serialized = serde_json::to_string(&no_origin).expect("serialize result");
-    assert!(!serialized.contains(url), "{serialized}");
+    assert!(serialized.contains(bundle), "{serialized}");
+    assert!(!serialized.contains(opaque), "{serialized}");
     assert!(
-        serialized.contains("https://sitecmd.com/assets/[redacted]"),
+        serialized.contains("https://sitecmd.com/deliver/[redacted]/main"),
         "{serialized}"
     );
 }
 
 #[test]
-fn broken_images_result_keeps_same_origin_path_but_strips_it_without_page_origin() {
-    let url = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+fn broken_images_result_keeps_asset_filenames_but_strips_opaque_segments_off_origin() {
+    let bundle = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
+    let opaque = "https://sitecmd.com/deliver/a1b2c3d4e5f678901234567890abcdef1234/main";
 
     let same_origin = broken_images_result(
-        &[measured(url, AssetKind::Image, 404, None, false)],
+        &[
+            measured(bundle, AssetKind::Image, 404, None, false),
+            measured(opaque, AssetKind::Image, 404, None, false),
+        ],
         Some("https://sitecmd.com"),
     );
     assert!(
-        same_origin.description.contains(url),
+        same_origin.description.contains(bundle) && same_origin.description.contains(opaque),
         "{}",
         same_origin.description
     );
 
-    let no_origin =
-        broken_images_result(&[measured(url, AssetKind::Image, 404, None, false)], None);
+    let no_origin = broken_images_result(
+        &[
+            measured(bundle, AssetKind::Image, 404, None, false),
+            measured(opaque, AssetKind::Image, 404, None, false),
+        ],
+        None,
+    );
+    assert!(
+        no_origin.description.contains(bundle),
+        "a hashed bundle filename is what the fix greps for: {}",
+        no_origin.description
+    );
     assert!(
         no_origin
             .description
-            .contains("https://sitecmd.com/assets/[redacted]"),
+            .contains("https://sitecmd.com/deliver/[redacted]/main"),
         "{}",
         no_origin.description
     );
     assert!(
-        !no_origin.description.contains(url),
+        !no_origin.description.contains(opaque),
         "{}",
         no_origin.description
     );
 }
 
 #[test]
-fn asset_caching_result_keeps_same_origin_path_but_strips_it_without_page_origin() {
+fn asset_caching_result_keeps_the_sites_own_path_and_grades_nothing_without_a_page_origin() {
     let url = "https://sitecmd.com/assets/dashboard-health-score-a1b2c3d4e5f67890.js";
 
     let same_origin = asset_caching_result(
         &[cached(url, Some("no-cache"))],
         Some("https://sitecmd.com"),
     );
+    assert_eq!(same_origin.status, CheckStatus::Warn);
     assert!(
         same_origin.description.contains(url),
         "{}",
         same_origin.description
     );
 
+    // Without a page origin, same-site membership is unknown rather than
+    // empty: the check reports what it could not establish instead of passing
+    // the site, and persists no foreign path token either way.
     let no_origin = asset_caching_result(&[cached(url, Some("no-cache"))], None);
-    assert!(
-        no_origin
-            .description
-            .contains("https://sitecmd.com/assets/[redacted]"),
+    assert_eq!(
+        no_origin.status,
+        CheckStatus::Skipped,
         "{}",
         no_origin.description
     );
+    let raw = no_origin.raw_data.expect("raw_data");
+    assert_eq!(raw["reason"], "no_page_origin");
+    assert_eq!(raw["fingerprinted_sampled"], 1);
+    assert!(raw.get("weak").is_none(), "nothing was graded: {raw}");
+    assert!(raw.get("weak_count").is_none(), "nothing was graded: {raw}");
     assert!(
-        !no_origin.description.contains(url),
+        !no_origin.description.contains("sitecmd.com"),
         "{}",
         no_origin.description
+    );
+}
+
+#[test]
+fn without_a_page_origin_an_empty_fingerprint_sample_still_reports_its_verdict() {
+    // Nothing matched the filename pattern, which is true whether or not the
+    // assets could have been attributed, so this one is not a skip.
+    let result = asset_caching_result(
+        &[cached("https://cdn.example/app.js", Some("no-cache"))],
+        None,
+    );
+    assert_eq!(result.status, CheckStatus::Pass, "{}", result.description);
+    assert!(
+        result
+            .description
+            .starts_with("No sampled static-asset filename matched"),
+        "{}",
+        result.description
     );
 }
 

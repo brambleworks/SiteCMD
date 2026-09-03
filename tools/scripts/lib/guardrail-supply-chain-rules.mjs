@@ -240,11 +240,20 @@ export function supplyChainSafetyFailures(read, options = {}) {
       );
     }
 
-    // An override is inert unless the graph caps the dependency below it.
-    if (advisory && !nonSecurity) {
+    const declaredRanges = lookupRanges(entry.name);
+
+    // An override for a package nothing depends on is dead config whatever its
+    // justification: there is no resolution left for the floor to rewrite. This
+    // is the one inertness check a `non-security:` reason does not excuse, and
+    // the gap that let `ws` and `sharp` outlive their dependents here.
+    if (declaredRanges && declaredRanges.length === 0) {
+      failures.push(
+        `${where} overrides "${entry.name}", which nothing in the installed graph depends on. An override with nothing to rewrite is dead config that reads like protection. Remove it.`,
+      );
+    } else if (advisory && !nonSecurity) {
+      // A security override is inert unless the graph caps the dependency below it.
       const floor = rangeFloor(entry.range);
-      const declaredRanges = lookupRanges(entry.name);
-      if (floor && declaredRanges && declaredRanges.length > 0) {
+      if (floor && declaredRanges) {
         const capping = declaredRanges.filter((range) => rangeCapsBelow(range, floor));
         if (capping.length === 0) {
           failures.push(

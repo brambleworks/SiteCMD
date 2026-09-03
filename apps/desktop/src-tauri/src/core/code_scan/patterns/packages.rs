@@ -100,14 +100,24 @@ pub(in crate::core::code_scan) static IMPORT_CAPTURE_PATTERNS: LazyLock<Vec<rege
             // Side-effect imports have no `from` clause.
             regex::Regex::new(r#"(?m)^[\t ]*import[\t ]*["']([^"']+)["']"#)
                 .expect("static side-effect import regex"), // allow-expect: compile-time literal regex
-            // Static import/export-from declarations may span multiple lines.
-            // Stop at a semicolon so one malformed or string-only line cannot
-            // consume a later declaration. Anchoring keeps words such as
-            // `code.includes('import ')` from becoming package references.
-            regex::Regex::new(r#"(?ms)^[\t ]*import\b[^;]*?\bfrom\s*["']([^"']+)["']"#)
-                .expect("static import-from regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r#"(?ms)^[\t ]*export\b[^;]*?\bfrom\s*["']([^"']+)["']"#)
-                .expect("static export-from regex"), // allow-expect: compile-time literal regex
+            // Static import/export-from declarations may span multiple lines,
+            // so the clause between the keyword and `from` is spelled out
+            // instead of "anything up to the next semicolon": a run-on match
+            // used to reach past the declaration and capture a `from "..."`
+            // that belonged to a string literal further down the file.
+            // Each clause shape carries its own separator: a brace or star
+            // needs no space after the keyword, because bundled and minified
+            // sources write `import{a}from"x"` and `export*from"x"`, while a
+            // bare identifier needs one so `import type X from "pkg"` and
+            // `import pkg from "x"` both keep their clause intact.
+            regex::Regex::new(
+                r#"(?ms)^[\t ]*import(?:\s*\{[^{}]*\}|\s*\*\s*as\s+[\w$]+|\s+type\s*\{[^{}]*\}|\s+type\s*\*\s*as\s+[\w$]+|\s+(?:type\s+)?[\w$]+(?:\s*,\s*(?:\{[^{}]*\}|\*\s*as\s+[\w$]+))?)\s*from\s*["']([^"']+)["']"#,
+            )
+            .expect("static import-from regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(
+                r#"(?ms)^[\t ]*export(?:\s*\{[^{}]*\}|\s*\*(?:\s*as\s+[\w$]+)?|\s+type\s*\{[^{}]*\}|\s+type\s*\*(?:\s*as\s+[\w$]+)?)\s*from\s*["']([^"']+)["']"#,
+            )
+            .expect("static export-from regex"), // allow-expect: compile-time literal regex
             // Dynamic forms can appear mid-expression, so they stay unanchored,
             // but a word boundary keeps `require(`/`import(` from matching when
             // glued onto an identifier (e.g. `myrequire(`).

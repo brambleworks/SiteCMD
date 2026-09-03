@@ -87,17 +87,36 @@ pub(super) fn collect_route_security_issues(
     }
 
     if likely_public_endpoint && !uses_llm && !has_rate_limit {
+        let route_reason = ctx
+            .signals
+            .route_evidence
+            .as_deref()
+            .unwrap_or("a route handler");
+        let risk_match = ctx.signals.public_risk_match.as_ref();
+        let surface = match risk_match {
+            Some(risk) => format!("matched the abuse-sensitive word {}", risk.describe()),
+            None => "parses request input or writes without a recognized auth gate".to_string(),
+        };
+        // A word matched in the path names no line in the file, so point at the
+        // handler the route was recognized by instead of an unrelated match.
+        let anchor_line = if risk_match.is_some_and(|risk| risk.in_route_path()) {
+            route_handler_marker_line(content)
+                .or_else(|| first_match_line(content, &REQUEST_BODY_PATTERNS))
+        } else {
+            first_match_line(content, &PUBLIC_RISK_ENDPOINT_PATTERNS)
+                .or_else(|| first_match_line(content, &REQUEST_BODY_PATTERNS))
+        };
         issues.push(build_issue(
             "public-endpoint-rate-limit",
             "security",
             if public_risk_endpoint { Severity::High } else { Severity::Medium },
             "No recognized rate limit for public-looking route",
-            "This route matches public auth, search, chat, upload, contact, or similar patterns, but SiteCMD found no local limiter or inherited middleware signal. Static source does not establish actual internet exposure, edge policy, authentication, or gateway quotas. If the effective path is public and performs abuse-sensitive or expensive work without a caller-aware limit, automation and accidental loops can consume capacity or amplify brute-force attempts.",
+            "This file is route-like and shows an abuse-sensitive surface, but SiteCMD found no local limiter or inherited middleware signal. Static source does not establish actual internet exposure, edge policy, authentication, or gateway quotas. If the effective path is public and performs abuse-sensitive or expensive work without a caller-aware limit, automation and accidental loops can consume capacity or amplify brute-force attempts.",
             file,
-            first_match_line(content, &PUBLIC_RISK_ENDPOINT_PATTERNS)
-                .or_else(|| first_match_line(content, &REQUEST_BODY_PATTERNS))
-                .or_else(|| find_line(content, "export async function post(")),
-            Some("A public-looking auth/search/chat/upload/contact-style route was detected without a recognized local rate-limit pattern; edge, gateway, and custom middleware controls were not resolved.".into()),
+            anchor_line.or_else(|| find_line(content, "export async function post(")),
+            Some(format!(
+                "Route-like by {route_reason}; the file {surface}. No recognized local rate-limit pattern was found; edge, gateway, and custom middleware controls were not resolved."
+            )),
             Some("Trace every deployment entry point and inventory effective edge, gateway, account, user, tenant, and network controls. If a gap remains, enforce an atomic shared limit before expensive work, with separate policies for authenticated and pre-auth abuse and a documented fail-open or fail-closed choice.".into()),
             Some("Load-test bursts and sustained traffic across multiple identities, networks, and application instances. Confirm rejected requests start no protected work, allowed callers remain fair, and HTTP throttles return the intended 429 and Retry-After behavior.".into()),
         ));
@@ -305,7 +324,13 @@ pub(super) fn collect_route_security_issues(
         ));
     }
 
-    if multi_tenant_handler && !has_tenant_scope_query && !has_auth_owned_id_scope {
+    // A webhook has no signed-in principal to scope by: the provider signature
+    // is the whole authorization story.
+    if multi_tenant_handler
+        && !ctx.signals.is_webhook
+        && !has_tenant_scope_query
+        && !has_auth_owned_id_scope
+    {
         issues.push(build_issue(
             "tenant-scope-missing",
             "security",

@@ -10,9 +10,11 @@ pub mod framework_defaults;
 pub mod guidance;
 pub mod html_quality;
 pub mod meta_infra;
+pub mod stylesheet_cache;
 pub mod titles;
 pub mod types;
 
+pub use stylesheet_cache::StylesheetCache;
 pub use types::*;
 
 /// Context passed to each polish signal - the fetched page data + CSS content.
@@ -21,7 +23,8 @@ pub struct PolishContext {
     pub url: url::Url,
     /// Raw HTML body
     pub html: String,
-    /// Concatenated CSS from first 3 linked stylesheets (empty if none fetched)
+    /// Concatenated CSS from the linked stylesheets that were fetched, up to
+    /// `css_fetch::MAX_CSS_FILES` of them (empty if none were fetched)
     pub css: String,
     /// Cached lowercase HTML. Avoids re-lowercasing the same body for every
     /// signal. Use `html_lower` to read, never touch directly.

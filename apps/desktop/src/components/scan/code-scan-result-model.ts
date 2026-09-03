@@ -25,7 +25,7 @@ export function getCodeScanPresentation(): CodeScanPresentation {
     compareEmptyTitle: "This is your first Code Scan for this target",
     issuesLabel: "issues",
     emptyTitle: "No code risks detected",
-    emptyCopy: "Your linked project passed the latest Code Scan.",
+    emptyCopy: "Your project passed the latest Code Scan.",
     rerunLabel: "Run Code Scan Again",
     focusLabel: "Focus top issue",
   };

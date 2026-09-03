@@ -54,6 +54,7 @@ describe("siteCmdScoreModelFromSnapshot", () => {
         effMedium: 0,
         effLow: 0,
         floorApplied: false,
+        ceilingApplied: false,
       },
       computedAt: 1,
     });
@@ -65,6 +66,8 @@ describe("siteCmdScoreModelFromSnapshot", () => {
     expect(model.breakdown.overall).toBe(26);
     expect(model.breakdown.exploitableCapped).toBe(false);
     expect(model.breakdown.hasDeductions).toBe(false);
+    // Nothing is open in this breakdown, so the 26 is not the open-issue ceiling.
+    expect(model.breakdown.ceilingNote).toBeNull();
   });
 
   it("rounds the overall score to a whole number and carries the cap flag", () => {
@@ -87,6 +90,7 @@ describe("siteCmdScoreModelFromSnapshot", () => {
         effMedium: 0,
         effLow: 0,
         floorApplied: false,
+        ceilingApplied: false,
       },
       computedAt: 1,
     });

@@ -84,6 +84,14 @@ impl CheckContext {
                 let mut inconclusive = false;
                 for url in candidates {
                     let safe_url = crate::log_sanitizer::evidence_safe_page_url(&url);
+                    // Deliberately NOT sent here: the browser `Accept` the
+                    // 404 probe uses. That header is on the 404 probe because
+                    // origins measurably content-negotiate a missing *page*;
+                    // no evidence says they do it for a sitemap, and asking
+                    // for text/html first would make an HTML shell the
+                    // preferred representation of a document
+                    // `parse_sitemap_document` rejects, turning a found
+                    // sitemap into a missing one.
                     let resp = match self
                         .client
                         .get(&url)

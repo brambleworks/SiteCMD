@@ -1,26 +1,26 @@
 //! Detects blocking scripts and stylesheets in `<head>`.
 
+use crate::checks::html_attrs::{attr_value, has_attr, tag_slices, url_attr_value};
 use crate::checks::{Check, CheckResult, CheckStatus, PageContext, ScanCategory, Severity};
-use regex::Regex;
-use std::sync::LazyLock;
 
-static RB_SCRIPT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)<script\s[^>]*src\s*=\s*["']([^"']+)["'][^>]*>"#).unwrap());
-/// async/defer as attributes (whitespace-preceded). Matched against the
-/// tag with the src value blanked out: `\b` alone matched "async" inside
-/// URLs like /js/async-utils.js, hiding genuinely blocking scripts
-///.
-static ASYNC_DEFER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)\s(async|defer)[\s/>=]|type\s*=\s*["']?module\b"#).unwrap());
-static RB_LINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<link\s[^>]*>"#).unwrap());
-static RB_STYLESHEET_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)rel\s*=\s*["']stylesheet["']"#).unwrap());
-static RB_HREF_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)href\s*=\s*["']([^"']+)["']"#).unwrap());
-static MEDIA_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)media\s*=\s*["']([^"']+)["']"#).unwrap());
-static PRELOAD_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)rel\s*=\s*["']preload["']"#).unwrap());
+/// Whether a `<script src>` tag in `<head>` blocks the parser. `nomodule`
+/// joins async, defer, and `type=module`: a module-supporting browser (every
+/// current one) neither fetches nor executes a `nomodule` script, so counting
+/// it as render-blocking describes no browser in use.
+fn blocks_the_parser(tag: &str) -> bool {
+    let is_module =
+        attr_value(tag, "type").is_some_and(|value| value.trim().eq_ignore_ascii_case("module"));
+    !has_attr(tag, "async") && !has_attr(tag, "defer") && !has_attr(tag, "nomodule") && !is_module
+}
+
+/// Whether a `<link>` carries the given rel keyword. `rel` is a space-separated
+/// token list, so a substring match on the whole attribute is not enough.
+fn has_rel(tag: &str, keyword: &str) -> bool {
+    attr_value(tag, "rel").is_some_and(|rel| {
+        rel.split_whitespace()
+            .any(|token| token.eq_ignore_ascii_case(keyword))
+    })
+}
 
 pub struct RenderBlockingCheck;
 
@@ -43,39 +43,42 @@ impl Check for RenderBlockingCheck {
 
         let mut blocking_scripts: Vec<String> = Vec::new();
         let mut blocking_styles: Vec<String> = Vec::new();
+        let head_lower = head.to_ascii_lowercase();
 
-        // Find scripts in head without async/defer/type=module
-        for cap in RB_SCRIPT_RE.captures_iter(head) {
-            let full_tag = cap.get(0).map(|m: regex::Match| m.as_str()).unwrap_or("");
-            let src = &cap[1];
-
-            // Blank the src value so URL text can't satisfy the
-            // attribute match.
-            let attrs_only = full_tag.replace(src, " ");
-            if !ASYNC_DEFER_RE.is_match(&attrs_only) {
-                blocking_scripts.push(truncate(src, 80));
+        // Scripts in head with a real src and none of async, defer, nomodule,
+        // or type=module.
+        for tag in tag_slices(head, &head_lower, "script") {
+            let Some(src) = url_attr_value(tag, "src") else {
+                continue;
+            };
+            if blocks_the_parser(tag) {
+                blocking_scripts.push(truncate(&src, 80));
             }
         }
 
-        // Find stylesheets without media (other than all/screen) or preload
-        for tag in RB_LINK_RE.find_iter(head) {
-            let tag_str: &str = tag.as_str();
-            if RB_STYLESHEET_RE.is_match(tag_str) && !PRELOAD_RE.is_match(tag_str) {
-                // Only absent, `all`, or `screen` media blocks rendering
-                // unconditionally; conditional media should not be counted.
-                if let Some(media_cap) = MEDIA_RE.captures(tag_str) {
-                    let media = media_cap[1].trim();
-                    if !(media.is_empty()
-                        || media.eq_ignore_ascii_case("all")
-                        || media.eq_ignore_ascii_case("screen"))
-                    {
-                        continue;
-                    }
-                }
-                if let Some(href_cap) = RB_HREF_RE.captures(tag_str) {
-                    blocking_styles.push(truncate(&href_cap[1], 80));
+        // Stylesheets without media (other than all/screen) or preload.
+        for tag in tag_slices(head, &head_lower, "link") {
+            if !has_rel(tag, "stylesheet") || has_rel(tag, "preload") {
+                continue;
+            }
+            // Only absent, `all`, or `screen` media blocks rendering
+            // unconditionally; conditional media should not be counted.
+            if let Some(media) = attr_value(tag, "media") {
+                let media = media.trim();
+                if !(media.is_empty()
+                    || media.eq_ignore_ascii_case("all")
+                    || media.eq_ignore_ascii_case("screen"))
+                {
+                    continue;
                 }
             }
+            // A `data-href` placeholder is not a request: the theme
+            // stylesheets GitHub swaps in at runtime were counted as 29
+            // blocking sheets against 15 real ones.
+            let Some(href) = url_attr_value(tag, "href") else {
+                continue;
+            };
+            blocking_styles.push(truncate(&href, 80));
         }
 
         let script_count = blocking_scripts.len();
@@ -282,6 +285,84 @@ mod tests {
             "{}",
             results[0].description
         );
+    }
+
+    #[test]
+    fn a_data_href_placeholder_is_not_a_render_blocking_stylesheet() {
+        // github.com ships 14 runtime theme stylesheets as `data-href`
+        // placeholders alongside its real `href` sheets.
+        let placeholders: String = (0..14)
+            .map(|i| {
+                format!(
+                    r#"<link data-color-theme="t{i}" media="all" rel="stylesheet" data-href="/assets/theme-{i}.css" />"#
+                )
+            })
+            .collect();
+        let html = format!(
+            r#"<html><head><link rel="stylesheet" href="/real.css">{placeholders}</head><body></body></html>"#
+        );
+        let results = RenderBlockingCheck.run(&ctx(&html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+        assert!(
+            results[0].description.contains("1 stylesheet"),
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn a_nomodule_script_is_not_render_blocking() {
+        let html = r#"<html><head><script src="/_next/static/chunks/legacy.js" noModule=""></script></head><body></body></html>"#;
+        let results = RenderBlockingCheck.run(&ctx(html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn a_stylesheet_rel_with_several_tokens_still_counts() {
+        let stylesheets: String = (0..8)
+            .map(|i| format!(r#"<link rel="stylesheet alternate-ignored" href="/s{i}.css">"#))
+            .collect();
+        let html = format!("<html><head>{stylesheets}</head><body></body></html>");
+        let results = RenderBlockingCheck.run(&ctx(&html));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+    }
+
+    #[test]
+    fn a_link_inside_an_inline_script_string_is_not_a_stylesheet() {
+        let html = r#"<html><head>
+            <script>document.write('<link rel="stylesheet" href="/from-script.css">');</script>
+            <link rel="stylesheet" href="/real.css">
+        </head><body></body></html>"#;
+        let results = RenderBlockingCheck.run(&ctx(html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+        assert!(
+            results[0].description.contains("1 stylesheet"),
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn an_entity_encoded_script_src_is_reported_as_the_browser_requests_it() {
+        let html = r#"<html><head><script src="/js/app.js?v=1&amp;b=2"></script></head><body></body></html>"#;
+        let results = RenderBlockingCheck.run(&ctx(html));
+        let raw = results[0].raw_data.as_ref().expect("raw data");
+        assert_eq!(raw["blocking_scripts"][0], "/js/app.js?v=1&b=2");
     }
 
     #[test]

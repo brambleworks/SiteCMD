@@ -715,7 +715,8 @@
           "manualFix": null,
           "rawData": {
             "inconclusive": 0,
-            "paths_probed": 13
+            "paths_probed": 13,
+            "signature_mismatch": 0
           },
           "severity": "low",
           "status": "pass",
@@ -896,7 +897,8 @@
           "manualFix": null,
           "rawData": {
             "inconclusive": 0,
-            "paths_probed": 13
+            "paths_probed": 13,
+            "signature_mismatch": 0
           },
           "severity": "low",
           "status": "pass",
@@ -1319,7 +1321,7 @@
           "category": "polish",
           "checkId": "config.custom_404",
           "confidence": "high",
-          "description": "The generated missing-looking path returned HTTP 404 with a response body over 500 bytes. That confirms the status and a substantial body, but body length alone does not establish that the page is branded, accessible, useful, or consistent with the rest of the site.",
+          "description": "The generated missing-looking path returned HTTP 404 with a response body over 500 bytes. That confirms the status and the size of what came back, and nothing more: body length does not establish that the response is a purpose-built error page rather than the homepage served under a 404, nor that it is branded, accessible, useful, or consistent with the rest of the site.",
           "fixPrompt": null,
           "manualFix": null,
           "rawData": {
@@ -1329,7 +1331,7 @@
           },
           "severity": "low",
           "status": "pass",
-          "title": "404 response includes a substantial error page"
+          "title": "404 status with a 900-byte body"
         }
       ],
       "input": {
@@ -1769,6 +1771,7 @@
             "destination_content_assessed": false,
             "effective_base_target": "https://example.com/",
             "eligible_candidate_count": 2,
+            "excluded_reserved_paths": 0,
             "excluded_target_count": 0,
             "fragment_targets_assessed": false,
             "inconclusive": [],
@@ -1845,6 +1848,7 @@
             "destination_content_assessed": false,
             "effective_base_target": "https://example.com/",
             "eligible_candidate_count": 2,
+            "excluded_reserved_paths": 0,
             "excluded_target_count": 0,
             "fragment_targets_assessed": false,
             "inconclusive": [],
@@ -1914,6 +1918,62 @@
           "fixPrompt": null,
           "manualFix": null,
           "rawData": {
+            "anchor_href_count": 2,
+            "attempted_count": 1,
+            "authenticated_session_used": false,
+            "broken": [],
+            "confirmed_missing_statuses": [404, 410],
+            "destination_content_assessed": false,
+            "effective_base_target": "https://example.com/",
+            "eligible_candidate_count": 1,
+            "excluded_reserved_paths": 1,
+            "excluded_target_count": 0,
+            "fragment_targets_assessed": false,
+            "inconclusive": [],
+            "rendered_dom_links_assessed": false,
+            "responded_without_404_or_410_count": 1,
+            "sample_limit": 100,
+            "sample_truncated": false,
+            "sampled_candidate_count": 1,
+            "soft_404_assessed": false,
+            "source_scope": "initial_html_anchor_href"
+          },
+          "severity": "high",
+          "status": "pass",
+          "title": "internal link status sample"
+        }
+      ],
+      "input": {
+        "observations": [
+          {
+            "head": {
+              "body": null,
+              "content_length": null,
+              "content_type": null,
+              "final_url": "https://example.com/about",
+              "headers": [],
+              "kind": "response",
+              "status": 200
+            },
+            "url": "https://example.com/about"
+          }
+        ],
+        "page_body": "<a href=\"/cdn-cgi/l/email-protection#4b2a2f2a0b2a2f2a\">contact</a><a href=\"/about\">about</a>",
+        "scope": "internal"
+      },
+      "name": "a_cloudflare_email_protection_anchor_is_never_sampled"
+    },
+    {
+      "check": "seo.broken_links",
+      "expected": [
+        {
+          "category": "seo",
+          "checkId": "seo.broken_links",
+          "confidence": "high",
+          "description": "No HTTP 404 or 410 was observed among 1 sampled same-host anchor destination at scan time. This bounded status probe does not assess soft 404s, authenticated behavior, fragments, destination content, or links inserted after rendering. 1 eligible destination was sampled.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
             "anchor_href_count": 1,
             "attempted_count": 1,
             "authenticated_session_used": false,
@@ -1922,6 +1982,7 @@
             "destination_content_assessed": false,
             "effective_base_target": "https://example.com/",
             "eligible_candidate_count": 1,
+            "excluded_reserved_paths": 0,
             "excluded_target_count": 0,
             "fragment_targets_assessed": false,
             "inconclusive": [],
@@ -1987,6 +2048,7 @@
             "destination_content_assessed": false,
             "effective_base_target": "https://example.com/",
             "eligible_candidate_count": 1,
+            "excluded_reserved_paths": 0,
             "excluded_target_count": 0,
             "fragment_targets_assessed": false,
             "inconclusive": [
@@ -2059,6 +2121,7 @@
             "destination_content_assessed": false,
             "effective_base_target": "https://example.com/",
             "eligible_candidate_count": 0,
+            "excluded_reserved_paths": 0,
             "excluded_target_count": 2,
             "fragment_targets_assessed": false,
             "inconclusive": [],
@@ -2110,6 +2173,7 @@
             "destination_content_assessed": false,
             "effective_base_target": "https://example.com/",
             "eligible_candidate_count": 1,
+            "excluded_reserved_paths": 0,
             "excluded_target_count": 0,
             "fragment_targets_assessed": false,
             "inconclusive": [],
@@ -2176,6 +2240,7 @@
             "destination_content_assessed": false,
             "effective_base_target": "https://example.com/",
             "eligible_candidate_count": 1,
+            "excluded_reserved_paths": 0,
             "excluded_target_count": 0,
             "fragment_targets_assessed": false,
             "inconclusive": [
@@ -2849,8 +2914,8 @@
             ]
           },
           "severity": "low",
-          "status": "warn",
-          "title": "Sitemap probe needs review",
+          "status": "skipped",
+          "title": "Sitemap probe did not complete",
           "whyItMatters": "Sitemap discovery cannot be assessed reliably until the declared or inconclusive response is verified in the site's real crawler context."
         }
       ],
@@ -3092,7 +3157,7 @@
           "category": "seo",
           "checkId": "seo.sitemap_freshness",
           "confidence": "high",
-          "description": "1 of 1 direct <lastmod> values do not use a supported W3C date shape (YYYY-MM-DD or an RFC 3339 date-time). The protocol permits at most one optional <lastmod> per <url> or <sitemap> entry. Any emitted value should be syntactically valid and reflect that entry's last significant modification.",
+          "description": "1 of 1 direct <lastmod> values do not use a W3C Datetime shape (YYYY, YYYY-MM, YYYY-MM-DD, or a date with a Thh:mm, Thh:mm:ss, or Thh:mm:ss.s time and a Z or +hh:mm zone designator). The protocol permits at most one optional <lastmod> per <url> or <sitemap> entry. Any emitted value should be syntactically valid and reflect that entry's last significant modification.",
           "fixPrompt": null,
           "manualFix": "Emit at most one direct `<lastmod>` child per `<url>` or `<sitemap>` entry. Use a W3C date (`YYYY-MM-DD`) or date-time with a timezone, and derive it from that entry's last significant content change. Correct malformed or repeated values, or omit the optional tag when no trustworthy entry-specific date exists; do not stamp every URL with the build time.",
           "rawData": {
@@ -3117,6 +3182,71 @@
         "xml": "<urlset><url><loc>https://example.com/</loc><lastmod>yesterday</lastmod></url></urlset>"
       },
       "name": "malformed_lastmod_values_warn_with_direct_evidence"
+    },
+    {
+      "check": "seo.sitemap_freshness",
+      "expected": [
+        {
+          "category": "seo",
+          "checkId": "seo.sitemap_freshness",
+          "confidence": "high",
+          "description": "6 of 6 sitemap entries include a syntactically valid <lastmod> value (100%). The tag is optional per entry, and coverage alone is not a defect. This syntax check cannot confirm that the dates match significant page changes or that a search engine uses them.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "coverage_pct": 100,
+            "direct_lastmod_count": 6,
+            "entries_with_lastmod": 6,
+            "entries_with_multiple_lastmod": 0,
+            "entry_count": 6,
+            "invalid_lastmod_count": 0,
+            "invalid_lastmod_samples": [],
+            "lastmod_optional": true,
+            "semantic_accuracy_verified": false
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Sitemap lastmod usage"
+        }
+      ],
+      "input": {
+        "url": "https://example.com/sitemap.xml",
+        "xml": "<urlset><url><loc>https://example.com/a</loc><lastmod>2026</lastmod></url><url><loc>https://example.com/b</loc><lastmod>2026-09</lastmod></url><url><loc>https://example.com/c</loc><lastmod>2026-09-02</lastmod></url><url><loc>https://example.com/d</loc><lastmod>2026-09-02T03:00Z</lastmod></url><url><loc>https://example.com/e</loc><lastmod>2026-09-02T03:00:00+02:00</lastmod></url><url><loc>https://example.com/f</loc><lastmod>2026-09-02T03:00:00.5-05:00</lastmod></url></urlset>"
+      },
+      "name": "every_w3c_datetime_profile_shape_passes_freshness"
+    },
+    {
+      "check": "seo.sitemap_freshness",
+      "expected": [
+        {
+          "category": "seo",
+          "checkId": "seo.sitemap_freshness",
+          "confidence": "high",
+          "description": "3 of 3 direct <lastmod> values do not use a W3C Datetime shape (YYYY, YYYY-MM, YYYY-MM-DD, or a date with a Thh:mm, Thh:mm:ss, or Thh:mm:ss.s time and a Z or +hh:mm zone designator). The protocol permits at most one optional <lastmod> per <url> or <sitemap> entry. Any emitted value should be syntactically valid and reflect that entry's last significant modification.",
+          "fixPrompt": null,
+          "manualFix": "Emit at most one direct `<lastmod>` child per `<url>` or `<sitemap>` entry. Use a W3C date (`YYYY-MM-DD`) or date-time with a timezone, and derive it from that entry's last significant content change. Correct malformed or repeated values, or omit the optional tag when no trustworthy entry-specific date exists; do not stamp every URL with the build time.",
+          "rawData": {
+            "coverage_pct": 100,
+            "direct_lastmod_count": 3,
+            "entries_with_lastmod": 3,
+            "entries_with_multiple_lastmod": 0,
+            "entry_count": 3,
+            "invalid_lastmod_count": 3,
+            "invalid_lastmod_samples": ["2026-09-02 03:00", "2026-13-01", "2026-09-02T03:00"],
+            "lastmod_optional": true,
+            "semantic_accuracy_verified": false
+          },
+          "severity": "low",
+          "status": "warn",
+          "title": "Sitemap has invalid lastmod values",
+          "whyItMatters": "Consumers may ignore malformed or non-conforming freshness hints. Even valid dates are useful only when they consistently track meaningful changes to the linked content."
+        }
+      ],
+      "input": {
+        "url": "https://example.com/sitemap.xml",
+        "xml": "<urlset><url><loc>https://example.com/a</loc><lastmod>2026-09-02 03:00</lastmod></url><url><loc>https://example.com/b</loc><lastmod>2026-13-01</lastmod></url><url><loc>https://example.com/c</loc><lastmod>2026-09-02T03:00</lastmod></url></urlset>"
+      },
+      "name": "space_separated_impossible_and_zoneless_lastmod_values_warn"
     },
     {
       "check": "seo.og_image_status",
@@ -4288,22 +4418,91 @@
         {
           "category": "security",
           "checkId": "security.https_enforcement",
-          "confidence": "needs_review",
-          "confidenceReason": "We can't tell whether HTTPS works for this host without a separate scan over HTTPS.",
-          "description": "Site was scanned over HTTP. HTTPS was not tested. Re-scan with an https:// URL to verify HTTPS is available and that HTTP redirects to it.",
+          "confidence": "high",
+          "description": "This scan fetched the page over cleartext HTTP and was never redirected to HTTPS, and the HTTPS origin root (https://example.com) answered with status 200. HTTPS is reachable for this host, so plain-http visitors are being served over cleartext when they could be sent to it.",
           "fixPrompt": null,
-          "manualFix": "Re-run the scan with the canonical `https://` URL. Then verify the public HTTP origin redirects to HTTPS with an intentional permanent status (commonly 301 for GET/HEAD navigation or 308 when method preservation matters), and review HSTS separately.",
-          "rawData": null,
-          "severity": "low",
-          "status": "skipped",
-          "title": "HTTPS enforcement",
-          "whyItMatters": "If HTTPS isn't available or HTTP isn't redirected, login sessions, form submissions, and page content can all be intercepted or modified in transit."
+          "manualFix": "At the public edge, redirect the HTTP origin to the equivalent HTTPS origin with an intentional permanent status, preserving paths and safe query semantics. Use 308 where non-GET method preservation matters, test representative routes/methods, and configure HSTS on HTTPS only after confirming the HTTPS estate is ready.",
+          "rawData": {
+            "https_answered": true,
+            "https_probe_url": "https://example.com",
+            "https_status": 200,
+            "scanned_over_http": true
+          },
+          "severity": "high",
+          "status": "fail",
+          "title": "HTTP does not redirect to HTTPS",
+          "whyItMatters": "Anything sent over cleartext HTTP can be read or modified by anyone on the network path between the visitor and the server, and browsers mark these pages as not secure."
         }
       ],
       "input": {
+        "outcome": {
+          "content_length": null,
+          "content_type": null,
+          "final_url": "https://example.com/",
+          "headers": [],
+          "kind": "response",
+          "status": 200
+        },
         "page_url": "http://example.com/page"
       },
-      "name": "an_http_scan_target_reports_that_https_was_untested"
+      "name": "an_http_scan_of_a_host_that_serves_https_is_a_missing_redirect"
+    },
+    {
+      "check": "security.https_enforcement",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.https_enforcement",
+          "confidence": "high",
+          "description": "This scan fetched the page over cleartext HTTP, and no HTTPS response was observed for the HTTPS origin root (https://neverssl.com). An unanswered probe, a timeout, a reset, a filtered port, and an origin with no HTTPS at all are indistinguishable here; what is established is that this page was served in cleartext.",
+          "fixPrompt": null,
+          "manualFix": "Obtain a certificate for the host (a free automated one from Let's Encrypt or your host's built-in provisioning is enough), serve the site over HTTPS, then redirect the HTTP origin to it with a permanent status. Confirm from a public network before adding HSTS.",
+          "rawData": {
+            "https_answered": false,
+            "https_probe_url": "https://neverssl.com",
+            "https_status": null,
+            "scanned_over_http": true
+          },
+          "severity": "high",
+          "status": "fail",
+          "title": "No HTTPS response observed; site served over HTTP",
+          "whyItMatters": "Anything sent over cleartext HTTP can be read or modified by anyone on the network path between the visitor and the server, and browsers mark these pages as not secure."
+        }
+      ],
+      "input": {
+        "outcome": {
+          "class": "transport",
+          "detail": "error sending request",
+          "kind": "failure"
+        },
+        "page_url": "http://neverssl.com/"
+      },
+      "name": "an_http_only_host_fails_instead_of_reporting_https_untested"
+    },
+    {
+      "check": "security.https_enforcement",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.https_enforcement",
+          "confidence": "needs_review",
+          "confidenceReason": "A local preview server's transport does not establish the deployed site's HTTPS behavior.",
+          "description": "Skipped on localhost preview. A local preview server serving plain HTTP says nothing about whether the deployed site offers HTTPS or redirects to it.",
+          "fixPrompt": null,
+          "manualFix": "Re-run the scan against the deployed URL to verify that HTTPS is available and that the public HTTP origin redirects to it.",
+          "rawData": {
+            "reason": "localhost_preview_server"
+          },
+          "severity": "low",
+          "status": "skipped",
+          "title": "HTTPS enforcement"
+        }
+      ],
+      "input": {
+        "page_is_local": true,
+        "page_url": "http://my-app.ddev.site/page"
+      },
+      "name": "a_local_http_scan_keeps_the_preview_skip"
     },
     {
       "check": "security.open_redirect",
@@ -6840,7 +7039,7 @@
           "category": "security",
           "checkId": "security.dns.spf",
           "confidence": "high",
-          "description": "No TXT record starting with v=spf1 was found at example.com. SPF lets receivers evaluate whether the connecting host is authorized to use the domain in the SMTP MAIL FROM or HELO identity. It does not by itself authenticate the user-visible From header; DMARC alignment addresses that separate identity. A domain that sends mail needs a record matching its current senders, while a domain that sends no mail can publish a null SPF policy.",
+          "description": "No TXT record starting with v=spf1 was found at example.com. SPF lets receivers evaluate whether the connecting host is authorized to use the domain in the SMTP MAIL FROM or HELO identity. It does not by itself authenticate the user-visible From header; DMARC alignment addresses that separate identity. A domain that sends mail needs a record matching its current senders, while a domain that sends no mail can publish a null SPF policy. This domain publishes no MX records, so it shows no inbound mail setup; the null record `v=spf1 -all` is still the right policy for a domain that sends no mail, because it lets receivers reject anyone using the domain in the SMTP envelope identity.",
           "fixPrompt": null,
           "manualFix": "Inventory every service that sends with this domain in MAIL FROM or HELO, then publish exactly one SPF TXT record at example.com using each provider's current documented mechanism and the narrowest appropriate `all` policy. Keep the evaluation within SPF's DNS-lookup limits. If the domain sends no mail, publish `v=spf1 -all`; configure aligned DKIM and DMARC separately for protection of the visible From domain.",
           "rawData": {
@@ -7070,7 +7269,7 @@
           "category": "security",
           "checkId": "security.dns.dmarc",
           "confidence": "high",
-          "description": "No TXT record at _dmarc.example.com. Without DMARC, the domain publishes no alignment-based request for receivers to quarantine or reject messages that use its visible From domain. Receivers can still apply their own filtering and authentication policy.",
+          "description": "No TXT record at _dmarc.example.com. Without DMARC, the domain publishes no alignment-based request for receivers to quarantine or reject messages that use its visible From domain. Receivers can still apply their own filtering and authentication policy. This domain publishes no MX records, so it shows no inbound mail setup; a domain that sends no mail can publish `v=DMARC1; p=reject` directly so receivers reject anyone using it as a visible From domain.",
           "fixPrompt": null,
           "manualFix": "Publish a TXT record at _dmarc.example.com starting in monitoring mode: `v=DMARC1; p=none; rua=mailto:dmarc-reports@example.com`. Review the aggregate reports to confirm your real senders pass, then graduate the policy to p=quarantine and finally p=reject.",
           "rawData": {
@@ -7212,17 +7411,18 @@
           "category": "security",
           "checkId": "security.dns.dkim",
           "confidence": "high",
-          "description": "example.com has no MX records and no SPF record, so it does not look like a mail-handling domain. Skipped probing 16 common DKIM selector names.",
+          "description": "example.com publishes no MX records and has no SPF record, so it shows no mail setup. DKIM signs outbound mail, so probing 22 common selector names would establish nothing; this check was skipped rather than graded.",
           "fixPrompt": null,
           "manualFix": null,
           "rawData": {
             "domain": "example.com",
             "has_mx": false,
             "probed": false,
+            "reason": "no_mail_setup",
             "spf_posture": "absent"
           },
           "severity": "low",
-          "status": "pass",
+          "status": "skipped",
           "title": "DKIM probe not applicable"
         }
       ],
@@ -7244,7 +7444,7 @@
           "category": "security",
           "checkId": "security.dns.dkim",
           "confidence": "high",
-          "description": "example.com publishes the SPF null record (v=spf1 -all), explicitly declaring that it sends no mail, and has no mail-receiving MX records. DKIM signs outbound mail, so missing DKIM selectors are the correct posture here. Skipped probing 16 common DKIM selector names.",
+          "description": "example.com publishes the SPF null record (v=spf1 -all), explicitly declaring that it sends no mail, and has no mail-receiving MX records. DKIM signs outbound mail, so missing DKIM selectors are the correct posture here. Skipped probing 22 common DKIM selector names.",
           "fixPrompt": null,
           "manualFix": null,
           "rawData": {
@@ -7284,10 +7484,13 @@
             "domain": "example.com",
             "failed_probes": 0,
             "probed": true,
+            "selectors_answered": 22,
             "selectors_found": ["google"],
             "selectors_malformed": [],
-            "selectors_probed": 16,
-            "selectors_revoked": []
+            "selectors_probed": 22,
+            "selectors_revoked": [],
+            "spf_derived_selectors": [],
+            "spf_providers": ["Google Workspace"]
           },
           "severity": "low",
           "status": "pass",
@@ -7324,6 +7527,112 @@
         {
           "category": "security",
           "checkId": "security.dns.dkim",
+          "confidence": "high",
+          "description": "Found a DKIM key record for selector protonmail under _domainkey.example.com. The protonmail selector publishes key material through a non-empty p= value that receivers can use to verify a matching signature. This DNS observation does not confirm that outbound messages are signed, that signatures validate, or that the signing domain aligns with the visible From domain.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "domain": "example.com",
+            "failed_probes": 0,
+            "probed": true,
+            "selectors_answered": 22,
+            "selectors_found": ["protonmail"],
+            "selectors_malformed": [],
+            "selectors_probed": 22,
+            "selectors_revoked": [],
+            "spf_derived_selectors": [],
+            "spf_providers": ["Proton Mail"]
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "DKIM selectors"
+        }
+      ],
+      "input": {
+        "apex_txt": {
+          "answer": "records",
+          "value": ["v=spf1 include:_spf.protonmail.ch ~all"]
+        },
+        "domain": "example.com",
+        "mx": {
+          "answer": "records",
+          "value": [
+            {
+              "exchange": "mail.protonmail.ch",
+              "preference": 10
+            },
+            {
+              "exchange": "mailsec.protonmail.ch",
+              "preference": 20
+            }
+          ]
+        },
+        "selectors": {
+          "protonmail": {
+            "answer": "records",
+            "value": ["v=DKIM1;k=rsa;p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyl1c8A0ip8di"]
+          }
+        }
+      },
+      "name": "dkim_proton_mail_selector_passes"
+    },
+    {
+      "check": "security.dns.dkim",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.dns.dkim",
+          "confidence": "high",
+          "description": "Found a DKIM key record for selector mailjet under _domainkey.example.com. The mailjet selector publishes key material through a non-empty p= value that receivers can use to verify a matching signature. This DNS observation does not confirm that outbound messages are signed, that signatures validate, or that the signing domain aligns with the visible From domain.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "domain": "example.com",
+            "failed_probes": 0,
+            "probed": true,
+            "selectors_answered": 23,
+            "selectors_found": ["mailjet"],
+            "selectors_malformed": [],
+            "selectors_probed": 23,
+            "selectors_revoked": [],
+            "spf_derived_selectors": ["mailjet"],
+            "spf_providers": ["Mailjet"]
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "DKIM selectors"
+        }
+      ],
+      "input": {
+        "apex_txt": {
+          "answer": "records",
+          "value": ["v=spf1 include:spf.mailjet.com ~all"]
+        },
+        "domain": "example.com",
+        "mx": {
+          "answer": "records",
+          "value": [
+            {
+              "exchange": "mail.example.com",
+              "preference": 10
+            }
+          ]
+        },
+        "selectors": {
+          "mailjet": {
+            "answer": "records",
+            "value": ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyl1c8A0ip8di"]
+          }
+        }
+      },
+      "name": "dkim_spf_include_adds_the_provider_selector_the_common_list_misses"
+    },
+    {
+      "check": "security.dns.dkim",
+      "expected": [
+        {
+          "category": "security",
+          "checkId": "security.dns.dkim",
           "confidence": "needs_review",
           "confidenceReason": "The observed common selectors have no active public key, but a custom selector outside the probe list may be active.",
           "description": "The common-selector probe found no active public key under _domainkey.example.com: k1 is revoked with an empty p= value. A different custom selector may still be active, so confirm against a recently delivered message or the sending provider before changing DNS.",
@@ -7333,10 +7642,13 @@
             "domain": "example.com",
             "failed_probes": 0,
             "probed": true,
+            "selectors_answered": 22,
             "selectors_found": [],
             "selectors_malformed": [],
-            "selectors_probed": 16,
-            "selectors_revoked": ["k1"]
+            "selectors_probed": 22,
+            "selectors_revoked": ["k1"],
+            "spf_derived_selectors": [],
+            "spf_providers": []
           },
           "severity": "low",
           "status": "warn",
@@ -7374,20 +7686,23 @@
           "category": "security",
           "checkId": "security.dns.dkim",
           "confidence": "needs_review",
-          "confidenceReason": "Selector names are chosen by the mail provider and this probe only guesses 16 common ones; a custom selector is invisible to it, so absence here is not proof that DKIM is missing.",
-          "description": "None of 16 common DKIM selector names (default, google, selector1, k1, ...) has a key record under _domainkey.example.com. If this domain sends mail, DKIM signing may not be set up - or it may use a custom selector this probe cannot see.",
+          "confidenceReason": "Selector names are chosen by the mail provider and this probe only tries 22 known names; a custom selector is invisible to it, so absence here is not proof that DKIM is missing.",
+          "description": "None of the 22 DKIM selector names answered under _domainkey.example.com has a key record. If this domain sends mail, DKIM signing may not be set up - or it may use a custom selector this probe cannot see.",
           "fixPrompt": null,
           "manualFix": "Enable DKIM signing wherever this domain's mail is sent from (Google Workspace: Admin console > Apps > Gmail > Authenticate email; Microsoft 365: Defender portal > Email authentication settings; transactional senders like Postmark or SendGrid show the exact DNS records in their dashboard). Publish the CNAME or TXT record the provider gives you at its selector name under _domainkey.example.com.",
           "rawData": {
             "domain": "example.com",
             "failed_probes": 0,
             "probed": true,
+            "selectors_answered": 22,
             "selectors_found": [],
-            "selectors_probed": 16
+            "selectors_probed": 22,
+            "spf_derived_selectors": [],
+            "spf_providers": []
           },
           "severity": "low",
           "status": "warn",
-          "title": "No DKIM selectors found among common names",
+          "title": "No DKIM selectors found among the probed names",
           "whyItMatters": "Without a verifiable DKIM signature, receivers lean on SPF alone, which breaks on forwarding; DKIM plus SPF gives DMARC something to align on."
         }
       ],
@@ -7416,16 +7731,19 @@
           "category": "security",
           "checkId": "security.dns.dkim",
           "confidence": "high",
-          "description": "None of 16 common DKIM selector names has a key record under _domainkey.example.com. This domain's SPF record is the null record (v=spf1 -all), declaring it sends no mail, and DKIM signs outbound mail - so missing selectors are consistent with that posture.",
+          "description": "None of the 22 DKIM selector names answered under _domainkey.example.com has a key record. This domain's SPF record is the null record (v=spf1 -all), declaring it sends no mail, and DKIM signs outbound mail - so missing selectors are consistent with that posture.",
           "fixPrompt": null,
           "manualFix": null,
           "rawData": {
             "domain": "example.com",
             "failed_probes": 0,
             "probed": true,
+            "selectors_answered": 22,
             "selectors_found": [],
-            "selectors_probed": 16,
-            "spf_posture": "null_record"
+            "selectors_probed": 22,
+            "spf_derived_selectors": [],
+            "spf_posture": "null_record",
+            "spf_providers": []
           },
           "severity": "low",
           "status": "pass",
@@ -8463,6 +8781,7 @@
           "rawData": {
             "fingerprinted_sampled": 0,
             "min_durable_secs": 604800,
+            "third_party_sampled": 0,
             "weak": [],
             "weak_count": 0
           },
@@ -8599,6 +8918,7 @@
           "rawData": {
             "fingerprinted_sampled": 0,
             "min_durable_secs": 604800,
+            "third_party_sampled": 0,
             "weak": [],
             "weak_count": 0
           },
@@ -8730,6 +9050,7 @@
           "rawData": {
             "fingerprinted_sampled": 0,
             "min_durable_secs": 604800,
+            "third_party_sampled": 0,
             "weak": [],
             "weak_count": 0
           },
@@ -8888,6 +9209,7 @@
           "rawData": {
             "fingerprinted_sampled": 0,
             "min_durable_secs": 604800,
+            "third_party_sampled": 0,
             "weak": [],
             "weak_count": 0
           },
@@ -9020,12 +9342,13 @@
           "checkId": "performance.asset_caching",
           "confidence": "needs_review",
           "confidenceReason": "The cache headers and filename tokens are directly observed, but the scanner cannot prove that the token is a content hash or that the URL is immutable, public, and identical across users.",
-          "description": "1 of 1 sampled assets with fingerprint-like filenames is served without the check's one-week freshness threshold: https://example.com/assets/index-DkJ8s0aB.js (no-cache). The names look content-hashed, but source markup alone does not prove that each URL changes whenever its bytes change.",
+          "description": "1 of 1 sampled same-site assets with fingerprint-like filenames is served without the check's one-week freshness threshold: https://example.com/assets/index-DkJ8s0aB.js (no-cache). The names look content-hashed, but source markup alone does not prove that each URL changes whenever its bytes change.",
           "fixPrompt": null,
           "manualFix": "First verify that the build produces a new URL whenever an asset's bytes change and that the response is public and identical across users. Only then apply a long-lived policy such as `Cache-Control: public, max-age=31536000, immutable` at the authoritative CDN/static-file layer. Keep revalidation or shorter freshness for mutable, private, personalized, or operationally unversioned URLs.",
           "rawData": {
             "fingerprinted_sampled": 1,
             "min_durable_secs": 604800,
+            "third_party_sampled": 0,
             "weak": [
               {
                 "cache_control": "no-cache",
@@ -9057,6 +9380,122 @@
         "page_body": "<script src=\"/assets/index-DkJ8s0aB.js\"></script>"
       },
       "name": "asset_sample_weak_cached_fingerprint_warns"
+    },
+    {
+      "check": "performance.asset_weight",
+      "expected": [
+        {
+          "category": "performance",
+          "checkId": "performance.asset_weight",
+          "confidence": "high",
+          "description": "1 asset response measured (sampled from 1 reference): 50 KB sampled byte sum including the 75 B HTML document. This is not observed navigation transfer: text sizes are decoded/uncompressed, responsive groups use the largest measured candidate, and caching, lazy loading, media conditions, or browser selection can change what transfers.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "assets": [
+              {
+                "bytes": 50000,
+                "content_type": "text/javascript",
+                "kind": "script",
+                "measured_floor": false,
+                "status_code": 200,
+                "url": "https://plausible.io/js/pa-XfHGJa14uHVX9qMr7Gz_g.js"
+              }
+            ],
+            "by_kind": {
+              "script": 50000
+            },
+            "data_uri_bytes": 0,
+            "data_uri_count": 0,
+            "fetchable_found": 1,
+            "found": 1,
+            "html_bytes": 75,
+            "measured": 1,
+            "measured_asset_bytes": 50000,
+            "measurement_incomplete": false,
+            "measurement_kind": "sampled_decoded_byte_sum_not_navigation_transfer",
+            "sampled": 1,
+            "skipped_unsupported": 0,
+            "total_bytes": 50075,
+            "truncated_reads": 0,
+            "unmeasured": 0
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Sampled asset byte sum"
+        },
+        {
+          "category": "performance",
+          "checkId": "performance.broken_images",
+          "confidence": "high",
+          "description": "No image candidate was sampled from the fetched markup.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "http_error_count": 0,
+            "http_errors": [],
+            "image_assets_sampled": 0,
+            "inconclusive_count": 0,
+            "non_image_content_type_count": 0,
+            "non_image_content_types": [],
+            "responded_2xx": 0
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Sampled image HTTP availability"
+        },
+        {
+          "category": "performance",
+          "checkId": "performance.images.heavy",
+          "confidence": "high",
+          "description": "No image assets were sampled from this page.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "heavy": [],
+            "images_sampled": 0,
+            "threshold_bytes": 300000
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Sampled image transfer size"
+        },
+        {
+          "category": "performance",
+          "checkId": "performance.asset_caching",
+          "confidence": "high",
+          "description": "No sampled same-site asset filename matched this check's fingerprint-like token pattern. 1 sampled third-party asset with a fingerprint-like filename was not graded because another origin sets its cache headers.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "fingerprinted_sampled": 1,
+            "min_durable_secs": 604800,
+            "third_party_sampled": 1,
+            "weak": [],
+            "weak_count": 0
+          },
+          "severity": "low",
+          "status": "pass",
+          "title": "Static asset caching"
+        }
+      ],
+      "input": {
+        "measured": [
+          {
+            "bytes": 50000,
+            "cache_control": "public, max-age=60, no-transform",
+            "content_type": "text/javascript",
+            "group": 0,
+            "has_srcset": false,
+            "kind": "script",
+            "measured_floor": false,
+            "status_code": 200,
+            "url": "https://plausible.io/js/pa-XfHGJa14uHVX9qMr7Gz_g.js"
+          }
+        ],
+        "page_body": "<script src=\"https://plausible.io/js/pa-XfHGJa14uHVX9qMr7Gz_g.js\"></script>"
+      },
+      "name": "asset_sample_third_party_weak_cache_is_not_graded"
     },
     {
       "check": "performance.asset_weight",
@@ -9174,6 +9613,7 @@
           "rawData": {
             "fingerprinted_sampled": 0,
             "min_durable_secs": 604800,
+            "third_party_sampled": 0,
             "weak": [],
             "weak_count": 0
           },
@@ -9301,6 +9741,7 @@
           "rawData": {
             "fingerprinted_sampled": 0,
             "min_durable_secs": 604800,
+            "third_party_sampled": 0,
             "weak": [],
             "weak_count": 0
           },
@@ -9581,7 +10022,7 @@
           "checkId": "config.www_redirect",
           "confidence": "needs_review",
           "confidenceReason": "The alternate host returned no response, which does not establish whether it serves the site, redirects, or does not exist.",
-          "description": "The request to www.example.com did not complete, so this scan produced no www/non-www consistency verdict. A host that does not exist at all is a common and harmless reason for that, but so is a timeout at a host that does serve the site.",
+          "description": "The request to www.example.com did not complete, so this scan produced no www/non-www consistency verdict. A timeout, a reset, or a refused connection at a host that does serve the site all look like this, and so does a name that failed to resolve for a reason this runtime could not identify.",
           "fixPrompt": null,
           "manualFix": null,
           "rawData": {
@@ -9602,6 +10043,71 @@
         }
       },
       "name": "an_unreachable_alternate_host_produces_no_verdict"
+    },
+    {
+      "check": "config.www_redirect",
+      "expected": [
+        {
+          "category": "seo",
+          "checkId": "config.www_redirect",
+          "confidence": "high",
+          "description": "www.example.com does not resolve: the DNS lookup returned no address for it. Publishing the site on a single host is a legitimate configuration, so there is no second copy splitting authority and no www/non-www pair to grade.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "alt_host": "www.example.com",
+            "reason": "dns_unresolved"
+          },
+          "severity": "medium",
+          "status": "skipped",
+          "title": "Alternate host does not resolve"
+        }
+      ],
+      "input": {
+        "alt_host": "www.example.com",
+        "outcome": {
+          "class": "dns_unresolved",
+          "detail": "error sending request for url (http://www.example.com/)",
+          "kind": "failure"
+        }
+      },
+      "name": "an_alternate_host_that_does_not_resolve_is_a_single_host_configuration"
+    },
+    {
+      "check": "config.custom_404",
+      "expected": [
+        {
+          "category": "polish",
+          "checkId": "config.custom_404",
+          "confidence": "high",
+          "description": "The probe was rate-limited or blocked: the generated missing-looking path returned HTTP 429, which is the origin declining this request rather than its handling of a missing page. No 404 behavior was observed, so this scan produced no verdict.",
+          "fixPrompt": null,
+          "manualFix": null,
+          "rawData": {
+            "reason": "probe_rate_limited_or_blocked",
+            "status_code": 429
+          },
+          "severity": "low",
+          "status": "skipped",
+          "title": "Custom 404 page"
+        }
+      ],
+      "input": {
+        "outcome": {
+          "body": {
+            "bytes": 0,
+            "text": "",
+            "utf8_valid": true
+          },
+          "content_length": null,
+          "content_type": "text/html",
+          "final_url": "https://wordpress.org/x",
+          "headers": [],
+          "kind": "response",
+          "status": 429
+        }
+      },
+      "name": "a_rate_limited_404_probe_produces_no_verdict"
     }
   ],
   "comment": "Cross-runtime golden probe-verdict fixtures: classified probe outcomes paired with the full expected CheckResult rows under a frozen evaluation_time (hosted scanner spec, probe tier). Embedded via include_str! so the SAME bytes run natively in desktop CI and through the wasm artifact in the hosted runner's CI. Regenerate expected blocks after an INTENTIONAL verdict change: cargo test -p sitecmd-engine --test golden_probes -- --ignored regenerate"

@@ -153,11 +153,13 @@ fn web_policy_severity(result: &CheckResult) -> Option<Severity> {
         }
         // A caching miss on immutable assets is a pure optimization.
         "performance.asset_caching" => Severity::Low,
-        // Measured transfer weight and oversized HTML documents are direct
-        // user-facing load costs; they escalate on Fail.
-        "performance.asset_weight" | "performance.page_weight" => {
-            status_severity(result, Severity::Medium, Severity::High)
-        }
+        // An oversized HTML document is a directly observed transfer cost, so
+        // it escalates on Fail.
+        "performance.page_weight" => status_severity(result, Severity::Medium, Severity::High),
+        // The asset sampler sums decoded sizes over a bounded sample and says
+        // so in its own text ("not observed navigation transfer"), so its Warn
+        // is advisory and its Fail tops out at Medium.
+        "performance.asset_weight" => status_severity(result, Severity::Low, Severity::Medium),
         "performance.fonts"
         | "performance.http_requests"
         | "performance.images"

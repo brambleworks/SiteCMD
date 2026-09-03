@@ -28,11 +28,13 @@ export function desktopScannerBodySafetyFailures(read, listFiles) {
     );
   }
 
-  // Extract page signals before the polish phase consumes the body.
+  // Extract page signals before the polish phase consumes the body. Both
+  // anchors tolerate rustfmt wrapping the call across lines, so a formatting
+  // change can never fail this rule with an ordering message.
   const scanner = read("apps/desktop/src-tauri/src/core/scanner.rs");
-  const preReadIdx = scanner.indexOf("site_facts::read_before_polish(");
-  const polishIdx = scanner.indexOf("run_polish_phase(&mut ctx");
-  if (preReadIdx === -1 || polishIdx === -1 || preReadIdx > polishIdx) {
+  const preRead = scanner.match(/site_facts::read_before_polish\s*\(/);
+  const polish = scanner.match(/run_polish_phase\s*\(\s*&mut\s+ctx/);
+  if (!preRead || !polish || preRead.index > polish.index) {
     failures.push(
       "scanner.rs must call site_facts::read_before_polish before run_polish_phase consumes the page body via mem::take",
     );

@@ -263,15 +263,64 @@ pub(in crate::core::code_scan) static TENANT_SCOPE_QUERY_PATTERNS: LazyLock<Vec<
     ]
     });
 
+/// A spread inside a `where` predicate, and the local binding that built it.
+/// `where: { type, ...installForObject }` is owner-scoped when
+/// `installForObject` was assigned from the session in the same file.
+pub(in crate::core::code_scan) static WHERE_SPREAD_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| {
+        regex::Regex::new(r#"(?is)\bwhere\s*:\s*\{[^}]{0,260}\.\.\.\s*([A-Za-z0-9_$]+)"#)
+            .expect("static where-spread regex") // allow-expect: compile-time literal regex
+    });
+
+pub(in crate::core::code_scan) static SESSION_SCOPED_BINDING_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| {
+        // The binding must carry an owner id *read from a session accessor*,
+        // the same discipline `AUTH_OWNED_ID_SCOPE_PATTERNS` applies inline.
+        // Mentioning the word is not enough: `userId: req.body.userId` is the
+        // request-supplied owner id this rule exists to catch, and
+        // `sessionLabel: req.body.label` is not an ownership predicate at all.
+        // The value may be a multi-line object literal, so the span runs to the
+        // `;` that ends the statement rather than to the end of the line.
+        regex::Regex::new(
+            r#"(?ms)^\s*(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=[^;]{0,240}\b[A-Za-z0-9_]*[Ii]d\s*:\s*(?:(?:req|request|ctx|c)\.)?(?:session|ctx\.user|currentUser|user|member|auth\(\))[A-Za-z0-9_.?]*(?:id|userId)\b"#,
+        )
+        .expect("static session-scoped binding regex") // allow-expect: compile-time literal regex
+    });
+
+/// The payload variable handed to a write call, as in
+/// `prisma.credential.create({ data })`. When that binding was built from the
+/// session, the row carries the caller's own id.
+pub(in crate::core::code_scan) static WRITE_PAYLOAD_BINDING_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| {
+        regex::Regex::new(
+            r#"(?is)\.(?:create|update|upsert|createMany|updateMany)\s*\(\s*\{\s*(?:data\s*:\s*)?([A-Za-z0-9_$]+)\s*[,}]"#,
+        )
+        .expect("static write payload binding regex") // allow-expect: compile-time literal regex
+    });
+
 pub(in crate::core::code_scan) static AUTH_OWNED_ID_SCOPE_PATTERNS: LazyLock<Vec<regex::Regex>> =
     LazyLock::new(|| {
         vec![
+        // The optional `req.` / `request.` / `ctx.` / `c.` prefix covers
+        // frameworks that hang the session off the request object.
         regex::Regex::new(
-            r#"(?is)\bwhere\s*:\s*\{[^}]{0,260}\bid\s*:\s*(?:session|ctx\.user|currentUser|user|member|auth\(\))[A-Za-z0-9_.?]*(?:id|userId)"#,
+            r#"(?is)\bwhere\s*:\s*\{[^}]{0,260}\b[A-Za-z0-9_]*[Ii]d\s*:\s*(?:(?:req|request|ctx|c)\.)?(?:session|ctx\.user|currentUser|user|member|auth\(\))[A-Za-z0-9_.?]*(?:id|userId)"#,
         )
         .unwrap(),
         regex::Regex::new(
-            r#"(?is)\.(?:eq|match|filter)\s*\(\s*["'`]id["'`]\s*,\s*(?:session|ctx\.user|currentUser|user|member|auth\(\))[A-Za-z0-9_.?]*(?:id|userId)"#,
+            r#"(?is)\.(?:eq|match|filter)\s*\(\s*["'`]id["'`]\s*,\s*(?:(?:req|request|ctx|c)\.)?(?:session|ctx\.user|currentUser|user|member|auth\(\))[A-Za-z0-9_.?]*(?:id|userId)"#,
+        )
+        .unwrap(),
+        // A spread ownership object carries the owner predicate the literal
+        // forms above look for: `where: { type, ...credentialOwner }`.
+        regex::Regex::new(
+            r#"(?is)\bwhere\s*:\s*\{[^}]{0,260}\.\.\.\s*[A-Za-z0-9_]*(?:owner|Owner)[A-Za-z0-9_]*\b"#,
+        )
+        .unwrap(),
+        // A bearer token in the predicate is itself the scope: the caller can
+        // only reach the row whose unguessable token they already hold.
+        regex::Regex::new(
+            r#"(?is)\b(?:where|directLink|[A-Za-z0-9_]*Link)\s*:\s*\{[^}]{0,120}\btoken\s*[,}]"#,
         )
         .unwrap(),
     ]

@@ -11,6 +11,14 @@ pub enum CodeScanError {
     Failed(String),
 }
 
+/// Engine helpers report plain messages; `?` lifts them into the failure arm
+/// so cancellation stays the only other outcome.
+impl From<String> for CodeScanError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

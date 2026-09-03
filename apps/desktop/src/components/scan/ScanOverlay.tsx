@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import type { ScanProgressEvent, MultiScanProgressEvent } from "@/hooks/useScan";
-import { ProgressBar } from "@/components/ui/progress-bar";
-import {
-  getMultiScanOverallPercent,
-  getWebScanProgressLabel,
-  getWebScanProgressPercent,
-} from "@/lib/scan-progress-display";
+import { getWebScanProgressLabel } from "@/lib/scan-progress-display";
+import { readScanRunPercent } from "@/lib/scan-progress-store";
+import { useScanRunWholePercent } from "@/components/scan/useScanRunWholePercent";
+import { ScanOverlayBar, ScanOverlayRing } from "@/components/scan/ScanOverlayProgress";
 import { CATEGORY_LABELS, formatCheckName } from "@/lib/tokens";
 import type { ScanRunStep } from "@/lib/scan-run-status";
 import type { ScanCategory, ScheduledScanType } from "@/lib/types";
@@ -41,13 +39,16 @@ interface ScanActivityEntry {
 
 const ACTIVITY_LIMIT = 48;
 const TERMINAL_VISIBLE_LIMIT = 12;
-const SMOOTH_PROGRESS_INTERVAL_MS = 50;
-const SMOOTH_PROGRESS_PERCENT_PER_SECOND = 46;
-const FINAL_PROGRESS_PERCENT_PER_SECOND = 360;
 const PHASE_MIN_DWELL_MS = 320;
-const WEB_TAIL_PROGRESS_TICK_MS = 250;
-const WEB_BROWSER_RUNNING_CEILING = 96;
-const WEB_BROWSER_ESTIMATED_DURATION_MS = 10_000;
+const AXE_TIPS = [
+  "Loading page in a hidden browser…",
+  "Injecting axe-core accessibility engine…",
+  "Testing WCAG 2.2 compliance rules…",
+  "Checking color contrast ratios…",
+  "Validating ARIA attributes…",
+  "Inspecting heading hierarchy…",
+  "Evaluating keyboard navigation…",
+];
 
 function getWebScanStageIndex(progress: ScanProgressEvent | null): number {
   if (!progress) return 0;
@@ -134,91 +135,8 @@ function getCodeScanStageIndex(progress: ScanProgressEvent | null): number {
   return 0;
 }
 
-function getCodeScanProgressPercent(progress: ScanProgressEvent | null): number {
-  if (!progress?.check_id.startsWith("code-scan.")) return 5;
-  if (!progress.checks_total) return 5;
-  return Math.min(
-    100,
-    Math.max(5, Math.round((progress.checks_done / progress.checks_total) * 100)),
-  );
-}
-
 function getActivityStageIndex(progress: ScanProgressEvent, isCodeScan: boolean) {
   return isCodeScan ? getCodeScanStageIndex(progress) : getWebScanStageIndex(progress);
-}
-
-function getActivityPercent(progress: ScanProgressEvent, isCodeScan: boolean) {
-  const rawPercent = isCodeScan
-    ? getCodeScanProgressPercent(progress)
-    : getWebScanProgressPercent(progress);
-  return getProgressTargetPercent(rawPercent, progress, isCodeScan);
-}
-
-function getProgressTargetPercent(
-  rawPercent: number,
-  progress: ScanProgressEvent | null,
-  isCodeScan: boolean,
-  tailElapsedMs = 0,
-) {
-  const finalCodeProgress =
-    isCodeScan && progress?.check_id === "code-scan.complete" && progress.status === "complete";
-  if (finalCodeProgress) return 100;
-  if (isCodeScan) return Math.min(96, Math.max(5, rawPercent));
-
-  if (progress?.check_id === "browser-analysis") {
-    if (progress.status === "complete") return rawPercent;
-    const remaining = WEB_BROWSER_RUNNING_CEILING - rawPercent;
-    const elapsedShare = Math.min(1, tailElapsedMs / WEB_BROWSER_ESTIMATED_DURATION_MS);
-    return rawPercent + remaining * elapsedShare;
-  }
-
-  if (progress?.check_id === "polish-signals") {
-    if (progress.status === "complete") return rawPercent;
-    return rawPercent + Math.min(3, tailElapsedMs / 1_400);
-  }
-
-  return Math.min(96, Math.max(0, rawPercent));
-}
-
-function getWebTailProgressKey(progress: ScanProgressEvent | null, isCodeScan: boolean) {
-  if (isCodeScan || !progress || progress.status !== "running") return null;
-  if (progress.check_id === "browser-analysis" || progress.check_id === "polish-signals") {
-    return progress.check_id;
-  }
-  return null;
-}
-
-function useSmoothedProgress(targetPercent: number, resetKey: string) {
-  const [displayPercent, setDisplayPercent] = useState(targetPercent);
-  // State updaters read the committed target through a ref to avoid effect-event calls.
-  const targetRef = useRef(targetPercent);
-  useEffect(() => {
-    targetRef.current = targetPercent;
-  }, [targetPercent]);
-
-  useEffect(() => {
-    setDisplayPercent(targetRef.current);
-  }, [resetKey]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setDisplayPercent((current) => {
-        const target = targetRef.current;
-        const delta = target - current;
-        if (Math.abs(delta) < 0.5) return target;
-
-        const speed =
-          target >= 100 ? FINAL_PROGRESS_PERCENT_PER_SECOND : SMOOTH_PROGRESS_PERCENT_PER_SECOND;
-        const maxStep = (speed * SMOOTH_PROGRESS_INTERVAL_MS) / 1000;
-        const next = current + Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
-        return Number(next.toFixed(1));
-      });
-    }, SMOOTH_PROGRESS_INTERVAL_MS);
-
-    return () => window.clearInterval(interval);
-  }, []);
-
-  return Math.round(displayPercent);
 }
 
 function usePacedStageIndex(targetIndex: number, resetKey: string, forceTarget = false) {
@@ -272,28 +190,6 @@ function usePacedStageIndex(targetIndex: number, resetKey: string, forceTarget =
   return visibleIndex;
 }
 
-function usePhaseElapsedMs(phaseKey: string | null) {
-  const [phaseElapsedMs, setPhaseElapsedMs] = useState(0);
-
-  useEffect(() => {
-    if (!phaseKey) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the phase timer when the phase clears; paired with the interval-driven counter
-      setPhaseElapsedMs(0);
-      return;
-    }
-
-    const startedAt = Date.now();
-    setPhaseElapsedMs(0);
-    const interval = window.setInterval(() => {
-      setPhaseElapsedMs(Date.now() - startedAt);
-    }, WEB_TAIL_PROGRESS_TICK_MS);
-
-    return () => window.clearInterval(interval);
-  }, [phaseKey]);
-
-  return phaseElapsedMs;
-}
-
 function formatTerminalTime(ms: number) {
   return `${Math.max(0, ms / 1000).toFixed(1)}s`;
 }
@@ -322,7 +218,6 @@ export function ScanOverlay({
   }
   const isCodeScan = codePhaseSeen;
   const isMultiPage = !isCodeScan && Boolean(multiProgress && multiProgress.page_count > 1);
-  const multiPageKey = `${multiProgress?.session_id ?? "single"}:${multiProgress?.page_index ?? 0}`;
   const activeCollector = isCodeScan ? "code" : "web";
   const scanStepKey = `${scanType ?? "web"}:${scanRunStep?.mode ?? "single"}:${activeCollector}:${multiProgress?.session_id ?? "single"}`;
 
@@ -361,7 +256,9 @@ export function ScanOverlay({
       checksTotal: progress.checks_total,
       timestampMs: Date.now() - startTime,
       stageIndex: getActivityStageIndex(progress, entryIsCodeScan),
-      percent: getActivityPercent(progress, entryIsCodeScan),
+      // Where the run model sits as this event lands; the feed reveals the
+      // entry once the displayed percent has caught up to it.
+      percent: readScanRunPercent(),
     };
     setActivityEntries((prev) =>
       [...prev.filter((item) => item.id !== entry.id), entry].slice(-ACTIVITY_LIMIT),
@@ -372,27 +269,16 @@ export function ScanOverlay({
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [activityEntries]);
 
-  const pct = getWebScanProgressPercent(progress);
   const elapsedStr = (elapsed / 1000).toFixed(1);
   const isAxePhase = progress?.check_id === "axe-core" && progress?.status === "running";
 
-  const AXE_TIPS = [
-    "Loading page in a hidden browser…",
-    "Injecting axe-core accessibility engine…",
-    "Testing WCAG 2.2 compliance rules…",
-    "Checking color contrast ratios…",
-    "Validating ARIA attributes…",
-    "Inspecting heading hierarchy…",
-    "Evaluating keyboard navigation…",
-  ];
   const [tipIndex, setTipIndex] = useState(0);
   useEffect(() => {
     if (!isAxePhase) return;
     const interval = setInterval(() => setTipIndex((i) => (i + 1) % AXE_TIPS.length), 3000);
     return () => clearInterval(interval);
-  }, [isAxePhase, AXE_TIPS.length]);
+  }, [isAxePhase]);
 
-  const circ = 2 * Math.PI * 58;
   const displayUrl = formatUrlDisplay(url);
   const codeProgress = isCodeScan && progress?.check_id.startsWith("code-scan.") ? progress : null;
   const rawCodePhaseIndex = isCodeScan ? getCodeScanStageIndex(codeProgress) : 0;
@@ -402,35 +288,8 @@ export function ScanOverlay({
   const codePhaseIndex = usePacedStageIndex(rawCodePhaseIndex, scanStepKey, isCodeComplete);
   const codePhase = CODE_SCAN_STAGES[codePhaseIndex];
   const codePhaseLabel = codePhase.key === "summary" ? "Finalizing results" : codePhase.label;
-  const rawCodeScanPct = isCodeScan ? getCodeScanProgressPercent(codeProgress) : 0;
-  const rawDisplayPct = isCodeScan ? rawCodeScanPct : pct;
-  const webTailProgressKey = getWebTailProgressKey(progress, isCodeScan);
-  const webTailElapsedMs = usePhaseElapsedMs(webTailProgressKey);
-  const displayPctTarget = getProgressTargetPercent(
-    rawDisplayPct,
-    progress,
-    isCodeScan,
-    webTailElapsedMs,
-  );
-  const lastMultiProgressEventRef = useRef(progress);
-  const [multiPagePctTarget, setMultiPagePctTarget] = useState(displayPctTarget);
-  // A run-key change resets multi-page progress before the first paint.
-  const activeMultiPageKey = isMultiPage ? multiPageKey : null;
-  const [multiPageRunKey, setMultiPageRunKey] = useState<string | null>(null);
-  if (activeMultiPageKey !== multiPageRunKey) {
-    setMultiPageRunKey(activeMultiPageKey);
-    if (isMultiPage) setMultiPagePctTarget(0);
-  }
-  useEffect(() => {
-    if (!isMultiPage || progress === lastMultiProgressEventRef.current) return;
-    lastMultiProgressEventRef.current = progress;
-    setMultiPagePctTarget(displayPctTarget);
-  }, [displayPctTarget, isMultiPage, progress]);
-  const overallPctTarget =
-    isMultiPage && multiProgress
-      ? getMultiScanOverallPercent(multiProgress, multiPagePctTarget)
-      : displayPctTarget;
-  const displayPct = useSmoothedProgress(overallPctTarget, scanStepKey);
+  // Whole numbers only: the ring and bar leaves follow the fractional glide.
+  const displayPct = useScanRunWholePercent();
   const isFullScanRun = scanRunStep?.mode === "full" && scanRunStep.stepCount > 1;
   const activeRunStep =
     isFullScanRun && isCodeScan
@@ -473,47 +332,15 @@ export function ScanOverlay({
       backdropClassName="dialog--blur"
       className="scan-overlay-content">
       <div className="scan-overlay-ring-wrap">
-        <div className="scan-score-hero-shell">
-          <div
-            className={`scan-progress-ping scan-overlay-ping animate-ping ${displayRingClass}`}
-          />
-          <svg className="scan-overlay-ring-svg" viewBox="0 0 128 128">
-            <circle
-              cx="64"
-              cy="64"
-              r="58"
-              fill="none"
-              stroke="currentColor"
-              strokeOpacity={0.06}
-              strokeWidth="2.5"
-            />
-            <circle
-              cx="64"
-              cy="64"
-              r="58"
-              fill="none"
-              stroke={displayRingColor}
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeDasharray={`${circ}`}
-              strokeDashoffset={`${circ * (1 - displayPct / 100)}`}
-              className="scan-overlay-ring-progress"
-            />
-          </svg>
-          <div className="scan-overlay-ring-label">
-            <div className="scan-overlay-pct" data-testid="scan-progress-percent">
-              {displayPct}
-              <span className="scan-overlay-pct-unit text-muted-foreground">%</span>
-            </div>
-          </div>
-        </div>
+        <ScanOverlayRing color={displayRingColor} ringClass={displayRingClass} />
 
         <div className="scan-overlay-caption">
           {isCodeScan ? (
             <>
               <p className="eyebrow--alt scan-overlay-eyebrow text-primary">Code Scan</p>
-              <p className="scan-overlay-heading">Scanning linked project code</p>
-              <p className="muted-text scan-overlay-subcaption">{`Auditing linked code for ${displayUrl}`}</p>
+              <p className="scan-overlay-heading">
+                {displayUrl ? `Scanning code for ${displayUrl}` : "Scanning project code"}
+              </p>
             </>
           ) : multiProgress && multiProgress.page_count > 1 ? (
             <>
@@ -671,13 +498,7 @@ export function ScanOverlay({
         )}
       </div>
 
-      <ProgressBar
-        percent={displayPct}
-        color={displayRingColor}
-        label="Scan progress"
-        className="scan-overlay-bar-fill"
-        trackClassName="scan-overlay-bar-track"
-      />
+      <ScanOverlayBar color={displayRingColor} />
 
       <div className="scan-terminal" data-testid="scan-terminal">
         <div className="scan-terminal-header">

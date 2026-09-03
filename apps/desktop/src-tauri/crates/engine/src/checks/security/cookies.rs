@@ -15,6 +15,15 @@ fn attr_key(attr: &str) -> &str {
         .unwrap_or(attr)
 }
 
+/// Cookies whose documented client pattern requires JavaScript to read them,
+/// so an absent HttpOnly flag is the design rather than a gap: the
+/// double-submit CSRF tokens of Angular/Axios (`XSRF-TOKEN`) and Django
+/// (`csrftoken`), GitHub's `_octo`, and Segment's `ajs_*` identifiers.
+fn script_readable_by_design(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(lower.as_str(), "xsrf-token" | "csrftoken" | "_octo") || lower.starts_with("ajs_")
+}
+
 /// Validate a cookie name against the HTTP token grammar.
 fn valid_cookie_name(name: &str) -> bool {
     !name.is_empty()
@@ -41,6 +50,41 @@ fn valid_cookie_name(name: &str) -> bool {
                         | b'}'
                 )
         })
+}
+
+/// The pass row's description, naming only the attributes actually present
+/// and explaining each accepted absence.
+fn pass_description(
+    name: &str,
+    has_secure: bool,
+    has_httponly: bool,
+    httponly_waived: bool,
+) -> String {
+    let mut present = Vec::new();
+    if has_secure {
+        present.push("Secure");
+    }
+    if has_httponly {
+        present.push("HttpOnly");
+    }
+    present.push("a recognized SameSite value");
+    let listed = match present.len() {
+        1 => present[0].to_string(),
+        2 => format!("{} and {}", present[0], present[1]),
+        _ => format!("{}, {}, and {}", present[0], present[1], present[2]),
+    };
+    let mut description = format!(
+        "Cookie '{name}' includes {listed}. This attribute check does not establish whether the chosen SameSite policy fits the flow, whether JavaScript access is intentionally unnecessary, or whether Domain, Path, lifetime, and server-side session controls are correct."
+    );
+    if !has_secure {
+        description.push_str(" The Secure flag is absent; that is accepted on a localhost preview and must be present on the deployed HTTPS origin.");
+    }
+    if httponly_waived {
+        description.push_str(&format!(
+            " The HttpOnly flag is absent, which is the documented pattern for '{name}': client-side code reads this cookie by design. Confirm it carries no value that would grant access on its own."
+        ));
+    }
+    description
 }
 
 impl Check for CookieSecurityCheck {
@@ -396,10 +440,11 @@ impl Check for CookieSecurityCheck {
 
             let mut issues = Vec::new();
             let missing_secure = !has_secure && !ctx.is_localhost;
+            let httponly_waived = !has_httponly && script_readable_by_design(name);
             if missing_secure {
                 issues.push("the Secure flag");
             }
-            if !has_httponly {
+            if !has_httponly && !httponly_waived {
                 issues.push("the HttpOnly flag");
             }
             if !has_samesite {
@@ -411,7 +456,7 @@ impl Check for CookieSecurityCheck {
                     check_id: format!("{CHECK_ID_PREFIX}{name}"),
                     category: ScanCategory::Security,
                     title: format!("Cookie '{}' attributes", name),
-                    description: format!("Cookie '{}' includes Secure, HttpOnly, and a recognized SameSite value. This attribute check does not establish whether the chosen SameSite policy fits the flow, whether JavaScript access is intentionally unnecessary, or whether Domain, Path, lifetime, and server-side session controls are correct.", name),
+                    description: pass_description(name, has_secure, has_httponly, httponly_waived),
                     status: CheckStatus::Pass,
                     severity: Severity::Low,
                     fix_prompt: None,
@@ -421,6 +466,7 @@ impl Check for CookieSecurityCheck {
                         "cookie_value_redacted": true,
                         "has_secure": has_secure,
                         "has_httponly": has_httponly,
+                        "httponly_waived_script_readable": httponly_waived,
                         "samesite_value": samesite_value,
                     })),
                     confidence: crate::checks::IssueConfidence::High,
