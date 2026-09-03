@@ -2,20 +2,38 @@
 
 use crate::checks::{Check, CheckResult, CheckStatus, PageContext, ScanCategory, Severity};
 
-/// One third-party tracker/analytics signature. `analytics` marks services
-/// whose primary purpose is traffic or product analytics; ad and social
-/// pixels are trackers but not analytics.
+/// One third-party tracker/analytics signature. `marker` is the lowercase
+/// source string that identifies the provider: usually a host, sometimes a
+/// script path or instrumentation attribute. `analytics` marks services whose
+/// primary purpose is traffic or product analytics; ad and social pixels are
+/// trackers but not analytics. `cookieless` marks providers documented to set
+/// no cookie and store no per-visitor identifier: their presence is a
+/// disclosure fact, never a reason to expect a consent control. The two flags
+/// are independent, since Google Analytics is analytics and is not cookieless.
 pub struct TrackerSignature {
-    pub domain: &'static str,
+    pub marker: &'static str,
     pub name: &'static str,
     pub analytics: bool,
+    pub cookieless: bool,
 }
 
-const fn sig(domain: &'static str, name: &'static str, analytics: bool) -> TrackerSignature {
+const fn sig(marker: &'static str, name: &'static str, analytics: bool) -> TrackerSignature {
     TrackerSignature {
-        domain,
+        marker,
         name,
         analytics,
+        cookieless: false,
+    }
+}
+
+/// A provider whose documented design sets no cookie and stores no visitor
+/// identifier (Plausible, Umami, Fathom, Simple Analytics).
+const fn cookieless_sig(marker: &'static str, name: &'static str) -> TrackerSignature {
+    TrackerSignature {
+        marker,
+        name,
+        analytics: true,
+        cookieless: true,
     }
 }
 
@@ -42,11 +60,62 @@ pub const TRACKER_SIGNATURES: &[TrackerSignature] = &[
     sig("segment.com", "Segment", true),
     sig("mixpanel.com", "Mixpanel", true),
     sig("amplitude.com", "Amplitude", true),
-    sig("plausible.io", "Plausible Analytics", true),
-    sig("umami.is", "Umami Analytics", true),
-    sig("usefathom.com", "Fathom Analytics", true),
-    sig("simpleanalytics.com", "Simple Analytics", true),
+    cookieless_sig("plausible.io", "Plausible Analytics"),
+    cookieless_sig("umami.is", "Umami Analytics"),
+    cookieless_sig("usefathom.com", "Fathom Analytics"),
+    cookieless_sig("simpleanalytics.com", "Simple Analytics"),
+    sig("googlesyndication.com", "Google AdSense", false),
+    sig("adsbygoogle", "Google AdSense", false),
+    sig("scorecardresearch.com", "comScore", true),
+    sig("chartbeat.com", "Chartbeat", true),
+    sig("ati-host.net", "AT Internet / Piano Analytics", true),
+    sig("aticdn.net", "AT Internet / Piano Analytics", true),
+    sig("rudderlabs.com", "RudderStack", true),
+    sig("rudderstack.com", "RudderStack", true),
+    sig("ruddersnippetversion", "RudderStack", true),
+    sig("js.hs-scripts.com", "HubSpot", true),
+    // GA4 markup instrumentation: govuk-style pages carry no vendor host in
+    // the initial HTML, only these attributes on the elements they measure.
+    sig("data-ga4-", "Google Analytics 4", true),
 ];
+
+/// Provider names matched in `lower`, deduplicated, restricted to one side of
+/// the cookieless axis.
+fn matched_provider_names(lower: &str, cookieless: bool) -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = Vec::new();
+    for signature in TRACKER_SIGNATURES {
+        if signature.cookieless == cookieless
+            && lower.contains(signature.marker)
+            && !names.contains(&signature.name)
+        {
+            names.push(signature.name);
+        }
+    }
+    names
+}
+
+/// Providers whose presence implies consent-relevant storage or data sharing.
+/// Shared with the consent and privacy-signal checks so they cannot disagree
+/// with `compliance.trackers` about whether such tracking is present.
+pub fn consent_relevant_trackers(lower: &str) -> Vec<&'static str> {
+    matched_provider_names(lower, false)
+}
+
+/// Providers SiteCMD classifies as cookieless: reported as detected, but never
+/// treated as a reason to expect a consent banner or a privacy-signal notice.
+pub fn cookieless_trackers(lower: &str) -> Vec<&'static str> {
+    matched_provider_names(lower, true)
+}
+
+/// English list for check copy: "a", "a and b", "a, b, and c".
+pub fn name_list(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => (*only).to_string(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
 
 pub struct ThirdPartyTrackerCheck;
 impl Check for ThirdPartyTrackerCheck {
@@ -60,7 +129,7 @@ impl Check for ThirdPartyTrackerCheck {
         let lower = ctx.body_lower();
         let mut found: Vec<String> = Vec::new();
         for signature in TRACKER_SIGNATURES {
-            if lower.contains(signature.domain) {
+            if lower.contains(signature.marker) {
                 let s = signature.name.to_string();
                 if !found.contains(&s) {
                     found.push(s);
@@ -131,8 +200,11 @@ impl Check for FormConsentCheck {
         ScanCategory::Compliance
     }
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
-        let lower = ctx.body_lower();
-        let form_count = lower.matches("<form").count();
+        // Triggers and mitigation must read the same text. A form inside a
+        // comment or a script template is not a form a visitor can submit, and
+        // a consent cue in the same place is not one they can read.
+        let content = super::content_text_lower(ctx.body_lower());
+        let form_count = content.matches("<form").count();
         let has_form = form_count > 0;
         if !has_form {
             return vec![CheckResult {
@@ -158,10 +230,11 @@ impl Check for FormConsentCheck {
         }
 
         let email_input_count =
-            lower.matches("type=\"email\"").count() + lower.matches("type='email'").count();
+            content.matches("type=\"email\"").count() + content.matches("type='email'").count();
         let has_email = email_input_count > 0;
-        let has_privacy_link = lower.contains("privacy") || lower.contains("consent");
-        let has_checkbox = lower.contains("type=\"checkbox\"") || lower.contains("type='checkbox'");
+        let has_privacy_link = content.contains("privacy") || content.contains("consent");
+        let has_checkbox =
+            content.contains("type=\"checkbox\"") || content.contains("type='checkbox'");
 
         if has_email && !has_privacy_link && !has_checkbox {
             vec![CheckResult {
@@ -366,6 +439,115 @@ mod tests {
                 .contains("No email-collecting form was detected"),
             "{}",
             results[0].description
+        );
+    }
+
+    #[test]
+    fn the_adsense_loader_is_a_detected_tracker() {
+        // visityourteam.com loads the AdSense tag beside Plausible; the tag is
+        // an ad network, so it is a tracker rather than an analytics service.
+        let body = r#"<html><head>
+            <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1234567890123456" crossorigin="anonymous"></script>
+        </head><body><ins class="adsbygoogle" data-ad-client="ca-pub-1234567890123456"></ins>
+            <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+        </body></html>"#;
+        let results = ThirdPartyTrackerCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        let trackers = results[0].raw_data.as_ref().unwrap()["trackers"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            trackers,
+            vec![serde_json::json!("Google AdSense")],
+            "the host and the inline queue name one provider once: {trackers:?}"
+        );
+        // An ad tag is not analytics, so config.analytics must not claim it as
+        // product measurement.
+        let analytics = crate::checks::config::analytics::AnalyticsCheck.run(&ctx_with_body(body));
+        assert!(
+            !analytics[0].description.contains("AdSense"),
+            "{}",
+            analytics[0].description
+        );
+    }
+
+    #[test]
+    fn comscore_beacon_markup_is_a_detected_tracker() {
+        // www.bbc.co.uk ships comScore as an image beacon, not a script tag.
+        let body = r#"<html><body><img alt="" height="1" width="1" src="https://sb.scorecardresearch.com/p?c1=2&amp;c2=17986528&amp;cs_ucfr=0"></body></html>"#;
+        let results = ThirdPartyTrackerCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert!(results[0].description.contains("comScore"));
+    }
+
+    #[test]
+    fn rudderstack_and_hubspot_loaders_are_detected_trackers() {
+        // laravel.com loads both through inline snippets.
+        let body = r#"<html><head>
+            <script>window.RudderSnippetVersion="3.0.3";</script>
+            <script src="https://cdn.rudderlabs.com/v3/modern/rsa.min.js"></script>
+            <script src="https://js.hs-scripts.com/45240648.js"></script>
+        </head></html>"#;
+        let results = ThirdPartyTrackerCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        let trackers = results[0].raw_data.as_ref().unwrap()["trackers"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert!(
+            trackers.contains(&serde_json::json!("RudderStack")),
+            "{trackers:?}"
+        );
+        assert!(
+            trackers.contains(&serde_json::json!("HubSpot")),
+            "{trackers:?}"
+        );
+        assert_eq!(
+            trackers
+                .iter()
+                .filter(|name| **name == serde_json::json!("RudderStack"))
+                .count(),
+            1,
+            "three RudderStack markers must report one provider: {trackers:?}"
+        );
+    }
+
+    #[test]
+    fn ga4_data_attributes_are_a_detected_tracker() {
+        // www.gov.uk instruments GA4 through markup attributes only.
+        let body = r#"<html><body><a data-ga4-link='{"event_name":"navigation"}' href="/x">x</a></body></html>"#;
+        let results = ThirdPartyTrackerCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert!(results[0].description.contains("Google Analytics 4"));
+    }
+
+    #[test]
+    fn a_form_and_a_cue_that_both_live_in_a_comment_produce_no_finding() {
+        // Triggers and mitigation read the same stripped text, so a page whose
+        // only form is commented out is a page with no form.
+        let body = r#"<html><body><!-- <form action="/subscribe" method="post">
+            <input type="email" name="email"><a href="/privacy">Privacy</a>
+        </form> --><p>Nothing here yet.</p></body></html>"#;
+        let results = FormConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert!(results[0].description.contains("No forms detected"));
+        let evidence = results[0].raw_data.as_ref().expect("form evidence");
+        assert_eq!(evidence["form_count"], 0);
+        assert_eq!(evidence["email_input_count"], 0);
+    }
+
+    #[test]
+    fn a_commented_out_privacy_word_is_not_a_form_consent_cue() {
+        let body = r#"<html><body><!-- privacy notice pending --><form action="/subscribe" method="post">
+            <input type="email" name="email"><button>Join</button>
+        </form></body></html>"#;
+        let results = FormConsentCheck.run(&ctx_with_body(body));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("form evidence")
+                ["privacy_or_consent_text_detected"],
+            false
         );
     }
 

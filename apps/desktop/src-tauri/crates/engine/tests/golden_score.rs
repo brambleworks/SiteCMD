@@ -64,6 +64,10 @@ fn assert_snapshot_matches(name: &str, actual: &ScoreSnapshot, expected: &ScoreS
         "{name}: breakdown.floor_applied"
     );
     assert_eq!(
+        a.ceiling_applied, e.ceiling_applied,
+        "{name}: breakdown.ceiling_applied"
+    );
+    assert_eq!(
         (a.eff_critical, a.eff_high, a.eff_medium, a.eff_low),
         (e.eff_critical, e.eff_high, e.eff_medium, e.eff_low),
         "{name}: breakdown effective counts"

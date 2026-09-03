@@ -172,8 +172,10 @@ fn host_matches_domain(host: &str, domain: &str) -> bool {
     host == domain || host.ends_with(&format!(".{}", domain))
 }
 
-/// Whether hosts are equal or one is a boundary-matched subdomain of the other.
-fn same_site(a: &str, b: &str) -> bool {
+/// Whether hosts are equal or share a registrable domain. `security.vibe.csrf`
+/// uses the same predicate, so a form this check treats as first-party is never
+/// dropped from CSRF grading as "another site".
+pub(crate) fn same_site(a: &str, b: &str) -> bool {
     let a = a.trim_end_matches('.').to_ascii_lowercase();
     let b = b.trim_end_matches('.').to_ascii_lowercase();
     if a == b {
@@ -257,18 +259,18 @@ impl Check for FormActionHijackCheck {
             title: if external_targets.is_empty() {
                 "Form Action Domains".into()
             } else {
-                "Forms submit to unexpected external domains".into()
+                "Form actions point outside this site".into()
             },
             description: if external_targets.is_empty() {
                 "No HTTP(S) form action outside the scanned registrable site or the check's limited list of common payment and identity-provider domains was observed. This does not validate provider account ownership, runtime action changes, or server-side form handling.".into()
             } else {
                 format!(
-                    "{} {} to unexpected external domains: {}",
+                    "{} {} outside the scanned site and outside the check's list of common payment and identity providers: {}. Search, newsletter, and other outsourced endpoints are normal here; whether each destination is intended is not observable from the page.",
                     external_targets.len(),
                     if external_targets.len() == 1 {
-                        "form submits"
+                        "form submits to a domain"
                     } else {
-                        "forms submit"
+                        "forms submit to domains"
                     },
                     external_targets
                         .iter()
@@ -476,6 +478,24 @@ mod tests {
         let html = r#"<form action=https://collector.example.net/submit method=post></form>"#;
         let result = &FormActionHijackCheck.run(&ctx(html))[0];
         assert_eq!(result.status, CheckStatus::Warn);
+    }
+
+    #[test]
+    fn an_external_action_is_reported_as_external_not_as_unexpected() {
+        let html = r#"<form action="https://hn.algolia.com/" method="get"></form>"#;
+        let result = &FormActionHijackCheck.run(&ctx(html))[0];
+        assert_eq!(result.status, CheckStatus::Warn);
+        assert!(
+            !result.title.contains("unexpected") && !result.description.contains("unexpected"),
+            "intent is not observable from the page: {} / {}",
+            result.title,
+            result.description
+        );
+        assert!(
+            result.description.contains("not observable from the page"),
+            "{}",
+            result.description
+        );
     }
 
     #[test]

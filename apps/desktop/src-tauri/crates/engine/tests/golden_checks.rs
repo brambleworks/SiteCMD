@@ -36,11 +36,23 @@ fn check_by_id(id: &str) -> Box<dyn Check> {
         "performance.render_blocking" => {
             Box::new(c::performance::render_blocking::RenderBlockingCheck)
         }
+        "performance.unminified" => Box::new(c::performance::unminified::UnminifiedCodeCheck),
         "seo.headings" => Box::new(c::seo::headings::HeadingCheck),
+        "accessibility.skip_nav" => Box::new(c::accessibility::html_checks::SkipNavCheck),
         "security.mixed_content" => Box::new(c::security::mixed_content::MixedContentCheck),
         "config.deprecated_html" => Box::new(c::config::deprecated_html::DeprecatedHtmlCheck),
         "compliance.trackers" => Box::new(c::compliance::trackers::ThirdPartyTrackerCheck),
+        "compliance.form_consent" => Box::new(c::compliance::trackers::FormConsentCheck),
+        "compliance.ccpa_notice" => Box::new(c::compliance::statements::CcpaNoticeCheck),
+        "compliance.accessibility_statement" => {
+            Box::new(c::compliance::statements::AccessibilityStatementCheck)
+        }
+        "compliance.dnt_respect" => Box::new(c::compliance::gdpr::DntRespectCheck),
+        "config.analytics" => Box::new(c::config::analytics::AnalyticsCheck),
         "config.localhost_refs" => Box::new(c::predeploy::LocalhostRefsCheck),
+        "security.email_exposure" => Box::new(c::security::email_exposure::EmailExposureCheck),
+        "security.vibe.csrf" => Box::new(c::security::csrf::CsrfCheck),
+        "security.vibe.exposed_keys" => Box::new(c::security::exposed_keys::ExposedApiKeysCheck),
         other => panic!("no engine check registered for corpus id '{other}'"),
     }
 }

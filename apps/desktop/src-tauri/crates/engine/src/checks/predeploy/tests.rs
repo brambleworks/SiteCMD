@@ -409,3 +409,32 @@ fn test_dev_deps_detected() {
     assert!(results[0].description.contains("expected"));
     assert!(results[0].description.contains("does not establish"));
 }
+
+#[test]
+fn one_runtime_matched_by_two_patterns_is_labeled_once() {
+    for body in [
+        r#"<script src="/@vite/client"></script>"#,
+        r#"<script src="/browser-sync/browser-sync-client.js"></script><script>window.___browserSync___={}</script>"#,
+    ] {
+        let ctx = make_ctx(body, true);
+        let results = DevDependenciesCheck.run(&ctx);
+        let found = results[0].raw_data.as_ref().expect("evidence")["found"]
+            .as_array()
+            .expect("found list")
+            .clone();
+        assert_eq!(found.len(), 1, "{body}: {found:?}");
+    }
+}
+
+#[test]
+fn the_vite_client_label_is_not_repeated_in_the_description() {
+    let ctx = make_ctx(r#"<script src="/@vite/client"></script>"#, true);
+    let results = DevDependenciesCheck.run(&ctx);
+    assert!(
+        results[0]
+            .description
+            .contains("local preview: Vite HMR client."),
+        "{}",
+        results[0].description
+    );
+}

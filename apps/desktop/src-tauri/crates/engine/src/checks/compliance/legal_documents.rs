@@ -68,13 +68,20 @@ impl LegalPathWalk {
     }
 }
 
-/// True when the (lowercased) page contains a terms-of-service link signal.
+/// True when the (lowercased) page contains a terms-of-service link signal,
+/// either as link text or as an anchor whose href has a `tos` or `terms...`
+/// path segment.
 pub fn has_terms_link(lower: &str) -> bool {
-    lower.contains("terms of service")
-        || lower.contains("terms-of-service")
-        || lower.contains("terms and conditions")
-        || lower.contains("/terms")
-        || lower.contains("/tos")
+    let content = crate::checks::compliance::content_text_lower(lower);
+    content.contains("terms of service")
+        || content.contains("terms-of-service")
+        || content.contains("terms and conditions")
+        || crate::checks::compliance::anchor_href_segment_matches(&content, |segment| {
+            matches!(
+                crate::checks::compliance::path_segment_head(segment),
+                "tos" | "terms"
+            ) || matches!(segment, "termsofservice" | "termsofuse")
+        })
 }
 
 /// Grade the page link first, then the answered candidate-path sweep.
@@ -310,6 +317,58 @@ mod tests {
         assert!(has_terms_link("terms and conditions"));
         assert!(has_terms_link(r#"<a href="/tos">legal</a>"#));
         assert!(!has_terms_link("<a href=\"/about\">about us</a>"));
+    }
+
+    #[test]
+    fn a_terms_shaped_path_is_matched_by_segment_not_substring() {
+        for href in [
+            "/tos",
+            "/tos/",
+            "/terms?x=1",
+            "/legal/terms-of-use",
+            "/tos#top",
+            "https://example.com/terms",
+        ] {
+            assert!(
+                has_terms_link(&format!(r#"<a href="{href}">legal</a>"#)),
+                "{href} must count as a terms link"
+            );
+        }
+        for href in [
+            "/menu/tostadas",
+            "/about/customers",
+            "/tostada",
+            "/news/termsheet-2026",
+            // A bare relative token stays the weak signal this check moved
+            // away from; only a rooted path is credited.
+            "tos-vendor-list",
+        ] {
+            assert!(
+                !has_terms_link(&format!(r#"<a href="{href}">menu</a>"#)),
+                "{href} must not count as a terms link"
+            );
+        }
+    }
+
+    #[test]
+    fn a_privacy_shaped_path_is_matched_by_segment_not_substring() {
+        assert!(page_links_privacy_policy(
+            r#"<a href="/legal/privacy-policy">notice</a>"#
+        ));
+        assert!(page_links_privacy_policy(
+            r#"<a href="/privacy/">notice</a>"#
+        ));
+        assert!(!page_links_privacy_policy(
+            r#"<a href="/blog/privacyhawk-review">review</a>"#
+        ));
+    }
+
+    #[test]
+    fn a_commented_out_legal_link_is_not_a_published_link() {
+        assert!(!has_terms_link(r#"<!-- <a href="/terms">terms</a> -->"#));
+        assert!(!page_links_privacy_policy(
+            r#"<!-- <a href="/privacy">privacy policy</a> -->"#
+        ));
     }
 
     /// Walk a candidate list against one outcome per path, the way every

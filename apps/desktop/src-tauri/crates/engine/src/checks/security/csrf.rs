@@ -1,5 +1,6 @@
 //! Flags POST forms without recognizable CSRF token markup for review.
 
+use crate::checks::html_attrs::attr_value;
 use crate::checks::{Check, CheckResult, CheckStatus, PageContext, ScanCategory, Severity};
 use std::sync::LazyLock;
 
@@ -24,6 +25,30 @@ static CSRF_INDICATORS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
 
 pub struct CsrfCheck;
 
+/// True when the form's resolved action leaves this registrable site. A
+/// same-site token still applies across a site's own subdomains, so the test
+/// is `security.form_action_hijack`'s `same_site` predicate rather than an
+/// exact host match: anything this returns true for is a destination that
+/// check grades, and nothing falls between the two.
+fn posts_to_another_site(ctx: &PageContext, form: &str) -> bool {
+    let Some(action) = attr_value(form, "action") else {
+        return false;
+    };
+    let action = crate::checks::html_attrs::decode_url_character_references(action.trim());
+    if action.is_empty() {
+        return false;
+    }
+    let Ok(resolved) = ctx.url.join(&action) else {
+        return false;
+    };
+    let action_host = resolved.host_str().unwrap_or_default();
+    !action_host.is_empty()
+        && !crate::checks::security::forms::same_site(
+            action_host,
+            ctx.url.host_str().unwrap_or_default(),
+        )
+}
+
 impl Check for CsrfCheck {
     fn id(&self) -> &str {
         "security.vibe.csrf"
@@ -33,17 +58,29 @@ impl Check for CsrfCheck {
     }
 
     fn run(&self, ctx: &PageContext) -> Vec<CheckResult> {
-        let post_forms: Vec<&str> = POST_FORM_RE
+        let (cross_host_forms, post_forms): (Vec<&str>, Vec<&str>) = POST_FORM_RE
             .find_iter(&ctx.body)
             .map(|m| m.as_str())
-            .collect();
+            .partition(|form| posts_to_another_site(ctx, form));
 
         if post_forms.is_empty() {
             return vec![CheckResult {
                 check_id: self.id().into(),
                 category: self.category(),
                 title: "CSRF Protection".into(),
-                description: "No POST forms found on this page.".into(),
+                description: if cross_host_forms.is_empty() {
+                    "No POST forms found on this page.".into()
+                } else {
+                    format!(
+                        "No POST form submitting to this site was found on this page. {} POST {} to another site, where a same-site token cannot apply; security.form_action_hijack grades those destinations.",
+                        cross_host_forms.len(),
+                        if cross_host_forms.len() == 1 {
+                            "form submits"
+                        } else {
+                            "forms submit"
+                        }
+                    )
+                },
                 status: CheckStatus::Pass,
                 severity: Severity::Medium,
                 fix_prompt: None,
@@ -83,12 +120,11 @@ impl Check for CsrfCheck {
             },
             description: if unprotected_count == 0 {
                 format!(
-                    "All {} detected POST {} a recognized hidden-field or page-level CSRF token marker. This confirms the markup signal, not server-side validation, token binding, entropy, expiry, or authorization behavior.",
-                    post_forms.len(),
+                    "{} a recognized hidden-field or page-level CSRF token marker. This confirms the markup signal, not server-side validation, token binding, entropy, expiry, or authorization behavior.",
                     if post_forms.len() == 1 {
-                        "form has"
+                        "The 1 detected POST form has".to_string()
                     } else {
-                        "forms have"
+                        format!("All {} detected POST forms have", post_forms.len())
                     }
                 )
             } else {
@@ -266,6 +302,66 @@ mod tests {
         let html = r#"<form method=post action=/submit><input type=hidden name=csrf_token value=abc123></form>"#;
         let results = CsrfCheck.run(&ctx(html));
         assert_eq!(results[0].status, CheckStatus::Pass);
+    }
+
+    #[test]
+    fn a_form_posting_to_this_site_own_subdomain_is_still_graded() {
+        // The page's cookies and token are same-site with api.example.com, so
+        // this is a real CSRF surface. security.form_action_hijack treats it as
+        // first-party too, which is exactly why this check must keep it.
+        let html = r#"<form method="post" action="https://api.example.com/account"><input type="text" name="handle"></form>"#;
+        let results = CsrfCheck.run(&ctx(html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Warn,
+            "{}",
+            results[0].description
+        );
+        let evidence = results[0].raw_data.as_ref().expect("form evidence");
+        assert_eq!(evidence["total_post_forms"], 1);
+        assert_eq!(evidence["unprotected_forms"], 1);
+    }
+
+    #[test]
+    fn a_form_posting_to_another_site_is_not_this_site_csrf_surface() {
+        let html = r#"<form action="https://buttondown.email/api/emails/embed-subscribe/astro" method="post" target="popupwindow"><input type="email" name="email"><button>Subscribe</button></form>"#;
+        let results = CsrfCheck.run(&ctx(html));
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+        assert!(
+            results[0].description.contains("another site"),
+            "{}",
+            results[0].description
+        );
+        assert!(results[0].raw_data.is_none());
+    }
+
+    #[test]
+    fn a_same_host_form_beside_a_cross_host_form_is_still_graded() {
+        let html = r#"<form action="https://buttondown.email/subscribe" method="post"><input type="email" name="email"></form>
+        <form action="/account" method="post"><input type="text" name="handle"></form>"#;
+        let results = CsrfCheck.run(&ctx(html));
+        assert_eq!(results[0].status, CheckStatus::Warn);
+        let evidence = results[0].raw_data.as_ref().expect("form evidence");
+        assert_eq!(evidence["total_post_forms"], 1);
+        assert_eq!(evidence["unprotected_forms"], 1);
+    }
+
+    #[test]
+    fn the_single_form_pass_description_reads_as_singular() {
+        let html = r#"<form method="post" action="/submit"><input type="hidden" name="csrf_token" value="abc123"></form>"#;
+        let results = CsrfCheck.run(&ctx(html));
+        assert!(
+            results[0]
+                .description
+                .starts_with("The 1 detected POST form has"),
+            "{}",
+            results[0].description
+        );
     }
 
     #[test]

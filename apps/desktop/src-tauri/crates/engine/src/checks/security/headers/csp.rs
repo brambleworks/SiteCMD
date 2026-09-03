@@ -104,7 +104,11 @@ pub(super) fn evaluate_csp(
     let connect_sources = directives
         .get("connect-src")
         .or_else(|| directives.get("default-src"));
-    let object_sources = directives.get("object-src");
+    // object-src falls back to default-src in every CSP level, so
+    // `default-src 'none'` already blocks plugin content.
+    let object_sources = directives
+        .get("object-src")
+        .or_else(|| directives.get("default-src"));
     let base_sources = directives.get("base-uri");
     let frame_ancestors = directives.get("frame-ancestors");
     let mut blockers = Vec::new();
@@ -144,11 +148,11 @@ pub(super) fn evaluate_csp(
     }
     if csp_sources_include_any(script_sources, &["'unsafe-inline'"]) {
         if script_has_nonce_or_hash {
-            // CSP3: browsers ignore 'unsafe-inline' when a nonce/hash is
-            // present. Surface as a warning so the user can remove the
-            // redundant token, but don't fail the policy.
+            // CSP3 browsers ignore 'unsafe-inline' when a nonce/hash is
+            // present, so the token is the documented CSP2 fallback rather
+            // than a policy weakness.
             warnings.push(
-                "script-src lists 'unsafe-inline' alongside a nonce/hash - modern browsers ignore 'unsafe-inline' here; safe to remove".into(),
+                "script-src lists 'unsafe-inline' alongside a nonce/hash - CSP3 browsers ignore it, and it still applies in CSP2-only browsers, so keeping it is a deliberate fallback rather than a defect".into(),
             );
         } else {
             blockers.push("script-src allows unsafe inline script execution".into());

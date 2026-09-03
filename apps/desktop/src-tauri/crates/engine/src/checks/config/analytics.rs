@@ -16,13 +16,16 @@ impl Check for AnalyticsCheck {
         let mut found: Vec<&str> = Vec::new();
         for signature in crate::checks::compliance::trackers::TRACKER_SIGNATURES {
             if signature.analytics
-                && lower.contains(signature.domain)
+                && lower.contains(signature.marker)
                 && !found.contains(&signature.name)
             {
                 found.push(signature.name);
             }
         }
-        if found.is_empty() && lower.contains("analytics.js") {
+        // First-party loader names: the vendor is unresolved, but measurement
+        // is plainly wired up, so "no analytics" would be the wrong claim.
+        if found.is_empty() && (lower.contains("analytics.js") || lower.contains("load-analytics"))
+        {
             found.push("Generic analytics");
         }
         vec![CheckResult {
@@ -38,21 +41,12 @@ impl Check for AnalyticsCheck {
             } else {
                 format!("Analytics detected: {}.", found.join(", "))
             },
-            status: if found.is_empty() {
-                CheckStatus::Warn
-            } else {
-                CheckStatus::Pass
-            },
+            // Analytics is optional, so its absence is a fact to report, not
+            // a defect to fix.
+            status: CheckStatus::Pass,
             severity: Severity::Low,
             fix_prompt: None,
-            manual_fix: if found.is_empty() {
-                Some(
-                    "Inventory existing server, CDN, tag-manager, and consent-gated measurement first. If important product questions remain unanswered, choose the smallest analytics approach that supplies those metrics and meets the product's consent, privacy, retention, access, residency, and cost requirements."
-                        .into(),
-                )
-            } else {
-                None
-            },
+            manual_fix: None,
             raw_data: Some(serde_json::json!({"analytics": found})),
             confidence: if found.is_empty() {
                 crate::checks::IssueConfidence::NeedsReview
@@ -64,11 +58,7 @@ impl Check for AnalyticsCheck {
             } else {
                 None
             },
-            why_it_matters: if found.is_empty() {
-                Some("When a product relies on acquisition or behavior data, defined and privacy-appropriate measurement helps distinguish evidence from assumptions; products that do not need those signals can leave this closed as not applicable.".into())
-            } else {
-                None
-            },
+            why_it_matters: None,
         }]
     }
 }
@@ -109,13 +99,16 @@ mod tests {
                 continue;
             }
             let body = format!(
-                r#"<script src="https://{}/script.js"></script>"#,
-                signature.domain
+                r#"<script src="https://x/{}/s.js"></script>"#,
+                signature.marker
             );
             let results = AnalyticsCheck.run(&ctx(&body));
-            assert_eq!(
-                results[0].status,
-                CheckStatus::Pass,
+            let detected = results[0].raw_data.as_ref().expect("analytics evidence")["analytics"]
+                .as_array()
+                .expect("analytics list")
+                .clone();
+            assert!(
+                !detected.is_empty(),
                 "{} detected by compliance.trackers must count as analytics",
                 signature.name
             );
@@ -123,9 +116,33 @@ mod tests {
     }
 
     #[test]
-    fn page_without_analytics_still_warns() {
+    fn an_absent_optional_feature_is_reported_as_a_pass_not_a_warning() {
         let body = "<html><body><h1>Widgets</h1></body></html>";
         let results = AnalyticsCheck.run(&ctx(body));
-        assert_eq!(results[0].status, CheckStatus::Warn);
+        assert_eq!(results[0].status, CheckStatus::Pass);
+        assert!(results[0].description.contains("Analytics is optional"));
+        assert!(results[0].manual_fix.is_none());
+        assert!(results[0].fix_prompt.is_none());
+        assert_eq!(
+            results[0].raw_data.as_ref().expect("analytics evidence")["analytics"],
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn ga4_data_attribute_instrumentation_counts_as_analytics() {
+        // www.gov.uk carries no analytics host in the initial HTML: the GA4
+        // wiring is data attributes plus a first-party loader module.
+        let body = r#"<html><body><a class="govuk-link" data-ga4-link='{"event_name":"navigation"}' href="/x">x</a>
+            <script type="module" src="/assets/frontend/govuk_publishing_components/load-analytics-ad855bc6.js"></script></body></html>"#;
+        let results = AnalyticsCheck.run(&ctx(body));
+        assert!(results[0].description.contains("Google Analytics 4"));
+    }
+
+    #[test]
+    fn a_first_party_analytics_loader_is_not_reported_as_no_analytics() {
+        let body = r#"<html><body><script src="/assets/load-analytics-ad855bc6.js"></script></body></html>"#;
+        let results = AnalyticsCheck.run(&ctx(body));
+        assert!(results[0].description.contains("Generic analytics"));
     }
 }

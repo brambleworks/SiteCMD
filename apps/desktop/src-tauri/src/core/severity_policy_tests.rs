@@ -381,6 +381,35 @@ fn advisory_warns_do_not_count_as_full_severity() {
         normalized_web_issue_severity(&robots_missing),
         Severity::Low
     );
+    // A sampled, decoded asset byte sum is not a navigation transfer
+    // measurement, so its Warn is advisory and its Fail stops at Medium even
+    // when the producer wrote High.
+    assert_eq!(
+        normalized_web_issue_severity(&web_result(
+            "performance.asset_weight",
+            CheckStatus::Warn,
+            Severity::Medium
+        )),
+        Severity::Low
+    );
+    assert_eq!(
+        normalized_web_issue_severity(&web_result(
+            "performance.asset_weight",
+            CheckStatus::Fail,
+            Severity::High
+        )),
+        Severity::Medium
+    );
+    // The HTML document size the page-weight row grades is directly observed,
+    // so it keeps the escalating tier.
+    assert_eq!(
+        normalized_web_issue_severity(&web_result(
+            "performance.page_weight",
+            CheckStatus::Fail,
+            Severity::High
+        )),
+        Severity::High
+    );
     // Static-probe TTFB never grades higher than Medium (timing.rs promise).
     assert_eq!(
         normalized_web_issue_severity(&web_result(
@@ -1092,15 +1121,12 @@ fn code_confidence_policy_distinguishes_observations_inferences_and_review_leads
         );
     }
 
-    // Bounded structural and dependency analysis provides strong evidence,
-    // while still leaving room for project-specific conventions.
-    let high_slugs = [
-        "god-route",
-        "god-module",
-        "oversized-module",
-        "undeclared-package",
-        "unused-dependency",
-    ];
+    // Bounded structural analysis provides strong evidence, while still
+    // leaving room for project-specific conventions. Dependency resolution is
+    // not on this list: an import can resolve through machinery the static
+    // walk does not model, and a package can be loaded by name at runtime, so
+    // `undeclared-package` and `unused-dependency` ship as NeedsReview.
+    let high_slugs = ["god-route", "god-module", "oversized-module"];
     for slug in high_slugs {
         let (confidence, reason) = crate::core::confidence_policy::code_issue_confidence(slug);
         assert_eq!(

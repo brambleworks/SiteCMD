@@ -1154,3 +1154,74 @@ fn multiple_enforced_csp_fields_are_reviewed_as_an_intersection() {
     assert_eq!(framing.status, CheckStatus::Pass);
     assert!(framing.description.contains("intersection"));
 }
+
+#[test]
+fn default_src_none_satisfies_the_object_src_hardening_verdict() {
+    let mut headers = all_security_headers();
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'none'; script-src 'self'; base-uri 'self'; frame-ancestors 'self'",
+        ),
+    );
+    let results = SecurityHeadersCheck.run(&ctx_with_headers("", headers));
+    let csp = results
+        .iter()
+        .find(|result| result.check_id == "security.headers.csp")
+        .unwrap();
+    assert_eq!(csp.status, CheckStatus::Pass, "{}", csp.description);
+    assert!(
+        !csp.description.contains("object-src"),
+        "default-src 'none' governs object-src: {}",
+        csp.description
+    );
+}
+
+#[test]
+fn default_src_self_still_reports_the_missing_object_src_directive() {
+    let mut headers = all_security_headers();
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; base-uri 'self'; frame-ancestors 'self'",
+        ),
+    );
+    let results = SecurityHeadersCheck.run(&ctx_with_headers("", headers));
+    let csp = results
+        .iter()
+        .find(|result| result.check_id == "security.headers.csp")
+        .unwrap();
+    assert_eq!(csp.status, CheckStatus::Warn);
+    assert!(
+        csp.description.contains("object-src 'none' is missing"),
+        "{}",
+        csp.description
+    );
+}
+
+#[test]
+fn unsafe_inline_beside_a_nonce_is_described_as_a_csp2_fallback() {
+    let mut headers = all_security_headers();
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'none'; script-src 'self' 'nonce-abc123' 'unsafe-inline' 'strict-dynamic'; base-uri 'self'; frame-ancestors 'self'",
+        ),
+    );
+    let results = SecurityHeadersCheck.run(&ctx_with_headers("", headers));
+    let csp = results
+        .iter()
+        .find(|result| result.check_id == "security.headers.csp")
+        .unwrap();
+    assert_eq!(csp.status, CheckStatus::Warn);
+    assert!(
+        csp.description.contains("CSP2-only browsers"),
+        "the advisory must name the fallback it serves: {}",
+        csp.description
+    );
+    assert!(
+        !csp.description.contains("safe to remove"),
+        "removing the CSP2 fallback is not advice SiteCMD can support: {}",
+        csp.description
+    );
+}

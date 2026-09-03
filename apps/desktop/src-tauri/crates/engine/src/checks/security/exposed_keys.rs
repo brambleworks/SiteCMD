@@ -72,11 +72,16 @@ static KEY_PATTERNS: LazyLock<Vec<KeyPattern>> = LazyLock::new(|| {
                 .expect("static stripe publishable regex"), // allow-expect: compile-time literal regex
             key_group: 0,
         },
+        // Boundary groups keep an exact-length credential from matching
+        // inside a longer identifier that merely ends the same way.
         KeyPattern {
             service: "AWS Access Key",
             class: KeyClass::Secret,
-            regex: regex::Regex::new(r#"AKIA[0-9A-Z]{16}"#).expect("static aws key regex"), // allow-expect: compile-time literal regex
-            key_group: 0,
+            regex: regex::Regex::new(
+                r#"(?:^|[^A-Za-z0-9_-])(AKIA[0-9A-Z]{16})(?:[^A-Za-z0-9_-]|$)"#,
+            )
+            .expect("static aws key regex"), // allow-expect: compile-time literal regex
+            key_group: 1,
         },
         // Google and Firebase browser keys are public identifiers when properly restricted.
         KeyPattern {
@@ -107,15 +112,20 @@ static KEY_PATTERNS: LazyLock<Vec<KeyPattern>> = LazyLock::new(|| {
         KeyPattern {
             service: "Slack Token",
             class: KeyClass::Secret,
-            regex: regex::Regex::new(r#"xox[baprs]-[0-9a-zA-Z\-]{10,}"#)
-                .expect("static slack token regex"), // allow-expect: compile-time literal regex
-            key_group: 0,
+            regex: regex::Regex::new(
+                r#"(?:^|[^A-Za-z0-9_-])(xox[baprs]-[0-9a-zA-Z\-]{10,})(?:[^A-Za-z0-9_-]|$)"#,
+            )
+            .expect("static slack token regex"), // allow-expect: compile-time literal regex
+            key_group: 1,
         },
         KeyPattern {
             service: "Twilio",
             class: KeyClass::Secret,
-            regex: regex::Regex::new(r#"SK[0-9a-fA-F]{32}"#).expect("static twilio key regex"), // allow-expect: compile-time literal regex
-            key_group: 0,
+            regex: regex::Regex::new(
+                r#"(?:^|[^A-Za-z0-9_-])(SK[0-9a-fA-F]{32})(?:[^A-Za-z0-9_-]|$)"#,
+            )
+            .expect("static twilio key regex"), // allow-expect: compile-time literal regex
+            key_group: 1,
         },
         KeyPattern {
             service: "SendGrid",
@@ -611,6 +621,55 @@ mod tests {
         assert_eq!(results[0].status, CheckStatus::Warn);
         assert_eq!(results[0].severity, Severity::Low);
         assert!(results[0].description.contains("Google API / Firebase"));
+    }
+
+    #[test]
+    fn an_identifier_ending_in_a_hex_hash_is_not_a_twilio_key() {
+        let hex = "0123456789abcdef".repeat(2);
+        // Built at runtime: a literal of this shape in the tree trips GitHub's
+        // own push protection, which cannot be allowlisted per line.
+        let html = format!(r#"<script>const taskId = "TA{}{}";</script>"#, "SK", hex);
+        let html = html.as_str();
+        let results = ExposedApiKeysCheck.run(&ctx(html));
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].status,
+            CheckStatus::Pass,
+            "{}",
+            results[0].description
+        );
+    }
+
+    #[test]
+    fn a_standalone_twilio_key_is_still_detected() {
+        let hex = "0123456789abcdef".repeat(2);
+        let html = format!(r#"<script>const sid = "{}{}";</script>"#, "SK", hex);
+        let html = html.as_str();
+        let results = ExposedApiKeysCheck.run(&ctx(html));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, CheckStatus::Fail);
+        assert!(results[0].description.contains("Twilio"));
+    }
+
+    #[test]
+    fn boundary_groups_do_not_hide_aws_or_slack_credentials() {
+        let aws = ExposedApiKeysCheck.run(&ctx(
+            r#"<script>const aws = "AKIAIOSFODNN7EXAMPLE";</script>"#,
+        ));
+        assert_eq!(aws[0].status, CheckStatus::Fail);
+        assert!(aws[0].description.contains("AWS"));
+
+        let slack = ExposedApiKeysCheck.run(&ctx(
+            r#"<script>const hook = "xoxb-1234567890-abcdefghijkl";</script>"#,
+        ));
+        assert_eq!(slack[0].status, CheckStatus::Fail);
+        assert!(slack[0].description.contains("Slack"));
+
+        // The same shapes embedded in a longer identifier are not credentials.
+        let embedded = ExposedApiKeysCheck.run(&ctx(
+            r#"<script>const id = "REPLICAKIAIOSFODNN7EXAMPLE0";</script>"#,
+        ));
+        assert_eq!(embedded[0].status, CheckStatus::Pass);
     }
 
     #[test]
