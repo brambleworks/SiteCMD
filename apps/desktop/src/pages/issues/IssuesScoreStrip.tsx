@@ -32,7 +32,10 @@ function buildDetail(
 
 export function IssuesScoreStrip({ score, checkedAt, issueSummary = null }: IssuesScoreStripProps) {
   const nowMs = useCurrentTime();
-  const scoreNote = score?.breakdown.capNote ?? score?.breakdown.floorNote ?? null;
+  // One note at a time, strongest first: the cap and the floor both outrank the
+  // open-issue ceiling, which only ever explains a headline just short of 100.
+  const scoreNote =
+    score?.breakdown.capNote ?? score?.breakdown.floorNote ?? score?.breakdown.ceilingNote ?? null;
 
   return (
     <div className="panel panel--flush">

@@ -439,6 +439,26 @@ describe("IssuesPage real behavior", () => {
         highCount: 2,
         mediumCount: 3,
         lowCount: 4,
+        exploitableCapped: false,
+        // Rust always sends a breakdown beside the score, and these are the
+        // deduction curve's points for these counts. The pairing is deliberate
+        // stress, not a real payload: 100 minus 46.17 rounds to 54, so the
+        // backend could never return this breakdown with an overall of 25. The
+        // strip must still render the persisted 25 and invent no explanation
+        // for the gap.
+        breakdown: {
+          base: 100,
+          criticalPoints: 15,
+          highPoints: 17.1,
+          mediumPoints: 9.97,
+          lowPoints: 4.1,
+          effCritical: 1,
+          effHigh: 2,
+          effMedium: 3,
+          effLow: 4,
+          floorApplied: false,
+          ceilingApplied: false,
+        },
         computedAt: 1,
       },
       refresh: vi.fn(),

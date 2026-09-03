@@ -601,7 +601,17 @@ effLow: number,
  * True when the zero-critical protective floor raised the final score
  * (no full-weight critical, not exploitable, deduction otherwise below 35).
  */
-floorApplied: boolean, };
+floorApplied: boolean,
+/**
+ * True when the open-issue ceiling, not the deduction arithmetic, set the
+ * final score. It only moves a score whose deductions round back to the
+ * base, which needs a tier count below 0.5: the Web Scan path reaches that
+ * (a Warn at NeedsReview confidence weighs 0.25), while `compute_score`'s
+ * lightest group weighs 0.5 and already lands on 99 by arithmetic, so a
+ * live snapshot never carries it. The UI reads this instead of inferring
+ * the ceiling from the numbers.
+ */
+ceilingApplied: boolean, };
 
 export type ScorePoint = { date: string, score: number, };
 

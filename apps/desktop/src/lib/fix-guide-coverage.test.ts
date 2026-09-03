@@ -98,7 +98,11 @@ function collectWebIssueIds(): string[] {
   const sessionAnalysis = productionHalf(
     readFileSync(path.join(RUST_SRC, "core/session_analysis.rs"), "utf8"),
   );
-  collectMatches(sessionAnalysis, /duplicate_field\(\s*pages,\s*"([^"]+)"/g).forEach((id) =>
+  // Match the first string literal in the call rather than a fixed argument
+  // list: the leading arguments have changed shape before (`pages` became
+  // `comparable, &compared`), and when they did this collector silently
+  // stopped seeing `seo.duplicate_h1` while the check was still emitted.
+  collectMatches(sessionAnalysis, /duplicate_field\(\s*[^"()]*"([^"]+)"/g).forEach((id) =>
     ids.add(id),
   );
   collectMatches(sessionAnalysis, /base_result\(\s*"([^"]+)"/g).forEach((id) => ids.add(id));

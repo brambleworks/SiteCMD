@@ -342,6 +342,7 @@ const seededScore: ScoreSnapshot = {
     effMedium: 0,
     effLow: 0,
     floorApplied: false,
+    ceilingApplied: false,
   },
   computedAt: Date.parse(SCAN_TIMESTAMP),
 };

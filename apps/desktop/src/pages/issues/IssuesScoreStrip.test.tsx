@@ -17,11 +17,16 @@ function breakdown(overrides: Partial<ScoreBreakdownDisplay> = {}): ScoreBreakdo
     hasDeductions: false,
     exploitableCapped: false,
     floorApplied: false,
+    ceilingApplied: false,
     capNote: null,
     floorNote: null,
+    ceilingNote: null,
     ...overrides,
   };
 }
+
+const CEILING_NOTE =
+  "Open issues deducted 0.4 points, which rounds back to 100, so the score is held at 99 while any issue is open.";
 
 describe("IssuesScoreStrip", () => {
   it("shows the unified SiteCMD score above the issues list", () => {
@@ -63,6 +68,30 @@ describe("IssuesScoreStrip", () => {
     expect(screen.queryByText(/critical\/high/)).not.toBeInTheDocument();
     expect(container.querySelector(".score-strip-icon")).not.toBeInTheDocument();
     expect(screen.queryByText("How this score is computed")).not.toBeInTheDocument();
+    // Real deductions account for the headline, so nothing extra is claimed.
+    expect(screen.queryByText(/held at/)).not.toBeInTheDocument();
+  });
+
+  it("explains a 99 the open-issue ceiling held below the deduction arithmetic", () => {
+    render(
+      <IssuesScoreStrip
+        score={{
+          sitecmdScore: 99,
+          totalIssues: 1,
+          severityTotals: { critical: 0, high: 0, medium: 0, low: 1 },
+          breakdown: breakdown({
+            overall: 99,
+            deductions: [{ tier: "low", label: "Low", points: 0.4 }],
+            hasDeductions: true,
+            ceilingApplied: true,
+            ceilingNote: CEILING_NOTE,
+          }),
+        }}
+        checkedAt="2026-04-20T17:08:00Z"
+      />,
+    );
+
+    expect(screen.getByText(CEILING_NOTE)).toBeInTheDocument();
   });
 
   it("uses the Issues page summary for counts instead of the score snapshot", () => {
@@ -129,6 +158,8 @@ describe("IssuesScoreStrip", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Not run yet/)).toBeInTheDocument();
     expect(screen.queryByText("No point deductions")).not.toBeInTheDocument();
+    // A genuine 100 has nothing to explain, so no ceiling note appears.
+    expect(screen.queryByText(/held at/)).not.toBeInTheDocument();
   });
 
   it("updates the checked time without a parent render", () => {
