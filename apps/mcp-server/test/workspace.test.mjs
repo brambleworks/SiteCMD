@@ -22,6 +22,7 @@ import {
   getScanHistory,
   SUPPORTED_ISSUE_STATUSES,
 } from "../dist/db.js";
+import { connectInMemory } from "./tools_list_snapshot.test.mjs";
 import { ensureProject, makeSeeders, openSchemaFixtureDb } from "./helpers/schema-fixture.mjs";
 
 // db.js resolves SITECMD_DB_PATH lazily at first query, so seeding the
@@ -120,6 +121,45 @@ test("getWorkspaceScan reports an invalid existing cache instead of returning no
   }
 });
 
+test("min_confidence keeps workspace-cache issues, which carry no confidence rating", async () => {
+  // The CLI scan cache has no confidence field at all (parseWorkspaceIssue
+  // never sets one), so ranking an unrated finding as needs_review emptied
+  // get_issues for every workspace-fallback caller that passed min_confidence.
+  const url = "https://workspace-confidence.example.com";
+  const root = mkdtempSync(join(tmpdir(), "sitecmd-workspace-confidence-"));
+  const sitecmdDir = join(root, ".sitecmd");
+  mkdirSync(sitecmdDir);
+  writeFileSync(
+    join(sitecmdDir, "config.json"),
+    JSON.stringify({ version: 1, url, name: "Fallback fixture" }),
+  );
+  writeFileSync(
+    join(sitecmdDir, "last-scan.json"),
+    JSON.stringify({
+      url,
+      overall_score: 90,
+      timestamp: "2026-05-06T12:00:00.000Z",
+      categories: [{ category: "security", score: 88 }],
+      issues: [makeIssue()],
+    }),
+  );
+
+  const previousCwd = process.cwd();
+  const session = await connectInMemory();
+  try {
+    process.chdir(root);
+    const result = await session.client.callTool({
+      name: "get_issues",
+      arguments: { url, min_confidence: "confirmed" },
+    });
+    assert.match(result.content[0].text, /security\.hsts/);
+  } finally {
+    await session.close();
+    process.chdir(previousCwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("parsePackageDependencyNames rejects malformed package manifests", () => {
   assert.equal(parsePackageDependencyNames(null), null);
   assert.equal(parsePackageDependencyNames([]), null);
@@ -198,7 +238,7 @@ function addProjectWithScanHistory(projectId, url = "https://variants.example.co
     );
 }
 
-test("getIssuesForProject returns active web and code scan items from one source of truth", () => {
+test("getIssuesForProject returns every active work item from one source of truth", () => {
   const projectId = 501;
   addWorkItem({
     projectId,
@@ -214,11 +254,13 @@ test("getIssuesForProject returns active web and code scan items from one source
     checkId: "code.security.raw-sql",
     title: "Unsafe SQL construction",
   });
+  // The dependency engine's findings count toward the SiteCMD Score, so they
+  // belong in the same list.
   addWorkItem({
     projectId,
     source: "updates",
-    signalId: "updates.react",
-    checkId: "updates.react",
+    signalId: "dependencies.outdated-major",
+    checkId: "dependencies.outdated-major",
     title: "React update available",
   });
 
@@ -226,6 +268,7 @@ test("getIssuesForProject returns active web and code scan items from one source
 
   assert.deepEqual(issues.map((issue) => issue.check_id).sort(), [
     "code.security.raw-sql",
+    "dependencies.outdated-major",
     "security.hsts",
   ]);
 });
