@@ -113,6 +113,16 @@ pub(in crate::core::code_scan) static REDIRECT_ALLOWLIST_PATTERNS: LazyLock<Vec<
             regex::Regex::new(r"\bsanitizeRedirect\b").unwrap(),
             regex::Regex::new(r"\bassertSafeRedirect\b").unwrap(),
             regex::Regex::new(r"\bvalidateRedirect\b").unwrap(),
+            // Project-local guard naming: `isValidReturnTo`, `isSafeUrl`,
+            // `isAllowedOrigin`, and the named helpers real callbacks use.
+            regex::Regex::new(
+                r"\bis(?:Valid|Safe|Allowed)\w*(?:Url|URL|Redirect|ReturnTo|Origin)s?\b",
+            )
+            .expect("static named redirect guard regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bgetSafeRedirectUrl\b")
+                .expect("static safe redirect helper regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bisOriginAllowed\b").expect("static origin allowlist regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bnormalizeReturnTo\b").expect("static return-to normalizer regex"), // allow-expect: compile-time literal regex
             regex::Regex::new(r"\ballowedRedirect").unwrap(),
             regex::Regex::new(r"\btrustedRedirect").unwrap(),
             regex::Regex::new(r"\ballowedOrigins?\b").unwrap(),
@@ -152,3 +162,36 @@ pub(in crate::core::code_scan) static EMAIL_PATTERNS: LazyLock<Vec<regex::Regex>
             regex::Regex::new(r"\bSESClient\b").unwrap(),
         ]
     });
+
+#[cfg(test)]
+mod tests {
+    use super::REDIRECT_ALLOWLIST_PATTERNS;
+
+    fn allowlisted(source: &str) -> bool {
+        REDIRECT_ALLOWLIST_PATTERNS
+            .iter()
+            .any(|pattern| pattern.is_match(source))
+    }
+
+    #[test]
+    fn project_named_return_to_guards_count_as_an_allowlist() {
+        assert!(allowlisted("isValidReturnTo(returnTo)"));
+        assert!(allowlisted("normalizeReturnTo(returnTo)"));
+        assert!(allowlisted("getSafeRedirectUrl(state)"));
+        assert!(allowlisted(
+            "if (!isOriginAllowed(body.redirectUri, client.redirectUris))"
+        ));
+        assert!(allowlisted("isSafeUrl(target)"));
+        assert!(allowlisted(
+            "isAllowedOrigin(request.headers.get(\"origin\"))"
+        ));
+    }
+
+    #[test]
+    fn an_unguarded_redirect_target_is_not_allowlisted() {
+        assert!(!allowlisted("return Response.redirect(returnTo);"));
+        assert!(!allowlisted("const next = searchParams.get(\"next\");"));
+        // A validator for something other than a destination does not count.
+        assert!(!allowlisted("isValidEmail(input.email)"));
+    }
+}

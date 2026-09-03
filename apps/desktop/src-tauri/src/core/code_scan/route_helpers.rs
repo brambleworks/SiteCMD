@@ -1,46 +1,12 @@
 use super::*;
 
-#[derive(Debug, Default, Clone)]
+mod db_writes;
+mod framework_auth;
+mod html_sinks;
 
-pub(super) struct NextMiddlewareProtection {
-    pub(super) global: bool,
-    pub(super) prefixes: Vec<String>,
-}
-
-impl NextMiddlewareProtection {
-    fn covers(&self, route_path: &str) -> bool {
-        self.global
-            || self
-                .prefixes
-                .iter()
-                .any(|prefix| route_path.starts_with(prefix))
-    }
-}
-
-pub(super) fn apply_framework_auth_overrides(
-    framework: Option<&str>,
-    files: &[SourceFile],
-    issues: &mut Vec<CodeIssue>,
-) {
-    if framework != Some("Next.js") {
-        return;
-    }
-
-    let middleware_protection = collect_next_middleware_protection(files);
-    if !middleware_protection.global && middleware_protection.prefixes.is_empty() {
-        return;
-    }
-
-    issues.retain(|issue| {
-        if !issue.id.starts_with("sensitive-auth:") {
-            return true;
-        }
-        let Some(route_path) = route_path_from_relative_path(&issue.relative_path) else {
-            return true;
-        };
-        !middleware_protection.covers(&route_path)
-    });
-}
+pub(in crate::core::code_scan) use db_writes::*;
+pub(in crate::core::code_scan) use framework_auth::*;
+pub(in crate::core::code_scan) use html_sinks::*;
 
 pub(super) fn has_inline_secret_guard(lower: &str) -> bool {
     let reads_request_credential = lower.contains("authorization")
@@ -205,18 +171,29 @@ static WRITE_HANDLER_MARKERS: &[&str] = &[
     "wp_rest_server::deletable",
 ];
 
-/// Whether `marker` occurs outside a quoted data definition.
+/// Whether `marker` occurs outside a quoted data definition, and outside a
+/// longer identifier or member chain.
 ///
 /// Backslashes escape quote-leading markers, but qualify bare PHP names such as
-/// `\Route::post`, which remain live declarations.
+/// `\Route::post`, which remain live declarations. A marker that starts with an
+/// identifier character must not be a member of a longer chain, so the ORM call
+/// `prisma.app.delete(` does not satisfy the Express marker `app.delete(`. A
+/// compound name is still a live declaration: `usersRouter.post(` keeps
+/// matching `router.post(`, because only the member dot marks a receiver the
+/// marker does not own.
 fn contains_unquoted(lower: &str, marker: &str) -> bool {
     let escape_marks_data = marker.starts_with('"') || marker.starts_with('\'');
+    let marker_starts_identifier = marker
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_alphanumeric() || first == '_');
     let mut search = 0;
     while let Some(pos) = lower[search..].find(marker) {
         let at = search + pos;
         let preceding = lower[..at].chars().next_back();
         let marker_as_data = matches!(preceding, Some('"' | '\'' | '`'))
-            || (escape_marks_data && preceding == Some('\\'));
+            || (escape_marks_data && preceding == Some('\\'))
+            || (marker_starts_identifier && preceding == Some('.'));
         if !marker_as_data {
             return true;
         }
@@ -231,8 +208,68 @@ fn has_unquoted_marker(lower: &str, markers: &[&str]) -> bool {
         .any(|marker| contains_unquoted(lower, marker))
 }
 
-pub(super) fn is_route_like(file: &SourceFile, lower: &str) -> bool {
-    let rel = file.relative_path.to_lowercase();
+/// Whether the file is a client-side data module or component. React Query
+/// hooks and `"use client"` components live under `api/` and `routes/`
+/// directories in common project layouts but never serve a request.
+pub(super) fn is_client_module(lower: &str) -> bool {
+    has_any(lower, &CLIENT_MODULE_PATTERNS)
+}
+
+/// The request-handler marker in the file, named for evidence text. The
+/// pattern list reads the original content because the HTTP verb exports are
+/// case-sensitive; the substring checks below stay on the lowercased copy.
+pub(super) fn route_handler_marker(rel: &str, content: &str, lower: &str) -> Option<&'static str> {
+    if let Some((label, _)) = ROUTE_HANDLER_MARKER_PATTERNS
+        .iter()
+        .find(|(_, pattern)| pattern.is_match(content))
+    {
+        return Some(label);
+    }
+    // Every module under `pages/api/` exports its handler as the default.
+    if (rel.starts_with("pages/api/") || rel.contains("/pages/api/"))
+        && lower.contains("export default")
+    {
+        return Some("a default export in a Pages Router API route");
+    }
+    // PHP entry points read the request superglobals directly.
+    if lower.contains("$_get")
+        || lower.contains("$_post")
+        || lower.contains("$_request")
+        || lower.contains("php://input")
+    {
+        return Some("a direct PHP request read");
+    }
+    if has_wp_handler_registration(lower) {
+        return Some("a WordPress handler registration");
+    }
+    if has_unquoted_marker(lower, ROUTE_DECLARATION_MARKERS) {
+        return Some("a framework route declaration");
+    }
+    None
+}
+
+/// The line of the first request-handler marker, so a finding whose risk word
+/// came from the path can point at the handler instead of an unrelated line.
+pub(super) fn route_handler_marker_line(content: &str) -> Option<u32> {
+    ROUTE_HANDLER_MARKER_PATTERNS
+        .iter()
+        .find_map(|(_, pattern)| {
+            pattern
+                .find(content)
+                .map(|found| line_number(content, found.start()))
+        })
+}
+
+/// Why the file counts as a route, phrased for evidence text, or `None` when
+/// it is not route-like.
+///
+/// For JavaScript and TypeScript a route-shaped path is a hint, never a
+/// verdict: config, type, service, and repository modules all live under `api/`
+/// and `routes/` directories, so there the path rule and the `route.ts`
+/// basename both require a request handler in the content. Other languages keep
+/// the path rule as it stands, with the PHP request read they already required.
+pub(super) fn route_like_evidence(file: &SourceFile, lower: &str) -> Option<String> {
+    let rel = file.relative_path.replace('\\', "/").to_lowercase();
     // Laravel's resources/ tree is frontend assets: a file under an /api/
     // path there is an HTTP *client* wrapper, not a server route.
     let path_rule_applies = !rel.starts_with("resources/") && !rel.contains("/resources/");
@@ -251,15 +288,48 @@ pub(super) fn is_route_like(file: &SourceFile, lower: &str) -> bool {
         || rel.starts_with("pages/api/")
         || rel.contains("/routes/")
         || rel.starts_with("routes/");
-    (path_rule_applies && php_direct_endpoint && conventional_route_path)
-        || rel.ends_with("/route.ts")
+    let route_basename = rel.ends_with("/route.ts")
         || rel.ends_with("/route.js")
         || rel.ends_with("/route.tsx")
-        || rel.ends_with("/route.jsx")
-        || rel == "routes/web.php"
-        || rel == "routes/api.php"
-        || has_wp_handler_registration(lower)
-        || has_unquoted_marker(lower, ROUTE_DECLARATION_MARKERS)
+        || rel.ends_with("/route.jsx");
+
+    if rel == "routes/web.php" || rel == "routes/api.php" {
+        return Some("a Laravel route manifest".into());
+    }
+    // A React Query module has no server handler of its own. A framework route
+    // that co-locates its loader with the page component does, and that marker
+    // outranks the client hooks beside it.
+    let marker = route_handler_marker(&rel, &file.content, lower);
+    if marker.is_none() && is_client_module(lower) {
+        return None;
+    }
+    let on_route_path = path_rule_applies && conventional_route_path && php_direct_endpoint;
+    if !is_js_source_path(&rel) {
+        if on_route_path {
+            return Some(match marker {
+                Some(marker) => format!("a route path and {marker}"),
+                None => "a route path".to_string(),
+            });
+        }
+        return marker
+            .filter(|_| {
+                has_wp_handler_registration(lower)
+                    || has_unquoted_marker(lower, ROUTE_DECLARATION_MARKERS)
+            })
+            .map(str::to_string);
+    }
+    let marker = marker?;
+    if on_route_path {
+        return Some(format!("a route path and {marker}"));
+    }
+    if route_basename {
+        return Some(format!("a `route` module basename and {marker}"));
+    }
+    // A framework route declaration is route evidence wherever it sits.
+    if has_wp_handler_registration(lower) || has_unquoted_marker(lower, ROUTE_DECLARATION_MARKERS) {
+        return Some(marker.to_string());
+    }
+    None
 }
 
 pub(super) fn is_write_handler(lower: &str) -> bool {
@@ -285,7 +355,10 @@ pub(super) fn is_frontend_surface(file: &SourceFile) -> bool {
 /// Excludes test fixtures from issue-emitting analysis while retaining them in
 /// the project inventory used for test-coverage evidence.
 pub(super) fn is_test_like_path(path: &Path) -> bool {
-    let lower = path.to_string_lossy().to_ascii_lowercase();
+    // Prefix a separator so a leading directory segment also matches; callers
+    // pass both absolute walk paths and project-relative paths, and a
+    // root-level `e2e/` or `tests/` directory has no separator in front of it.
+    let lower = format!("/{}", path.to_string_lossy().to_ascii_lowercase());
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -293,6 +366,14 @@ pub(super) fn is_test_like_path(path: &Path) -> bool {
     lower.contains("/__tests__/")
         || lower.contains("/tests/")
         || lower.contains("/test/")
+        // Test-support trees that hold fake databases, render helpers, and
+        // seed users.
+        || lower.contains("/testing/")
+        || lower.contains(".integration-test.")
+        || lower.ends_with("-test.ts")
+        || lower.ends_with("-test.tsx")
+        || lower.ends_with("-test.js")
+        || lower.ends_with("-test.jsx")
         // Recognize NestJS, Playwright, and Cypress end-to-end naming forms that
         // do not match the generic .spec. suffix.
         || lower.contains("/e2e/")
@@ -344,6 +425,9 @@ pub(super) fn is_example_like_path(path: &Path) -> bool {
         || lower.contains("/mocks/")
         || lower.contains("/examples/")
         || lower.contains("/example/")
+        // Framework repositories ship runnable teaching apps under sample/.
+        || lower.contains("/sample/")
+        || lower.contains("/samples/")
         || lower.contains("/playground/")
         || lower.contains("/playgrounds/")
         || lower.contains("/snippets/")
@@ -356,8 +440,49 @@ pub(super) fn is_example_like_path(path: &Path) -> bool {
         || lower.contains(".stories.")
 }
 
+/// Whether a query predicate or a write payload is carried by a local object
+/// that was built from the caller's own session in the same file, as in
+/// `const installForObject = teamId ? { teamId } : { userId: req.session.user.id };`
+/// followed by `where: { type, ...installForObject }`, or
+/// `const data = { type, userId: session.user?.id };` followed by
+/// `prisma.credential.create({ data })`. Either way the binding carries the
+/// ownership predicate the literal scope patterns look for.
+pub(super) fn has_session_scoped_binding(content: &str) -> bool {
+    let carried = WHERE_SPREAD_PATTERN
+        .captures_iter(content)
+        .chain(WRITE_PAYLOAD_BINDING_PATTERN.captures_iter(content))
+        .filter_map(|capture| capture.get(1).map(|name| name.as_str().to_string()))
+        .collect::<Vec<_>>();
+    if carried.is_empty() {
+        return false;
+    }
+    SESSION_SCOPED_BINDING_PATTERN
+        .captures_iter(content)
+        .filter_map(|capture| capture.get(1).map(|name| name.as_str()))
+        .any(|binding| carried.iter().any(|name| name == binding))
+}
+
+/// Whether a lowercased path names `word` as a path segment rather than as a
+/// substring inside one. Router decoration (`_authenticated+`, `(group)`,
+/// `[param]`) is stripped and Remix dot-delimited segments are split, so
+/// `admin+/stats.tsx` and `settings.billing.tsx` match while the transformer
+/// directory `api-to-internal` does not match `internal`.
+pub(super) fn path_has_word(path: &str, word: &str) -> bool {
+    path.split('/').any(|segment| {
+        segment
+            .trim_start_matches(['_', '(', '['])
+            .trim_end_matches(['+', ')', ']'])
+            .split('.')
+            .any(|part| part.starts_with(word))
+    })
+}
+
 pub(super) fn is_sensitive_handler(file: &SourceFile, lower: &str) -> bool {
-    let rel = file.relative_path.to_lowercase();
+    let rel = file.relative_path.replace('\\', "/").to_lowercase();
+    // Path segments only, matched at their start: `accounts` and
+    // `settings-layout` are still the account and settings surfaces, while the
+    // transformer directory `api-to-internal` is not an internal endpoint
+    // because `internal` does not begin any segment of it.
     let sensitive_path = [
         "admin",
         "billing",
@@ -367,7 +492,7 @@ pub(super) fn is_sensitive_handler(file: &SourceFile, lower: &str) -> bool {
         "backoffice",
     ]
     .iter()
-    .any(|needle| rel.contains(needle));
+    .any(|needle| path_has_word(&rel, needle));
     let sensitive_content = [
         "admin",
         "billing",
@@ -434,111 +559,6 @@ pub(super) fn has_inline_rust_tests(content_lower: &str) -> bool {
     content_lower.contains("#[cfg(test)]") || content_lower.contains("#[test]")
 }
 
-pub(super) fn collect_next_middleware_protection(files: &[SourceFile]) -> NextMiddlewareProtection {
-    let mut protection = NextMiddlewareProtection::default();
-
-    for file in files {
-        if !is_next_middleware_file(&file.relative_path) {
-            continue;
-        }
-        let lower = file.content.to_ascii_lowercase();
-        if !(has_any(&file.content, &AUTH_PATTERNS)
-            || has_inline_secret_guard(&lower)
-            || lower.contains("withauth")
-            || lower.contains("clerkmiddleware"))
-        {
-            continue;
-        }
-
-        let matcher_section = lower
-            .find("matcher")
-            .map(|index| &file.content[index..])
-            .unwrap_or(&file.content);
-        let mut found_prefix = false;
-        for pattern in NEXT_MIDDLEWARE_MATCHER_PATTERNS.iter() {
-            for capture in pattern.captures_iter(matcher_section) {
-                let Some(raw_matcher) = capture.get(1).map(|value| value.as_str()) else {
-                    continue;
-                };
-                let Some(prefix) = normalize_middleware_matcher(raw_matcher) else {
-                    continue;
-                };
-                found_prefix = true;
-                if !protection.prefixes.contains(&prefix) {
-                    protection.prefixes.push(prefix);
-                }
-            }
-        }
-
-        if !found_prefix {
-            protection.global = true;
-        }
-    }
-
-    protection
-}
-
-pub(super) fn is_next_middleware_file(relative_path: &str) -> bool {
-    let normalized = relative_path.replace('\\', "/").to_ascii_lowercase();
-    matches!(
-        normalized.as_str(),
-        "middleware.ts" | "middleware.js" | "src/middleware.ts" | "src/middleware.js"
-    )
-}
-
-pub(super) fn normalize_middleware_matcher(raw_matcher: &str) -> Option<String> {
-    if !raw_matcher.starts_with('/') {
-        return None;
-    }
-
-    let mut normalized = raw_matcher.to_string();
-    if let Some(prefix) = normalized.split(':').next() {
-        normalized = prefix.to_string();
-    }
-    normalized = normalized.replace("(.*)", "");
-    normalized = normalized.replace('*', "");
-    normalized = normalized.trim_end_matches('/').to_string();
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized)
-    }
-}
-
-pub(super) fn route_path_from_relative_path(relative_path: &str) -> Option<String> {
-    let normalized = relative_path.replace('\\', "/");
-    let trimmed = normalized.strip_prefix("src/").unwrap_or(&normalized);
-
-    if let Some(rest) = trimmed.strip_prefix("app/") {
-        for suffix in ["/route.ts", "/route.js", "/route.tsx", "/route.jsx"] {
-            if let Some(route) = rest.strip_suffix(suffix) {
-                return Some(normalize_route_path(route));
-            }
-        }
-    }
-
-    if let Some(rest) = trimmed.strip_prefix("pages/") {
-        for suffix in [".ts", ".js", ".tsx", ".jsx"] {
-            if let Some(route) = rest.strip_suffix(suffix) {
-                return Some(normalize_route_path(route));
-            }
-        }
-    }
-
-    None
-}
-
-pub(super) fn normalize_route_path(route: &str) -> String {
-    let mut parts = Vec::new();
-    for segment in route.split('/') {
-        if segment.is_empty() || (segment.starts_with('(') && segment.ends_with(')')) {
-            continue;
-        }
-        parts.push(segment);
-    }
-    format!("/{}", parts.join("/"))
-}
-
 #[derive(Debug, Clone, Copy)]
 
 pub(super) struct ResponsibilitySignals {
@@ -597,11 +617,55 @@ pub(super) fn collect_code_responsibilities(signals: ResponsibilitySignals) -> V
     labels
 }
 
-pub(super) fn is_publicly_abusable_route(file: &SourceFile, lower: &str) -> bool {
+/// Strips the path and quote delimiters a route-name pattern captures around
+/// its word.
+fn trim_word(matched: &str) -> &str {
+    matched.trim_matches(|character: char| !character.is_alphanumeric())
+}
+
+/// The abuse-sensitive word that made the file look public, and where it was
+/// found, so evidence can name it instead of asserting the whole category.
+#[derive(Debug, Clone)]
+pub(super) struct PublicRiskMatch {
+    word: String,
+    in_route_path: bool,
+}
+
+impl PublicRiskMatch {
+    /// The matched word and where it came from, for evidence text.
+    pub(super) fn describe(&self) -> String {
+        let location = if self.in_route_path {
+            "the route path"
+        } else {
+            "the file content"
+        };
+        format!("`{}` in {location}", self.word)
+    }
+
+    /// Whether the word came from the path, in which case no line in the file
+    /// carries it and the finding should point at the handler instead.
+    pub(super) fn in_route_path(&self) -> bool {
+        self.in_route_path
+    }
+}
+
+pub(super) fn public_risk_match(file: &SourceFile, lower: &str) -> Option<PublicRiskMatch> {
     let normalized = file.relative_path.replace('\\', "/").to_ascii_lowercase();
-    PUBLIC_RISK_ENDPOINT_PATTERNS
-        .iter()
-        .any(|pattern| pattern.is_match(&normalized) || pattern.is_match(lower))
+    for pattern in PUBLIC_RISK_ENDPOINT_PATTERNS.iter() {
+        if let Some(found) = pattern.find(&normalized) {
+            return Some(PublicRiskMatch {
+                word: trim_word(found.as_str()).to_string(),
+                in_route_path: true,
+            });
+        }
+        if let Some(found) = pattern.find(lower) {
+            return Some(PublicRiskMatch {
+                word: trim_word(found.as_str()).to_string(),
+                in_route_path: false,
+            });
+        }
+    }
+    None
 }
 
 #[cfg(test)]

@@ -118,6 +118,26 @@ pub(super) fn is_vendored_path(root: &Path, path: &Path) -> bool {
         .any(|prefix| rel_str == *prefix || rel_str.starts_with(&format!("{}/", prefix)))
 }
 
+/// Files drupal/core-composer-scaffold copies into every site unchanged. They
+/// are core's documentation, not the project's code, so they stay in the
+/// inventory but never receive first-party findings.
+static DRUPAL_SCAFFOLD_BASENAMES: &[&str] = &[
+    "default.settings.php",
+    "default.services.yml",
+    "example.settings.local.php",
+    "example.sites.php",
+];
+
+/// Returns true for a Drupal scaffold file under a `sites/` directory.
+pub(super) fn is_drupal_scaffold_file(relative_path: &str) -> bool {
+    let normalized = relative_path.replace('\\', "/");
+    let Some((directory, basename)) = normalized.rsplit_once('/') else {
+        return false;
+    };
+    DRUPAL_SCAFFOLD_BASENAMES.contains(&basename)
+        && directory.split('/').any(|segment| segment == "sites")
+}
+
 /// Return whether the walker must skip ignored, vendored, or disabled paths.
 pub(super) fn should_skip_walker_dir(root: &Path, path: &Path, file_name: &str) -> bool {
     if IGNORED_DIRS.contains(&file_name) {
@@ -322,6 +342,7 @@ fn collect_project_inventory_with_limits(
             || file_name.ends_with(".d.ts")
             || is_test_like_path(&path)
             || is_example_like_path(&path)
+            || is_drupal_scaffold_file(&relative_path)
         {
             continue;
         }

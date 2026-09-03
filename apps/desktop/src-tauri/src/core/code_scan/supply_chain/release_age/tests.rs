@@ -156,6 +156,7 @@ fn manifest(relative_path: &str, package_manager: &str) -> PackageManifest {
         content: format!(r#"{{"packageManager":"{package_manager}"}}"#),
         package_name: None,
         dependencies: HashSet::new(),
+        installed_dependencies: HashSet::new(),
         local_dependencies: HashSet::new(),
         dependency_specs: HashMap::new(),
     }

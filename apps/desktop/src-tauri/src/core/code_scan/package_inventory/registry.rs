@@ -114,7 +114,7 @@ pub(in crate::core::code_scan) fn parse_package_lock_registry_hosts(
             let Some(resolved) = info.get("resolved").and_then(|value| value.as_str()) else {
                 continue;
             };
-            let Some(host) = host_from_url(resolved) else {
+            let Some(host) = registry_host_from_resolved(resolved) else {
                 continue;
             };
             hosts.insert(name.to_ascii_lowercase(), host);
@@ -128,7 +128,7 @@ pub(in crate::core::code_scan) fn parse_package_lock_registry_hosts(
         let Some(resolved) = info.get("resolved").and_then(|value| value.as_str()) else {
             continue;
         };
-        let Some(host) = host_from_url(resolved) else {
+        let Some(host) = registry_host_from_resolved(resolved) else {
             continue;
         };
         hosts.insert(name.to_ascii_lowercase(), host);
@@ -168,7 +168,7 @@ pub(in crate::core::code_scan) fn parse_yarn_lock_registry_hosts(
                 .trim_start_matches("resolved ")
                 .trim_matches('"')
                 .trim_matches('\'');
-            let Some(host) = host_from_url(resolved) else {
+            let Some(host) = registry_host_from_resolved(resolved) else {
                 continue;
             };
             for name in &current_names {
@@ -239,7 +239,7 @@ pub(in crate::core::code_scan) fn parse_pnpm_lock_registry_hosts(
                 continue;
             };
             let resolved = &trimmed[url_start..];
-            let Some(host) = host_from_url(resolved) else {
+            let Some(host) = registry_host_from_resolved(resolved) else {
                 continue;
             };
             hosts.entry(package.clone()).or_insert(host);
@@ -285,6 +285,22 @@ pub(in crate::core::code_scan) fn host_from_url(value: &str) -> Option<String> {
     Some(url.host_str()?.to_ascii_lowercase())
 }
 
+/// The host a lockfile entry was fetched from, only when it is a registry
+/// tarball. Git, GitHub shorthand, file, link, and workspace resolutions are
+/// not registry fetches, so they name no host to compare.
+pub(in crate::core::code_scan) fn registry_host_from_resolved(resolved: &str) -> Option<String> {
+    let normalized = resolved
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_end_matches(',');
+    let url = url::Url::parse(normalized).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    Some(url.host_str()?.to_ascii_lowercase())
+}
+
 pub(in crate::core::code_scan) fn dependency_spec_uses_remote_url(spec: &str) -> bool {
     let normalized = spec.trim().to_ascii_lowercase();
     normalized.starts_with("git+")
@@ -302,7 +318,35 @@ pub(in crate::core::code_scan) fn format_registry_host_list(hosts: &HashSet<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_pnpm_package_key;
+    use super::{normalize_pnpm_package_key, registry_host_from_resolved};
+
+    #[test]
+    fn only_http_tarball_resolutions_name_a_registry_host() {
+        assert_eq!(
+            registry_host_from_resolved("https://registry.npmjs.org/axios/-/axios-1.7.2.tgz")
+                .as_deref(),
+            Some("registry.npmjs.org")
+        );
+        assert_eq!(
+            registry_host_from_resolved("http://npm.internal:4873/axios/-/axios-1.7.2.tgz")
+                .as_deref(),
+            Some("npm.internal")
+        );
+        // Git, GitHub shorthand, and local resolutions are not registry fetches.
+        assert_eq!(
+            registry_host_from_resolved(
+                "git+ssh://git@github.com/Va1/browser-sync-webpack-plugin.git#cef3b6c"
+            ),
+            None
+        );
+        assert_eq!(
+            registry_host_from_resolved("git+https://github.com/acme/widget.git#v1.0.0"),
+            None
+        );
+        assert_eq!(registry_host_from_resolved("github:acme/widget"), None);
+        assert_eq!(registry_host_from_resolved("file:../packages/widget"), None);
+        assert_eq!(registry_host_from_resolved("link:../packages/widget"), None);
+    }
 
     #[test]
     fn pnpm_keys_strip_version_suffixes_for_scoped_and_unscoped_packages() {

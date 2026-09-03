@@ -59,6 +59,12 @@ pub(in crate::core::code_scan) static AUTH_PATTERNS: LazyLock<Vec<regex::Regex>>
             regex::Regex::new(r"\bctx\.user\b").unwrap(),
             regex::Regex::new(r"\buserId\b").unwrap(),
             regex::Regex::new(r"\bensureAuthenticated\b").unwrap(),
+            // A call named verify/require/assert/ensure/check + Admin, Auth,
+            // Session, SignedIn, or LoggedIn is a gate by naming convention.
+            regex::Regex::new(
+                r"\b(?:verify|require|assert|ensure|check)(?:Admin|Auth|Session|SignedIn|LoggedIn)[A-Za-z0-9_]*\s*\(",
+            )
+            .expect("static named-gate regex"), // allow-expect: compile-time literal regex
             // Laravel and WordPress identity gates.
             regex::Regex::new(r"\bAuth::(?:check|user|id|guard|guest|attempt|login)").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
             // Match chain middleware with scalar or array arguments.
@@ -98,6 +104,19 @@ pub(in crate::core::code_scan) static NEXT_MIDDLEWARE_MATCHER_PATTERNS: LazyLock
     Vec<regex::Regex>,
 > = LazyLock::new(|| vec![regex::Regex::new(r#"["'](/[^"']+)["']"#).unwrap()]);
 
+/// Session lookups by naming convention. Reading the session is identity
+/// evidence only where a gate is already established, so this list stays out
+/// of `AUTH_PATTERNS` and is used by the layout-guard resolver, which also
+/// requires the layout to redirect.
+pub(in crate::core::code_scan) static SESSION_LOOKUP_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"\b(?:get|require|ensure|load|read|fetch)\w*Session\s*\(")
+                .expect("static session lookup regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bisAuthenticated\b").expect("static session lookup regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
 pub(in crate::core::code_scan) static AUTHZ_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(
     || {
         vec![
@@ -110,6 +129,13 @@ pub(in crate::core::code_scan) static AUTHZ_PATTERNS: LazyLock<Vec<regex::Regex>
             regex::Regex::new(r"\bauthorize\s*\(").unwrap(),
             regex::Regex::new(r"\bpolicy\b").unwrap(),
             regex::Regex::new(r"\bisAdmin\b").unwrap(),
+            // An admin verifier decides the role as well as the identity.
+            regex::Regex::new(r"\b(?:verify|require|assert|ensure|check)Admin[A-Za-z0-9_]*\s*\(")
+                .expect("static admin-verifier regex"), // allow-expect: compile-time literal regex
+            // Project-named access assertions: the call throws or returns when
+            // the caller may not touch the resource.
+            regex::Regex::new(r"\b(?:throwIfNot|assert|check|ensure|require)\w*Access\w*\s*\(")
+                .expect("static access-assertion regex"), // allow-expect: compile-time literal regex
             regex::Regex::new(r#"\brole\s*===\s*['"]admin['"]"#).unwrap(),
             regex::Regex::new(r"\bpermission").unwrap(),
             regex::Regex::new(r"\bability\.can\b").unwrap(),
@@ -197,6 +223,11 @@ pub(in crate::core::code_scan) static OAUTH_STATE_GUARD_PATTERNS: LazyLock<Vec<r
             )
             .unwrap(),
             regex::Regex::new(r#"\boauth_state\b"#).unwrap(),
+            // A named decoder owns the comparison: the callback reads the state
+            // parameter through it rather than comparing in the handler.
+            regex::Regex::new(r"\bdecodeOAuthState\b").expect("static OAuth state decoder regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bOAuthState\b").expect("static OAuth state type regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bparseState\s*\(").expect("static OAuth state parser regex"), // allow-expect: compile-time literal regex
             regex::Regex::new(r#"\bexpectedState\b"#).unwrap(),
             regex::Regex::new(r#"\bstoredState\b"#).unwrap(),
             regex::Regex::new(r#"\bstate\s*!==\s*"#).unwrap(),
@@ -323,6 +354,12 @@ pub(in crate::core::code_scan) static ONE_TIME_TOKEN_RAW_LOOKUP_PATTERNS: LazyLo
             r#"(?is)(?:token|resetToken|inviteToken|verificationToken)\s*=\s*(?:searchParams\.get\(|(?:formData|data|input|values)\.get\()"#,
         )
         .unwrap(),
+        // ES2015 shorthand: `where: { token }` is the same raw lookup as
+        // `where: { token: token }`.
+        regex::Regex::new(
+            r#"(?is)where\s*:\s*\{\s*(?:token|resetToken|inviteToken|verificationToken)\s*[,}]"#,
+        )
+        .expect("static shorthand token lookup regex"), // allow-expect: compile-time literal regex
     ]
 });
 

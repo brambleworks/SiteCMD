@@ -444,3 +444,159 @@ fn llm_usage_with_explicit_retry_cap_is_not_flagged() {
         report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn skips_jsx_inline_style_finding_for_next_og_image_routes() {
+    let temp = TempDir::new().unwrap();
+    let og_image = r##"
+                import { ImageResponse } from "next/og";
+
+                export const size = { width: 1200, height: 630 };
+
+                export default function OGImage() {
+                  return new ImageResponse(
+                    (
+                      <div style={{ display: "flex", width: "100%", height: "100%", background: "#0a1628" }}>
+                        <span style={{ fontSize: "28px", color: "#f0a500" }}>Visit</span>
+                        <span style={{ fontSize: "72px", color: "#ffffff" }}>Your Team</span>
+                        <span style={{ fontSize: "24px", color: "#94a3b8" }}>Guides</span>
+                      </div>
+                    ),
+                    { ...size }
+                  );
+                }
+            "##;
+    write_file(temp.path(), "app/opengraph-image.tsx", og_image);
+    write_file(temp.path(), "lib/league-pages/team-og.tsx", og_image);
+
+    let report = audit_project(temp.path()).unwrap();
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("jsx-inline-style-density:")),
+        "Satori renders inline styles only, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn skips_jsx_inline_style_finding_when_every_style_is_runtime_derived() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "components/tools/CompareClient.tsx",
+        r#"
+                export function CompareClient({ left, right }: Props) {
+                  return (
+                    <div>
+                      <div style={{ borderColor: left.primaryColor }} />
+                      <span style={{ background: left.primaryColor }} />
+                      <span style={{ background: right.primaryColor }} />
+                      <p style={{ color: right.primaryColor }}>{right.name}</p>
+                      <strong style={{ color: left.total <= right.total ? left.primaryColor : undefined }}>
+                        {left.name}
+                      </strong>
+                    </div>
+                  );
+                }
+            "#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("jsx-inline-style-density:")),
+        "runtime-derived values belong inline by the rule's own contract, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn skips_unsafe_html_for_json_ld_scripts_serialized_with_json_stringify() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "lib/seo.ts",
+        r#"
+                import React from "react";
+
+                export function JsonLd({ data }: { data: Record<string, unknown> }) {
+                  return React.createElement("script", {
+                    type: "application/ld+json",
+                    dangerouslySetInnerHTML: {
+                      __html: JSON.stringify(data).replace(/</g, "\\u003c"),
+                    },
+                  });
+                }
+            "#,
+    );
+    write_file(
+        temp.path(),
+        "components/Breadcrumbs.tsx",
+        r#"
+                export function Breadcrumbs({ json }: { json: object }) {
+                  return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(json) }} />;
+                }
+            "#,
+    );
+    // Negative control: JSON-LD beside the same serialization in a plain
+    // element. JSON.stringify does not escape `<`, so that div is a real sink.
+    write_file(
+        temp.path(),
+        "components/ProfileCard.tsx",
+        r#"
+                export function ProfileCard({ schema, userProfile }: Props) {
+                  return (
+                    <>
+                      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }} />
+                      <div dangerouslySetInnerHTML={{ __html: JSON.stringify(userProfile) }} />
+                    </>
+                  );
+                }
+            "#,
+    );
+    // Negative control: a JSON-LD file that also renders a raw HTML string.
+    write_file(
+        temp.path(),
+        "components/RichText.tsx",
+        r#"
+                export function RichText({ html, json }: Props) {
+                  return (
+                    <>
+                      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(json) }} />
+                      <div dangerouslySetInnerHTML={{ __html: html }} />
+                    </>
+                  );
+                }
+            "#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let ids = report.issues.iter().map(|i| &i.id).collect::<Vec<_>>();
+    assert!(
+        !ids.iter().any(|id| id.as_str() == "unsafe-html:lib/seo.ts"),
+        "serialized JSON in a non-executing script type is not an HTML sink, got {:?}",
+        ids
+    );
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "unsafe-html:components/Breadcrumbs.tsx"),
+        "the JSX form of the JSON-LD pattern is the same contract, got {:?}",
+        ids
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "unsafe-html:components/RichText.tsx"),
+        "negative control: a raw HTML sink beside JSON-LD keeps the finding, got {:?}",
+        ids
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "unsafe-html:components/ProfileCard.tsx"),
+        "negative control: serialized JSON in a plain element is still a markup sink, got {:?}",
+        ids
+    );
+}

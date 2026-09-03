@@ -83,6 +83,12 @@ pub(in crate::core::code_scan) static VALIDATION_PATTERNS: LazyLock<Vec<regex::R
             // Match validating FormRequest subclasses, not the base Request type.
             regex::Regex::new(r"\b[A-Z][A-Za-z0-9]+Request\s+\$[A-Za-z_]")
                 .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
+            // NestJS: a typed `@Body()` parameter is validated by the global or
+            // route-level ValidationPipe against its class-validator DTO.
+            regex::Regex::new(r"@Body\s*\([^)]*\)\s*[A-Za-z_$][\w$]*\s*:\s*[A-Z]")
+                .expect("static Nest body parameter regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bValidationPipe\b").expect("static Nest validation pipe regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r"\bclass-validator\b").expect("static class-validator regex"), // allow-expect: compile-time literal regex
         ]
     });
 
@@ -145,12 +151,111 @@ pub(in crate::core::code_scan) static PUBLIC_RISK_ENDPOINT_PATTERNS: LazyLock<Ve
             regex::Regex::new(r"\bnewsletter\b").unwrap(),
             regex::Regex::new(r"\bsubscribe\b").unwrap(),
             regex::Regex::new(r"\bupload\b").unwrap(),
-            regex::Regex::new(r"\bimport\b").unwrap(),
-            regex::Regex::new(r"\bexport\b").unwrap(),
+            // Route names only: a bare `import` / `export` word matches every
+            // ES module, so require the path, quoted-route, or compound-name
+            // form. Hyphen and underscore keep `/api/data-import` and
+            // `bulk_export` matching; the ES keyword is always preceded by a
+            // line break or a space, which none of these classes admits.
+            regex::Regex::new(r#"(?:^|[-_/"'`])import(?:[-_/."'`?]|$)"#).unwrap(),
+            regex::Regex::new(r#"(?:^|[-_/"'`])export(?:[-_/."'`?]|$)"#).unwrap(),
             regex::Regex::new(r"\binvite\b").unwrap(),
             regex::Regex::new(r"\bcheckout\b").unwrap(),
             regex::Regex::new(r"\bpayment\b").unwrap(),
             regex::Regex::new(r"\bwebhook\b").unwrap(),
+        ]
+    });
+
+/// Request-handler markers that turn a route-shaped path or a `route.ts`
+/// basename into an actual route. Each entry pairs the marker with the phrase
+/// that names it in evidence text. Matched against the original content: the
+/// HTTP verb exports are case-sensitive, because every framework that uses them
+/// requires the uppercase name and lowercasing first would read a React
+/// component called `Post` as a route handler. The other markers carry `(?i)`
+/// where the framework's own casing varies.
+pub(in crate::core::code_scan) static ROUTE_HANDLER_MARKER_PATTERNS: LazyLock<
+    Vec<(&'static str, regex::Regex)>,
+> = LazyLock::new(|| {
+    let compile = |label: &'static str, source: &str| {
+        (
+            label,
+            regex::Regex::new(source).expect("static route handler marker regex"), // allow-expect: source comes only from the compile-time literals below
+        )
+    };
+    vec![
+        // Next.js App Router and SvelteKit: `export async function GET(...)`,
+        // `export const POST = ...`.
+        compile(
+            "an exported HTTP verb handler",
+            r"(?m)^[\t ]*export\s+(?:async\s+)?(?:function|const|let|var)\s+(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b",
+        ),
+        // Re-exported handlers: `export { handler as GET, handler as POST }`.
+        compile(
+            "a re-exported HTTP verb handler",
+            r"(?s)export\s*\{[^}]{0,200}\bas\s+(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b",
+        ),
+        // Destructured handlers: `export const { GET } = createFromSource(...)`.
+        compile(
+            "a destructured HTTP verb export",
+            r"(?s)export\s+(?:const|let|var)\s*\{[^}]{0,200}\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b[^}]{0,200}\}\s*=",
+        ),
+        // Remix and React Router data routes. Lowercase, like the verbs above
+        // are uppercase: a component called `Loader` is not a data route.
+        compile(
+            "an exported action or loader",
+            r"(?m)^[\t ]*export\s+(?:async\s+)?(?:function|const|let|var)\s+(?:action|loader)\b",
+        ),
+        // Next.js Pages Router and Express-style default handlers.
+        compile(
+            "a default request-handler export",
+            r"(?i)export\s+default\s+(?:async\s+)?function\s+handler\b",
+        ),
+        // The same router by way of a factory: `export default
+        // defaultHandler({ GET: ... })`, `export default
+        // defaultResponder(getHandler)`. The callee has to name the role, so a
+        // default export of any other call is not a handler.
+        compile(
+            "a default handler-factory export",
+            r"export\s+default\s+[A-Za-z0-9_$]*(?i:handler|responder)\s*\(",
+        ),
+        // NestJS, Flask, and FastAPI route decorators.
+        compile(
+            "a route decorator",
+            r"(?i)@(?:[a-z_]\w*\.)?(?:get|post|put|patch|delete|options|head|all|route|controller)\s*\(",
+        ),
+        // Express, Hono, Elysia, and Fastify verb calls and mounts, each with a
+        // path argument. The receiver class keeps `prisma.app.delete(` from
+        // qualifying, and the quoted path keeps `app.use(cors())` out. `api` is
+        // deliberately absent: it names the browser HTTP client far more often
+        // than a server router.
+        compile(
+            "a router verb call",
+            r#"(?im)(?:^|[;{}(,\s])[A-Za-z0-9_$]*(?:app|router|server|hono|elysia|fastify|route)\s*\.\s*(?:get|post|put|patch|delete|options|head|all|use)\s*\(\s*["'`/]"#,
+        ),
+    ]
+});
+
+/// Markers that identify a client-side data module or component. These files
+/// live under `api/` and `routes/` directories in many project layouts but
+/// never serve a request. Matched against lowercased content.
+pub(in crate::core::code_scan) static CLIENT_MODULE_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"\buse(?:query|mutation|infinitequery|suspensequery)\s*[(<]")
+                .expect("static client module regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r#"(?m)^\s*["']use client["']"#).expect("static client module regex"), // allow-expect: compile-time literal regex
+        ]
+    });
+
+/// Calls that look outbound but stay inside the process: a Stripe webhook
+/// signature check and a bundled-asset URL load. Removed from the content
+/// before outbound-HTTP matching so a file that also makes a real remote call
+/// still counts as outbound.
+pub(in crate::core::code_scan) static LOCAL_ONLY_OUTBOUND_PATTERNS: LazyLock<Vec<regex::Regex>> =
+    LazyLock::new(|| {
+        vec![
+            regex::Regex::new(r"\bstripe\.webhooks\.\w*\s*\(").expect("static local-only regex"), // allow-expect: compile-time literal regex
+            regex::Regex::new(r#"(?s)\bfetch\s*\(\s*new\s+URL\s*\(\s*["'`]\.{1,2}/"#)
+                .expect("static local-only regex"), // allow-expect: compile-time literal regex
         ]
     });
 

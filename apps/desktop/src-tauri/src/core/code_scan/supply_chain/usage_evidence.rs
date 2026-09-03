@@ -24,11 +24,17 @@ pub(super) fn collect_extra_usage_evidence(project_files: &[ProjectFile]) -> Has
         let is_tsconfig = (file_name == "tsconfig.json"
             || (file_name.starts_with("tsconfig.") && file_name.ends_with(".json")))
             && ext == "json";
-        let is_test_source = JS_SOURCE_EXTENSIONS
+        // Tests, mocks, fixtures, and examples are withheld from the
+        // issue-emitting source walk, but a dependency they import is used.
+        let relative = std::path::Path::new(&file.relative_path);
+        let is_withheld_source = JS_SOURCE_EXTENSIONS
             .iter()
             .any(|candidate| candidate.eq_ignore_ascii_case(&ext))
-            && is_test_like_path(std::path::Path::new(&file.relative_path));
-        if !is_component && !is_style && !is_test_source && !is_tsconfig {
+            && (is_test_like_path(relative) || is_example_like_path(relative));
+        // Tool configuration selects plugins, presets, parsers, reporters, and
+        // transforms by quoted package name rather than by import.
+        let is_tool_config = is_tool_config_file_name(&file_name);
+        if !is_component && !is_style && !is_withheld_source && !is_tsconfig && !is_tool_config {
             continue;
         }
         if read_count >= MAX_EVIDENCE_FILES {
@@ -53,8 +59,61 @@ pub(super) fn collect_extra_usage_evidence(project_files: &[ProjectFile]) -> Has
                     names.insert(name);
                 }
             }
+            names.extend(quoted_package_names(&content));
         } else {
             names.extend(collect_package_names_in_content(&content));
+            if is_tool_config {
+                names.extend(quoted_package_names(&content));
+            }
+        }
+    }
+    names
+}
+
+/// Tool configuration whose file name follows no `*.config.*` convention.
+static TOOL_CONFIG_FILE_NAMES: &[&str] = &["nest-cli.json"];
+
+/// Whether a file name is tool configuration whose quoted strings select
+/// packages (`vitest.config.ts`, `.eslintrc.cjs`, `jest.config.js`,
+/// `babel.config.json`, `tsconfig.build.json`, `nest-cli.json`, ...).
+fn is_tool_config_file_name(file_name: &str) -> bool {
+    let name = file_name.strip_prefix('.').unwrap_or(file_name);
+    TOOL_CONFIG_FILE_NAMES.contains(&name)
+        || name.contains(".config.")
+        || ["jest", "eslint", "vitest", "babel", "tsconfig"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+}
+
+/// Package names appearing as quoted strings in tool configuration.
+fn quoted_package_names(content: &str) -> HashSet<String> {
+    const MAX_QUOTED_VALUES: usize = 2_000;
+    let mut names = HashSet::new();
+    let mut rest = content;
+    let mut seen = 0usize;
+    while let Some(open) = rest.find(['"', '\'']) {
+        let quote = rest.as_bytes()[open];
+        let after = &rest[open + 1..];
+        let Some(close) = after.find(quote as char) else {
+            break;
+        };
+        let value = &after[..close];
+        rest = &after[close + 1..];
+        seen += 1;
+        if seen >= MAX_QUOTED_VALUES {
+            break;
+        }
+        // A configuration value that names a package is the bare specifier
+        // itself, not a path, a glob, or a sentence.
+        if value.is_empty()
+            || value.len() > 214
+            || value.contains(char::is_whitespace)
+            || value.contains(['*', '\\', '(', ')', '<', '>', '$', '^', '|', '=', ':'])
+        {
+            continue;
+        }
+        if let Some(name) = normalize_package_spec(value) {
+            names.insert(name);
         }
     }
     names
@@ -94,7 +153,59 @@ fn style_import_package(line: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{style_import_package, tsconfig_jsx_import_source_package};
+    use super::{
+        is_tool_config_file_name, quoted_package_names, style_import_package,
+        tsconfig_jsx_import_source_package,
+    };
+
+    #[test]
+    fn tool_configuration_files_are_recognized() {
+        for name in [
+            "jest.config.ts",
+            "vitest.config.mts",
+            ".eslintrc.cjs",
+            "eslint.config.js",
+            "babel.config.json",
+            "jest-e2e.ts",
+            "tsconfig.build.json",
+            "tailwind.config.cjs",
+            // Named by convention rather than by a `*.config.*` pattern.
+            "nest-cli.json",
+        ] {
+            assert!(is_tool_config_file_name(name), "{name}");
+        }
+        for name in ["package.json", "index.ts", "server.js", "readme.md"] {
+            assert!(!is_tool_config_file_name(name), "{name}");
+        }
+    }
+
+    /// A NestJS project names its schematics collection and CLI plugins in
+    /// `nest-cli.json` and nowhere else, so a scan blind to that file reports
+    /// those packages unused.
+    #[test]
+    fn nest_cli_configuration_names_count_as_usage() {
+        let names = quoted_package_names(
+            "{\n  \"language\": \"ts\",\n  \"collection\": \"@nestjs/schematics\",\n  \"sourceRoot\": \"src\",\n  \"compilerOptions\": {\n    \"plugins\": [\"@nestjs/swagger\"]\n  }\n}\n",
+        );
+        assert!(names.contains("@nestjs/schematics"), "{names:?}");
+        assert!(names.contains("@nestjs/swagger"), "{names:?}");
+    }
+
+    #[test]
+    fn quoted_configuration_values_resolve_to_package_names() {
+        let names = quoted_package_names(
+            "export default {\n  preset: \"ts-jest\",\n  parser: '@typescript-eslint/parser',\n  reporters: [\"default\", \"jest-junit\"],\n  setupFiles: [\"<rootDir>/test/env.ts\"],\n  testRegex: \".*\\\\.spec\\\\.ts$\",\n}\n",
+        );
+        assert!(names.contains("ts-jest"), "{names:?}");
+        assert!(names.contains("@typescript-eslint/parser"), "{names:?}");
+        assert!(names.contains("jest-junit"), "{names:?}");
+        // Paths, globs, and regex sources are not package names.
+        assert!(
+            !names.iter().any(|name| name.contains("rootdir")),
+            "{names:?}"
+        );
+        assert!(!names.iter().any(|name| name.contains("spec")), "{names:?}");
+    }
 
     #[test]
     fn jsx_import_source_resolves_to_package_name() {

@@ -180,3 +180,35 @@ fn skips_parameterized_pg_query() {
         .iter()
         .any(|issue| issue.id.starts_with("raw-sql-unsafe:")));
 }
+
+#[test]
+fn skips_csrf_for_next_server_actions_guarded_by_the_framework_origin_check() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "lib/actions/tips.ts",
+        r#""use server";
+
+import { cookies } from "next/headers";
+import { createClient } from "@/lib/supabase/server";
+
+export async function submitTip(formData: FormData) {
+  const session = cookies().get("session-token");
+  if (!session) return { success: false };
+  const supabase = await createClient();
+  await supabase.from("tips").insert({ text: formData.get("text") });
+  return { success: true };
+}
+"#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("csrf-missing:")),
+        "Next.js rejects cross-origin Server Action invocations itself, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}

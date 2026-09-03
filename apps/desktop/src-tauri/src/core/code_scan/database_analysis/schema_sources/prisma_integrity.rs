@@ -7,6 +7,8 @@ pub(super) fn collect_prisma_schema_integrity_issues(artifact: &TextArtifact) ->
         return issues;
     }
 
+    let relation_type_names = prisma_relation_type_names(&artifact.content);
+
     for capture in PRISMA_MODEL_BLOCK_PATTERN.captures_iter(&artifact.content) {
         let Some(model_name) = capture.get(1).map(|value| value.as_str()) else {
             continue;
@@ -83,12 +85,14 @@ pub(super) fn collect_prisma_schema_integrity_issues(artifact: &TextArtifact) ->
                 continue;
             }
 
+            // Every Prisma scalar (`String`, `Int`, `DateTime`, `Json`) and
+            // every enum starts with a capital letter, so capitalization alone
+            // says nothing. Only a field whose type names another `model` or
+            // `type` block in this schema holds a relation; anything else is
+            // payload of the model's own, which a pivot table does not carry.
             if field_name.eq_ignore_ascii_case("id")
                 || is_join_like_metadata_column(field_name)
-                || field_type
-                    .chars()
-                    .next()
-                    .is_some_and(|character| character.is_ascii_uppercase())
+                || relation_type_names.contains(field_type.trim_end_matches('?'))
             {
                 continue;
             }
@@ -229,6 +233,31 @@ pub(super) fn collect_prisma_schema_integrity_issues(artifact: &TextArtifact) ->
     issues
 }
 
+/// Names of the `model` and `type` blocks the schema declares. A field typed
+/// with one of these holds a relation object; every other type is a Prisma
+/// scalar or an enum.
+fn prisma_relation_type_names(content: &str) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed
+            .strip_prefix("model ")
+            .or_else(|| trimmed.strip_prefix("type "))
+        else {
+            continue;
+        };
+        let name = rest
+            .trim_start()
+            .split(['{', ' ', '\t'])
+            .next()
+            .unwrap_or("");
+        if !name.is_empty() {
+            names.insert(name.to_string());
+        }
+    }
+    names
+}
+
 fn prisma_schema_has_composite_unique(body: &str, lookup_fields: &[String]) -> bool {
     let lookup_fields = lookup_fields
         .iter()
@@ -278,4 +307,44 @@ fn extract_bracket_fields(value: &str) -> Vec<String> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prisma_relation_type_names;
+
+    #[test]
+    fn only_model_and_type_blocks_name_relations() {
+        let schema = r#"
+datasource db {
+  provider = "postgresql"
+}
+
+enum EnvelopeStatus {
+  DRAFT
+}
+
+model Envelope {
+  id     String @id
+  status EnvelopeStatus
+}
+
+type Address {
+  city String
+}
+"#;
+        let names = prisma_relation_type_names(schema);
+        assert!(names.contains("Envelope"));
+        assert!(names.contains("Address"));
+        // Enums and Prisma scalars are payload, not relations.
+        assert!(!names.contains("EnvelopeStatus"));
+        assert!(!names.contains("String"));
+        assert!(!names.contains("DateTime"));
+    }
+
+    #[test]
+    fn a_declaration_without_a_space_before_the_brace_still_names_its_block() {
+        let names = prisma_relation_type_names("model TeamMember{\n  id String @id\n}\n");
+        assert!(names.contains("TeamMember"));
+    }
 }

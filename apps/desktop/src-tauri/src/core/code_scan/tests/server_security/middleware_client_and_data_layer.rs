@@ -339,3 +339,63 @@ fn supabase_browser_data_api_is_not_server_database_leakage() {
         .iter()
         .all(|issue| !issue.id.starts_with("client-db-access:")));
 }
+
+#[test]
+fn skips_sensitive_auth_when_a_named_admin_verifier_guards_the_action() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "lib/actions/price-reports.ts",
+        r#""use server";
+
+import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { verifyAdminRequest } from "@/lib/actions/admin-session";
+
+export async function acceptPriceReport(reportId: string) {
+  const authError = await verifyAdminRequest("[prices]");
+  if (authError) return { success: false, error: authError };
+  const admin = createAdminClient();
+  await admin.from("price_reports").update({ status: "approved" }).eq("id", reportId);
+  revalidatePath("/admin");
+  return { success: true };
+}
+"#,
+    );
+    // Negative control: the same admin write with no gate at all is still reported.
+    write_file(
+        temp.path(),
+        "lib/actions/unguarded.ts",
+        r#""use server";
+
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export async function purgeReport(reportId: string) {
+  const admin = createAdminClient();
+  await admin.from("price_reports").delete().eq("id", reportId);
+  return { success: true };
+}
+"#,
+    );
+
+    let report = audit_project(temp.path()).unwrap();
+    let ids = report.issues.iter().map(|i| &i.id).collect::<Vec<_>>();
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "sensitive-auth:lib/actions/price-reports.ts"),
+        "verifyAdminRequest( is the auth gate, got {:?}",
+        ids
+    );
+    assert!(
+        !ids.iter()
+            .any(|id| id.as_str() == "sensitive-authz:lib/actions/price-reports.ts"),
+        "an admin verifier is also the role decision, got {:?}",
+        ids
+    );
+    assert!(
+        ids.iter()
+            .any(|id| id.as_str() == "sensitive-auth:lib/actions/unguarded.ts"),
+        "negative control: an ungated admin write keeps the finding, got {:?}",
+        ids
+    );
+}

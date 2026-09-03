@@ -114,6 +114,10 @@ fn detects_missing_healthcheck_observability_and_migrations() {
         crate::checks::IssueConfidence::NeedsReview
     );
     assert_eq!(health.line, None);
+    assert_eq!(
+        health.relative_path, "package.json",
+        "a project-level finding anchors on the manifest, not on whichever route file walked first"
+    );
     assert!(health.description.contains("scanned routes"));
     let error_reporting = report
         .issues
@@ -1250,5 +1254,83 @@ fn sparse_markers_in_a_large_project_are_not_flagged_as_placeholder_density() {
             .iter()
             .map(|issue| &issue.id)
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn drupal_install_update_hooks_count_as_a_schema_change_workflow() {
+    let composer = r#"{ "name": "acme/site", "require": { "drupal/core-recommended": "^11.0", "drush/drush": "^13.0" } }"#;
+    let service = "<?php\nnamespace Drupal\\acme_core\\Service;\nclass Prices {\n  public function sync(): void {\n    $pdo = new PDO('mysql:host=db');\n    $pdo->query('SELECT 1');\n  }\n}\n";
+    let scraper = r#"{ "name": "scraper", "dependencies": { "mysql2": "^3.0.0" } }"#;
+
+    let with_hooks = TempDir::new().unwrap();
+    write_file(with_hooks.path(), "composer.json", composer);
+    write_file(
+        with_hooks.path(),
+        "web/modules/custom/acme_core/acme_core.install",
+        "<?php\nfunction acme_core_update_10001() {\n  \\Drupal::database()->schema()->addField('acme', 'sku', ['type' => 'varchar', 'length' => 64]);\n}\n",
+    );
+    write_file(
+        with_hooks.path(),
+        "web/modules/custom/acme_core/src/Service/Prices.php",
+        service,
+    );
+    write_file(with_hooks.path(), "scraper-service/package.json", scraper);
+    let report = audit_project(with_hooks.path()).unwrap();
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("migration-workflow-missing:")),
+        "hook_update_N in a first-party .install file is Drupal's schema workflow, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+
+    // Negative control: the same site without any install file still owes a workflow.
+    let without_hooks = TempDir::new().unwrap();
+    write_file(without_hooks.path(), "composer.json", composer);
+    write_file(
+        without_hooks.path(),
+        "web/modules/custom/acme_core/src/Service/Prices.php",
+        service,
+    );
+    write_file(
+        without_hooks.path(),
+        "scraper-service/package.json",
+        scraper,
+    );
+    let report = audit_project(without_hooks.path()).unwrap();
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("migration-workflow-missing:")),
+        "negative control lost the finding, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+
+    // Negative control: an .install file that only sets the module up declares
+    // no schema-change workflow, so the path alone must not satisfy the check.
+    let setup_only = TempDir::new().unwrap();
+    write_file(setup_only.path(), "composer.json", composer);
+    write_file(
+        setup_only.path(),
+        "web/modules/custom/acme_core/acme_core.install",
+        "<?php\nfunction acme_core_install() {\n  \\Drupal::state()->set('acme.ready', TRUE);\n}\n",
+    );
+    write_file(
+        setup_only.path(),
+        "web/modules/custom/acme_core/src/Service/Prices.php",
+        service,
+    );
+    write_file(setup_only.path(), "scraper-service/package.json", scraper);
+    let report = audit_project(setup_only.path()).unwrap();
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue.id.starts_with("migration-workflow-missing:")),
+        "an .install with no update hook is not a schema-change workflow, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
     );
 }

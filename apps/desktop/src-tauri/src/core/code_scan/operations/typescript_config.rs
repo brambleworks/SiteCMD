@@ -15,6 +15,26 @@ fn is_tsconfig_path(relative_path: &str) -> bool {
     name == "tsconfig.json" || (name.starts_with("tsconfig.") && name.ends_with(".json"))
 }
 
+/// Directory conventions that hold a repository's own integration suites and
+/// bundled demo applications. `is_test_like_path` and `is_example_like_path`
+/// do not know these names, and a relaxed tsconfig inside one configures the
+/// suite or the demo, not the type policy of the shipped build.
+fn is_suite_or_demo_tsconfig_path(relative_path: &str) -> bool {
+    let lower = format!("/{}", relative_path.replace('\\', "/").to_ascii_lowercase());
+    [
+        "/integration/",
+        "/integration-tests/",
+        "/integration_tests/",
+        "/example-apps/",
+        "/sample/",
+        "/samples/",
+        "/demo/",
+        "/demos/",
+    ]
+    .iter()
+    .any(|segment| lower.contains(segment))
+}
+
 /// Strip JSONC comments without treating comment markers inside strings as
 /// syntax. Replacing comment bytes with spaces preserves line numbers.
 fn strip_jsonc_comments(content: &str) -> String {
@@ -150,7 +170,10 @@ pub(super) fn collect_typescript_config_issues(
         // Demo/playground and fixture tsconfigs relax strict mode on purpose and
         // are not the user's production config.
         let path = Path::new(&file.relative_path);
-        if is_example_like_path(path) || is_test_like_path(path) {
+        if is_example_like_path(path)
+            || is_test_like_path(path)
+            || is_suite_or_demo_tsconfig_path(&file.relative_path)
+        {
             continue;
         }
         let Some(bytes) = read_project_file(file, TSCONFIG_MAX_BYTES) else {

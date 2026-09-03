@@ -1,101 +1,31 @@
+//! Cross-cutting quality and security patterns.
+//!
+//! Four cohesive groups live in their own submodules and are re-exported here,
+//! so every caller keeps using `patterns::*`: `markup` (raw-HTML sinks and
+//! sanitization), `ssrf` (server-side fetch destinations), `oauth_server`
+//! (authorization server versus client callback), and `queries` (list queries,
+//! pagination, and per-iteration lookups).
+
 use std::sync::LazyLock;
 
-pub(in crate::core::code_scan) static DANGEROUS_HTML_PATTERNS: LazyLock<Vec<regex::Regex>> =
+mod markup;
+mod oauth_server;
+mod queries;
+mod ssrf;
+
+pub(in crate::core::code_scan) use markup::*;
+pub(in crate::core::code_scan) use oauth_server::*;
+pub(in crate::core::code_scan) use queries::*;
+pub(in crate::core::code_scan) use ssrf::*;
+
+/// Column-zero function starts in JavaScript and TypeScript modules. Nested
+/// helpers are indented, so they never split a handler's own body.
+pub(in crate::core::code_scan) static JS_TOP_LEVEL_FUNCTION_START_PATTERN: LazyLock<regex::Regex> =
     LazyLock::new(|| {
-        vec![
-            regex::Regex::new(r"dangerouslySetInnerHTML").unwrap(),
-            regex::Regex::new(r"v-html").unwrap(),
-            // Flag only dynamic innerHTML assignments; static and empty values
-            // are not XSS evidence.
-            regex::Regex::new(r"innerHTML\s*=[^;]*\$\{").unwrap(),
-            regex::Regex::new(r"innerHTML\s*=[^;]*\+").unwrap(),
-            // `Markup(` with a word boundary so Drupal's safe wrappers
-            // (TranslatableMarkup, FormattableMarkup, PlaceholderMarkup, …)
-            // don't trip the check on every plugin metadata line.
-            regex::Regex::new(r"\bMarkup\(").unwrap(),
-            // PHP: a request superglobal reaching output directly - echo,
-            // print, the short echo tag, or Blade's raw-output braces.
-            // Escaped output also matches, but the sanitization patterns
-            // suppress the check for those files.
-            regex::Regex::new(
-                r"(?:\becho\b|\bprint\b|<\?=|\{!!)[^;]{0,160}\$_(?:GET|POST|REQUEST|COOKIE|SERVER)",
-            )
-            .expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
-        ]
-    });
-
-pub(in crate::core::code_scan) static JSX_INLINE_STYLE_PROP_PATTERN: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"style\s*=\s*\{\s*\{").unwrap());
-
-pub(in crate::core::code_scan) static SANITIZATION_PATTERNS: LazyLock<Vec<regex::Regex>> =
-    LazyLock::new(|| {
-        vec![
-            regex::Regex::new(r"DOMPurify").unwrap(),
-            regex::Regex::new(r"sanitizeHtml").unwrap(),
-            regex::Regex::new(r"\bsanitize\b").unwrap(),
-            regex::Regex::new(r"\bbleach\b").unwrap(),
-            regex::Regex::new(r"esc_html").unwrap(),
-            regex::Regex::new(r"\bescapeHtml\b").unwrap(),
-            regex::Regex::new(r"\bescape_html\b").unwrap(),
-            // Drupal-specific sanitization helpers
-            regex::Regex::new(r"Html::escape\b").unwrap(),
-            regex::Regex::new(r"Html::format\b").unwrap(),
-            regex::Regex::new(r"Xss::filter\b").unwrap(),
-            regex::Regex::new(r"Xss::filterAdmin\b").unwrap(),
-            // PHP native escaping and the WordPress esc_*/wp_kses/sanitize_*
-            // families (esc_html is already covered above).
-            regex::Regex::new(r"\bhtmlspecialchars\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r"\bhtmlentities\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r"\besc_attr").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r"\besc_url").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r"\bwp_kses").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r"\bsanitize_[a-z_]+\s*\(").expect("static PHP pattern regex"), // allow-expect: compile-time literal regex
-        ]
-    });
-
-pub(in crate::core::code_scan) static SSRF_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(
-    || {
-        vec![
-            regex::Regex::new(
-                r"fetch\s*\(\s*(?:url|body\.url|req\.body\.url|requestUrl|targetUrl)",
-            )
-            .unwrap(),
-            regex::Regex::new(
-                r"axios\.(get|post)\s*\(\s*(?:url|body\.url|req\.body\.url|requestUrl|targetUrl)",
-            )
-            .unwrap(),
-            regex::Regex::new(
-                r#"requests\.(get|post)\s*\(\s*(?:url|data\[['"]url['"]\]|target_url)"#,
-            )
-            .unwrap(),
-            // Direct request-accessor arguments - fetch(req.query.url) and
-            // requests.get(request.args["url"]) produced no finding when
-            // only fixed variable names were matched.
-            regex::Regex::new(r"fetch\s*\(\s*req(?:uest)?\.(?:query|body|params)\.[A-Za-z0-9_]+")
-                .expect("static SSRF pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(
-                r"axios\.(?:get|post)\s*\(\s*req(?:uest)?\.(?:query|body|params)\.[A-Za-z0-9_]+",
-            )
-            .expect("static SSRF pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r"fetch\s*\(\s*searchParams\.get\s*\(")
-                .expect("static SSRF pattern regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(
-                r"requests\.(?:get|post)\s*\(\s*request\.(?:args|form|values|GET|POST)(?:\.get\s*\(|\s*\[)",
-            )
-            .expect("static SSRF pattern regex"), // allow-expect: compile-time literal regex
-        ]
-    },
-);
-
-pub(in crate::core::code_scan) static SSRF_GUARD_PATTERNS: LazyLock<Vec<regex::Regex>> =
-    LazyLock::new(|| {
-        vec![
-            regex::Regex::new(r"allowlist").unwrap(),
-            regex::Regex::new(r"hostname").unwrap(),
-            regex::Regex::new(r"host_whitelist").unwrap(),
-            regex::Regex::new(r"new URL").unwrap(),
-            regex::Regex::new(r"urlparse").unwrap(),
-        ]
+        regex::Regex::new(
+        r"(?m)^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b|^(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\b|\(|[A-Za-z_$][\w$]*\s*=>)",
+    )
+    .unwrap()
     });
 
 pub(in crate::core::code_scan) static HARDCODED_SECRET_PATTERNS: LazyLock<Vec<regex::Regex>> =
@@ -131,6 +61,17 @@ pub(in crate::core::code_scan) static HARDCODED_SECRET_PATTERNS: LazyLock<Vec<re
             regex::Regex::new(r#"("|')github_pat_[A-Za-z0-9_]{22,}("|')"#)
                 .expect("static GitHub fine-grained PAT regex"), // allow-expect: compile-time literal regex
         ]
+    });
+
+/// A password-hash call opened immediately before the position being tested.
+///
+/// Anchored at the end of the text handed to it, so the caller passes
+/// everything in front of a credential literal: `bcrypt.hash("password123",
+/// 10)` and a bare `hash(` helper both match, while `myHash(` does not.
+pub(in crate::core::code_scan) static HASH_CALL_ARGUMENT_PREFIX_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\bhash(?:Sync|Password)?\s*\(\s*$")
+            .expect("static hash-call prefix regex") // allow-expect: compile-time literal regex
     });
 
 /// Weak placeholder credentials reported separately from exposed secrets.
@@ -245,7 +186,9 @@ pub(in crate::core::code_scan) static CLIENT_ENV_PUBLIC_ALLOWLIST_PATTERNS: Lazy
         // public half of the pair, embedded in the page by design; and web-map
         // keys (Google Maps, Mapbox) are public, referrer-restricted client keys:
         // NEXT_PUBLIC_HCAPTCHA_SITE_KEY, NEXT_PUBLIC_GOOGLE_MAPS_KEY, etc.
-        regex::Regex::new(r"(?i)\b(?:NEXT_PUBLIC|VITE|REACT_APP|EXPO_PUBLIC)_[A-Z0-9_]*(?:SITE_KEY|MAPS[A-Z0-9_]*KEY|MAPBOX[A-Z0-9_]*)\b")
+        // Turnstile's own docs spell the name `SITEKEY` without a separator,
+        // so the underscore is optional.
+        regex::Regex::new(r"(?i)\b(?:NEXT_PUBLIC|VITE|REACT_APP|EXPO_PUBLIC)_[A-Z0-9_]*(?:SITE_?KEY|MAPS[A-Z0-9_]*KEY|MAPBOX[A-Z0-9_]*)\b")
             .expect("static site/map key allowlist regex"), // allow-expect: compile-time literal regex
     ]
 });
@@ -293,49 +236,6 @@ pub(in crate::core::code_scan) static LOCALSTORAGE_AUTH_PATTERNS: LazyLock<Vec<r
     ]
     });
 
-// Require structural pagination syntax; bare words appear in unrelated code.
-pub(in crate::core::code_scan) static PAGINATION_GUARD_PATTERNS: LazyLock<Vec<regex::Regex>> =
-    LazyLock::new(|| {
-        vec![
-            // Object-literal keys with a value: `take: 50`, `limit: 100`
-            regex::Regex::new(r"(?i)\btake\s*:\s*\d+").unwrap(),
-            regex::Regex::new(r"(?i)\blimit\s*:\s*\d+").unwrap(),
-            regex::Regex::new(r"(?i)\boffset\s*:\s*\d+").unwrap(),
-            regex::Regex::new(r"(?i)\bpageSize\s*:\s*\d+").unwrap(),
-            regex::Regex::new(r"(?i)\bpage_size\s*:\s*\d+").unwrap(),
-            regex::Regex::new(r"(?i)\bperPage\s*:\s*\d+").unwrap(),
-            regex::Regex::new(r"(?i)\bper_page\s*:\s*\d+").unwrap(),
-            regex::Regex::new(
-                r"(?i)\b(?:take|limit|offset|pageSize|page_size|perPage|per_page)\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*",
-            )
-            .expect("static variable pagination regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(
-                r"(?i)[{,]\s*(?:take|limit|offset|pageSize|page_size|perPage|per_page|cursor)\s*[,}]",
-            )
-            .expect("static shorthand pagination regex"), // allow-expect: compile-time literal regex
-            regex::Regex::new(r"(?i)\bLIMIT\s+\d").unwrap(),
-            // Explicit pagination method calls
-            regex::Regex::new(r"(?i)\bpaginate\s*\(").unwrap(),
-            regex::Regex::new(r"(?i)\.cursor\s*\(").unwrap(),
-            // Cursor as an object-literal key (Prisma-style)
-            regex::Regex::new(r"(?i)\bcursor\s*:\s*\{").expect("static cursor-key regex"), // allow-expect: compile-time literal regex
-        ]
-    });
-
-pub(in crate::core::code_scan) static LIST_QUERY_PATTERNS: LazyLock<Vec<regex::Regex>> =
-    LazyLock::new(|| {
-        vec![
-            regex::Regex::new(r"\.findMany\s*\(").unwrap(),
-            regex::Regex::new(r"\.find\s*\(\s*\{").unwrap(),
-            regex::Regex::new(r"\.select\s*\(\s*\)").unwrap(),
-            regex::Regex::new(r"(?i)SELECT\s+.+\s+FROM\s+").unwrap(),
-            regex::Regex::new(r"\.query\.").unwrap(),
-            regex::Regex::new(r"\.getAll\s*\(").unwrap(),
-            regex::Regex::new(r"\.list\s*\(").unwrap(),
-            regex::Regex::new(r"\.scan\s*\(").unwrap(),
-        ]
-    });
-
 pub(in crate::core::code_scan) static PASSWORD_STORE_PATTERNS: LazyLock<Vec<regex::Regex>> =
     LazyLock::new(|| {
         // Limit plaintext-password detection to ORM or SQL writes; ordinary form
@@ -363,44 +263,47 @@ pub(in crate::core::code_scan) static PASSWORD_HASH_PATTERNS: LazyLock<Vec<regex
             // passwords this way), not plaintext.
             regex::Regex::new(r"(?i)hashed[_]?password").unwrap(),
             regex::Regex::new(r"(?i)\.hash\s*\(").unwrap(),
+            // A bare `hash(` helper imported into the file: `password:
+            // hash(user.password)` stores a digest, not the plaintext.
+            regex::Regex::new(r"(?i)password\s*:\s*(?:await\s+)?hash\w*\s*\(")
+                .expect("static bare hash-call regex"), // allow-expect: compile-time literal regex
             regex::Regex::new(r"(?i)hashSync\s*\(").unwrap(),
             regex::Regex::new(r"(?i)make_password\s*\(").unwrap(),
             regex::Regex::new(r"(?i)generate_password_hash\s*\(").unwrap(),
         ]
     });
 
-pub(in crate::core::code_scan) static NPLUS1_ORM_IN_LOOP_PATTERNS: LazyLock<Vec<regex::Regex>> =
-    LazyLock::new(|| {
-        vec![
-            // Bare `.get` and `.query` are intentionally not lookup
-            // signals: Map/HashMap reads and query-cache access inside loops
-            // are normal in-memory work. Generic names only count when the
-            // receiver itself is database-shaped.
-            regex::Regex::new(
-                r"(?s)for\s*\([^)]*\)\s*\{[^}]{0,200}(?:\.(?:findUnique|findFirst|findOne|findById|findByPk)|\b(?:db|database|repository|repo)\.(?:get|query))\s*\(",
-            )
-            .unwrap(),
-            regex::Regex::new(
-                r"(?s)\.forEach\s*\([^)]*=>\s*\{[^}]{0,200}(?:\.(?:findUnique|findFirst|findOne|findById|findByPk)|\b(?:db|database|repository|repo)\.(?:get|query))\s*\(",
-            )
-            .unwrap(),
-            regex::Regex::new(
-                r"(?s)\.map\s*\([^)]*=>\s*\{[^}]{0,200}(?:\.(?:findUnique|findFirst|findOne|findById|findByPk)|\b(?:db|database|repository|repo)\.(?:get|query))\s*\(",
-            )
-            .unwrap(),
-            regex::Regex::new(
-                r"(?s)for\s+\w+\s+in\s+[^:]+:[^}]{0,200}(?:\b[A-Za-z_][A-Za-z0-9_]*\.objects\.(?:get|filter)|\b(?:session|db)\.query)\s*\(",
-            )
-            .unwrap(),
-        ]
-    });
-
 #[cfg(test)]
 mod tests {
     use super::{
-        HARDCODED_SECRET_PATTERNS, PASSWORD_HASH_PATTERNS, PASSWORD_STORE_PATTERNS,
-        PLACEHOLDER_PATTERNS,
+        CLIENT_ENV_PUBLIC_ALLOWLIST_PATTERNS, HARDCODED_SECRET_PATTERNS, PASSWORD_HASH_PATTERNS,
+        PASSWORD_STORE_PATTERNS, PLACEHOLDER_PATTERNS,
     };
+
+    fn any_match(patterns: &[regex::Regex], source: &str) -> bool {
+        patterns.iter().any(|pattern| pattern.is_match(source))
+    }
+
+    #[test]
+    fn captcha_site_keys_are_public_with_or_without_a_separator() {
+        assert!(any_match(
+            &CLIENT_ENV_PUBLIC_ALLOWLIST_PATTERNS,
+            "NEXT_PUBLIC_CLOUDFLARE_SITEKEY"
+        ));
+        assert!(any_match(
+            &CLIENT_ENV_PUBLIC_ALLOWLIST_PATTERNS,
+            "NEXT_PUBLIC_TURNSTILE_SITEKEY"
+        ));
+        assert!(any_match(
+            &CLIENT_ENV_PUBLIC_ALLOWLIST_PATTERNS,
+            "NEXT_PUBLIC_HCAPTCHA_SITE_KEY"
+        ));
+        // A real client secret is still not on the allowlist.
+        assert!(!any_match(
+            &CLIENT_ENV_PUBLIC_ALLOWLIST_PATTERNS,
+            "NEXT_PUBLIC_STRIPE_SECRET_KEY"
+        ));
+    }
 
     #[test]
     fn placeholder_markers_require_word_boundaries() {

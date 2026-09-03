@@ -212,11 +212,16 @@ pub(super) fn collect_service_security_issues(
 
     // Laravel authorization often lives in route middleware, so do not infer its
     // absence from a protected controller. WordPress capability checks stay in-file.
+    // A webhook authorizes the provider, not a user, and an ownership or tenant
+    // predicate in the query is itself the authorization decision.
     if route_like
         && sensitive_handler
         && has_identity_auth
         && !has_authz
         && !middleware_auth_protected
+        && !is_webhook
+        && !ctx.signals.has_auth_owned_id_scope
+        && !ctx.signals.has_tenant_scope_query
     {
         issues.push(build_issue(
             "sensitive-authz",
@@ -284,7 +289,15 @@ pub(super) fn collect_service_security_issues(
         ));
     }
 
-    if route_like && touches_db && db_write_count >= 2 && !has_transaction && !wp_hook_handler {
+    // A repository module's writes belong to separate methods with separate
+    // callers, so two of them are never one unatomic operation.
+    if route_like
+        && touches_db
+        && db_write_count >= 2
+        && !has_transaction
+        && !wp_hook_handler
+        && !is_repository_module(&file.relative_path)
+    {
         issues.push(build_issue(
             "multi-write-no-transaction",
             "data",
@@ -294,8 +307,13 @@ pub(super) fn collect_service_security_issues(
             file,
             first_match_line(content, &DB_WRITE_PATTERNS),
             Some(format!(
-                "Detected {} write-like database-operation matches in this route file, but no recognized local transaction pattern. Handler boundaries and called-service transaction behavior were not resolved.",
-                db_write_count
+                "Detected {} {} with no recognized local transaction pattern. Called-service transaction behavior was not resolved.",
+                db_write_count,
+                if is_js_source_path(&file.relative_path) {
+                    "awaited write-like database operations inside one handler body"
+                } else {
+                    "write-like database-operation matches in this route file"
+                }
             )),
             Some("First confirm which writes share an atomic invariant. If they do, execute them through the database's supported transaction boundary at the service/repository layer. For unavoidable external effects, use persisted workflow/outbox state and idempotency rather than pretending a database transaction spans the network.".into()),
             Some("Against a disposable non-production database, inject a controlled failure before and after each related write and run two concurrent attempts. Verify database-only changes roll back together or the persisted workflow resumes safely without duplicate external effects.".into()),
@@ -331,7 +349,7 @@ pub(super) fn collect_service_security_issues(
             "Static analysis matched a request accessor at a server-side HTTP-fetch boundary and found no recognized local destination policy. The match does not prove attacker control, reachability, or the absence of an imported/network-layer guard. If a caller can choose the effective destination, the server may be induced to reach internal services, cloud metadata, or trusted network locations unavailable to that caller.",
             file,
             first_match_line(content, &SSRF_PATTERNS),
-            Some("A request-derived expression was matched at a server-side fetch call, but no recognized local allowlist or URL policy was found. Full value flow, DNS resolution, redirects, proxies, and egress controls were not evaluated.".into()),
+            Some("A fetch destination bound to a request value was matched: either a direct request accessor at the call, or a local `url`/`requestUrl`/`targetUrl` bound to a request in this file - assigned from a request accessor, from a parsed body such as `req.json()`, `req.text()` or `req.formData()`, or destructured out of one. No recognized local allowlist or URL policy was found, and full value flow, DNS resolution, redirects, proxies, and egress controls were not evaluated.".into()),
             Some("Prefer a server-owned destination allowlist. Parse once with a standards-compliant URL library; allow only required schemes and ports; reject credentials and private, loopback, link-local, multicast, reserved, and otherwise disallowed resolved addresses for both IPv4 and IPv6. Disable redirects or reapply the complete policy, including DNS/IP checks, on every hop; bound time and response size.".into()),
             Some("In an isolated test network with instrumented mock destinations, exercise allowed hosts plus loopback, private/link-local IPv4 and IPv6, alternate numeric forms, credentials, DNS changes, and redirects to disallowed addresses. Confirm every hop is revalidated and no request reaches the blocked fixtures.".into()),
         ));
@@ -352,7 +370,12 @@ pub(super) fn collect_service_security_issues(
         ));
     }
 
-    if needs_outbound_guards && likely_public_endpoint && !has_timeout {
+    // A route with no recognized auth gate is caller-facing whether or not its
+    // name carries an abuse-sensitive word. A read-only GET that proxies an
+    // upstream API needs a deadline just as much as a POST does, and pinning
+    // that on a risk word made the verdict turn on wording in a third-party URL.
+    let unguarded_outbound_route = likely_public_endpoint || !has_auth;
+    if needs_outbound_guards && unguarded_outbound_route && !has_timeout {
         issues.push(build_issue(
             "external-call-timeout",
             "operations",
@@ -367,7 +390,7 @@ pub(super) fn collect_service_security_issues(
         ));
     }
 
-    if needs_outbound_guards && likely_public_endpoint && !has_retry_guard {
+    if needs_outbound_guards && unguarded_outbound_route && !has_retry_guard {
         issues.push(build_issue(
             "external-call-retry",
             "operations",

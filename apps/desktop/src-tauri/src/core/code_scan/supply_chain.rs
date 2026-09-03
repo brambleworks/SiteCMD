@@ -19,6 +19,11 @@ mod lockfile_integrity;
 use lockfile_integrity::collect_lockfile_integrity_issues;
 mod usage_evidence;
 use usage_evidence::collect_extra_usage_evidence;
+mod resolution;
+use resolution::{
+    collect_base_url_prefixes, collect_path_alias_prefixes, has_lockfile_in_scope,
+    importer_is_typescript, is_framework_provided, types_package_name,
+};
 
 pub(super) fn analyze_supply_chain(
     root: &Path,
@@ -36,8 +41,10 @@ pub(super) fn analyze_supply_chain(
         .filter_map(|manifest| manifest.package_name.clone())
         .collect::<HashSet<_>>();
     // Treat tsconfig path aliases as internal imports, not undeclared npm
-    // dependencies.
+    // dependencies. `baseUrl` roots are kept separate because they only apply
+    // to the files their own config governs.
     let path_alias_prefixes = collect_path_alias_prefixes(project_files);
+    let base_url_prefixes = collect_base_url_prefixes(project_files);
     let package_refs = collect_js_package_refs(files);
     let imported_packages = package_refs
         .iter()
@@ -61,16 +68,28 @@ pub(super) fn analyze_supply_chain(
     for package_ref in package_refs {
         let framework_provided =
             is_framework_provided(&package_ref.package_name, &declared_dependencies);
-        let alias_internal = path_alias_prefixes.iter().any(|prefix| {
+        let matches_prefix = |prefix: &String| {
             package_ref.package_name == *prefix
                 || package_ref
                     .package_name
                     .starts_with(&format!("{}/", prefix))
-        });
+        };
+        let alias_internal = path_alias_prefixes.iter().any(matches_prefix)
+            || base_url_prefixes.iter().any(|(scope, prefixes)| {
+                package_ref.relative_path.starts_with(scope.as_str())
+                    && prefixes.iter().any(matches_prefix)
+            });
+        // A TypeScript file can import a package that ships no runtime module
+        // of its own, resolving the specifier entirely through its
+        // DefinitelyTyped declarations.
+        let types_declared = importer_is_typescript(&package_ref.relative_path)
+            && types_package_name(&package_ref.package_name)
+                .is_some_and(|types_name| declared_dependencies.contains(&types_name));
         let declared = declared_dependencies.contains(&package_ref.package_name)
             || local_package_names.contains(&package_ref.package_name)
             || framework_provided
-            || alias_internal;
+            || alias_internal
+            || types_declared;
 
         if !declared {
             let id = format!(
@@ -79,9 +98,10 @@ pub(super) fn analyze_supply_chain(
                 sanitize_identifier(&package_ref.package_name),
             );
             if seen_ids.insert(id.clone()) {
-                // Graded by the shared confidence policy (NeedsReview): import
-                // resolution is a heuristic with a documented false-positive
-                // history (path aliases, framework-provided namespaces).
+                // Graded by the shared confidence policy: import resolution is
+                // a heuristic with a documented false-positive history (path
+                // aliases, framework-provided namespaces, resolvers the scan
+                // does not model).
                 let (confidence, confidence_reason) =
                     crate::core::confidence_policy::code_issue_confidence("undeclared-package");
                 issues.push(CodeIssue {
@@ -144,18 +164,33 @@ pub(super) fn analyze_supply_chain(
         }
     }
 
+    // Workspace membership is read once per candidate workspace root; several
+    // manifests share the same ancestors.
+    let mut workspace_members: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+
     for manifest in manifests {
         let manifest_dir = manifest.absolute_path.parent().unwrap_or(root);
         let resolved_registry_hosts = collect_lockfile_registry_hosts(manifest_dir);
-        let has_supported_lockfile = has_lockfile_in_scope(manifest_dir, root);
-        let locked_packages = crate::updates::npm::parse(manifest_dir)
-            .into_iter()
-            .map(|package| package.name.to_ascii_lowercase())
-            .collect::<HashSet<_>>();
+        let has_supported_lockfile =
+            has_lockfile_in_scope(manifest_dir, root, &mut workspace_members);
         let external_declared_dependencies = manifest
             .dependencies
             .iter()
-            .filter(|dependency| !manifest.local_dependencies.contains(*dependency))
+            .filter(|dependency| {
+                // npm workspaces let a member reference a sibling with a bare
+                // `"*"`, which carries no `workspace:`/`link:` marker but still
+                // resolves to a scanned local package.
+                !manifest.local_dependencies.contains(*dependency)
+                    && !local_package_names.contains(*dependency)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        // Peer and optional entries are declared but not installed by this
+        // package: the consuming application owns a peer install, and an
+        // optional one may legitimately be absent.
+        let external_installed_dependencies = external_declared_dependencies
+            .iter()
+            .filter(|dependency| manifest.installed_dependencies.contains(*dependency))
             .cloned()
             .collect::<Vec<_>>();
 
@@ -197,7 +232,18 @@ pub(super) fn analyze_supply_chain(
             }
         }
 
-        if !external_declared_dependencies.is_empty() && !has_supported_lockfile {
+        // Sample, example, and fixture apps are teaching material rather than
+        // the project's shipped dependencies, and they are installed on their
+        // own terms. `unbounded-dependency-range` skips the same population.
+        let manifest_is_example_like = {
+            let path = Path::new(&manifest.relative_path);
+            is_example_like_path(path) || is_test_like_path(path)
+        };
+
+        if !external_installed_dependencies.is_empty()
+            && !has_supported_lockfile
+            && !manifest_is_example_like
+        {
             let id = format!("lockfile-missing:{}", manifest.relative_path);
             if seen_ids.insert(id.clone()) {
                 issues.push(CodeIssue {
@@ -259,8 +305,17 @@ pub(super) fn analyze_supply_chain(
             }
         }
 
-        if has_supported_lockfile && !locked_packages.is_empty() {
-            for dependency in &external_declared_dependencies {
+        // Names the in-scope lockfile resolves for this manifest. An empty set
+        // means the parser could not read the lockfile, which is a parser
+        // limitation rather than evidence of drift.
+        let locked_packages = if has_supported_lockfile {
+            crate::updates::npm::resolved_lockfile_names(manifest_dir)
+        } else {
+            HashSet::new()
+        };
+
+        if !locked_packages.is_empty() {
+            for dependency in &external_installed_dependencies {
                 if locked_packages.contains(dependency) {
                     continue;
                 }
@@ -300,6 +355,15 @@ pub(super) fn analyze_supply_chain(
                 let Some(resolved_host) = resolved_registry_hosts.get(dependency) else {
                     continue;
                 };
+                // A Git or URL spec names its own source; the direct-url
+                // finding above already reviews it.
+                if manifest
+                    .dependency_specs
+                    .get(dependency)
+                    .is_some_and(|spec| dependency_spec_uses_remote_url(spec))
+                {
+                    continue;
+                }
                 let allowed_hosts =
                     allowed_registry_hosts_for_dependency(dependency, &registry_config);
                 if allowed_hosts.contains(resolved_host) {
@@ -343,17 +407,40 @@ pub(super) fn analyze_supply_chain(
             // source files never import them.
             let script_referenced = collect_script_referenced_packages(
                 &manifest.content,
-                &external_declared_dependencies,
+                &external_installed_dependencies,
             );
 
-            for dependency in &external_declared_dependencies {
-                if imported_packages.contains(dependency)
-                    || script_referenced.contains(dependency)
-                    || should_ignore_unused_dependency(dependency)
-                    || suspicious_package_match(dependency).is_some()
-                    || extra_usage
-                        .get_or_insert_with(|| collect_extra_usage_evidence(project_files))
-                        .contains(dependency)
+            let used = external_installed_dependencies
+                .iter()
+                .filter(|dependency| {
+                    imported_packages.contains(*dependency)
+                        || script_referenced.contains(*dependency)
+                        || should_ignore_unused_dependency(dependency)
+                        || suspicious_package_match(dependency).is_some()
+                        || extra_usage
+                            .get_or_insert_with(|| collect_extra_usage_evidence(project_files))
+                            .contains(*dependency)
+                })
+                .cloned()
+                .collect::<HashSet<_>>();
+            // A declared package that satisfies a used package's peer
+            // requirement is used through that package. Read the lockfile only
+            // once an unused candidate actually appears.
+            let mut peer_required: Option<HashSet<String>> = None;
+
+            for dependency in &external_installed_dependencies {
+                if used.contains(dependency) {
+                    continue;
+                }
+                if peer_required
+                    .get_or_insert_with(|| {
+                        collect_lockfile_peer_dependencies(manifest_dir)
+                            .into_iter()
+                            .filter(|(host, _)| used.contains(host))
+                            .flat_map(|(_, peers)| peers)
+                            .collect::<HashSet<_>>()
+                    })
+                    .contains(dependency)
                 {
                     continue;
                 }
@@ -363,10 +450,10 @@ pub(super) fn analyze_supply_chain(
                     sanitize_identifier(dependency),
                 );
                 if seen_ids.insert(id.clone()) {
-                    // Graded by the shared confidence policy. The expanded
-                    // source/config/script inventory makes this a strong lead,
-                    // while the confidence reason preserves dynamic-tooling
-                    // caveats.
+                    // Graded by the shared confidence policy. The search covers
+                    // source, tests, mocks, fixtures, examples, configuration,
+                    // and package scripts, but "unused" stays an inference:
+                    // dynamic and external tooling loads packages by name.
                     let (confidence, confidence_reason) =
                         crate::core::confidence_policy::code_issue_confidence("unused-dependency");
                     issues.push(CodeIssue {
@@ -381,7 +468,7 @@ pub(super) fn analyze_supply_chain(
                         line: find_line(&manifest.content, dependency),
                         source_excerpt: excerpt_for_line(&manifest.content, find_line(&manifest.content, dependency)),
                         evidence: Some(redact_evidence(format!(
-                            "Dependency '{}' was declared, but no matching import was found in JavaScript or TypeScript source files.",
+                            "Dependency '{}' was declared, but nothing matched it in the scanned JavaScript, TypeScript, component, and stylesheet sources (tests, mocks, fixtures, and examples included), the quoted values of the tool configuration files that were read, this package.json's scripts, or the lockfile's peer requirements.",
                             dependency
                         ))),
                         why_now: Some("A truly unused installed package adds maintenance and install-time supply-chain surface, but configuration-only, plugin, CLI, stylesheet, generated, or runtime-loaded usage may not appear as a source import.".into()),
@@ -442,292 +529,9 @@ pub(super) fn analyze_supply_chain(
     collect_npmrc_token_issues(&mut issues, project_files);
     collect_dockerfile_pinning_issues(&mut issues, project_files);
     collect_pipe_to_shell_issues(&mut issues, project_files, manifests);
-    collect_unbounded_dependency_issues(&mut issues, manifests);
+    collect_unbounded_dependency_issues(&mut issues, manifests, &local_package_names);
     collect_release_age_issues(&mut issues, project_files, manifests);
     collect_lockfile_integrity_issues(&mut issues, project_files);
 
     issues
-}
-
-/// Whether a declared framework provides an imported module namespace.
-///
-/// Framework-owned namespaces are not declared as separate app dependencies.
-fn is_framework_provided(package: &str, declared: &HashSet<String>) -> bool {
-    let declares = |name: &str| declared.contains(name);
-    if (declares("ember-source") || declares("ember-cli"))
-        && (package.starts_with("@ember/") || package.starts_with("@glimmer/"))
-    {
-        return true;
-    }
-    if declares("vue") && package.starts_with("@vue/") {
-        return true;
-    }
-    if declares("nuxt") && (package == "vue" || package.starts_with("@vue/")) {
-        return true;
-    }
-    false
-}
-
-/// Find a supported lockfile between a manifest and the scanned project root.
-/// This recognizes workspace-root lockfiles without escaping scan scope.
-fn has_lockfile_in_scope(manifest_dir: &std::path::Path, root: &std::path::Path) -> bool {
-    const MAX_DEPTH: usize = 8;
-    let mut current = manifest_dir.to_path_buf();
-    for _ in 0..MAX_DEPTH {
-        if SUPPORTED_NPM_LOCKFILES
-            .iter()
-            .any(|name| current.join(name).exists())
-        {
-            return true;
-        }
-        // Stop after checking the repo root or the scan root; do not look higher.
-        if current.join(".git").exists() || current == root {
-            return false;
-        }
-        match current.parent() {
-            Some(parent) => current = parent.to_path_buf(),
-            None => return false,
-        }
-    }
-    false
-}
-
-/// Collect import prefixes provided by path aliases, Deno import maps, and
-/// bundler aliases rather than `package.json` dependencies.
-fn collect_path_alias_prefixes(project_files: &[ProjectFile]) -> std::collections::HashSet<String> {
-    const MAX_CONFIG_BYTES: u64 = 256 * 1024;
-    let mut prefixes = std::collections::HashSet::new();
-    for file in project_files {
-        let name = file
-            .relative_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(file.relative_path.as_str());
-        let is_ts_config = (name.starts_with("tsconfig") || name.starts_with("jsconfig"))
-            && name.ends_with(".json");
-        let is_deno_config = name == "deno.json" || name == "deno.jsonc";
-        // Bundler configs declare `resolve.alias` mapping specifiers to local
-        // files (e.g. Vite/Webpack/Rollup/Vitest/Next).
-        let is_bundler_config = matches!(
-            name.split('.').next(),
-            Some("vite" | "vitest" | "webpack" | "rollup" | "next" | "rspack" | "rsbuild")
-        ) && name.contains(".config.");
-        if !is_ts_config && !is_deno_config && !is_bundler_config {
-            continue;
-        }
-        let Some(bytes) = read_project_file(file, MAX_CONFIG_BYTES) else {
-            continue;
-        };
-        let Ok(content) = String::from_utf8(bytes) else {
-            continue;
-        };
-        for line in content.lines() {
-            let prefix = if is_deno_config {
-                deno_import_prefix_from_line(line)
-            } else if is_bundler_config {
-                bundler_alias_prefix_from_line(line)
-            } else {
-                path_alias_prefix_from_line(line)
-            };
-            if let Some(prefix) = prefix {
-                prefixes.insert(prefix);
-            }
-        }
-    }
-    prefixes
-}
-
-/// Extract the first import segment from a `resolve.alias` entry whose value
-/// references a local filesystem path.
-fn bundler_alias_prefix_from_line(line: &str) -> Option<String> {
-    let line = line.trim();
-    let rest = line.strip_prefix('"').or_else(|| line.strip_prefix('\''))?;
-    let quote = if line.starts_with('"') { '"' } else { '\'' };
-    let end = rest.find(quote)?;
-    let key = &rest[..end];
-    let after = rest[end + 1..].trim_start();
-    let after = after.strip_prefix(':')?.trim_start();
-    let lower = after.to_ascii_lowercase();
-    let references_local_path = lower.starts_with("path.resolve")
-        || lower.starts_with("path.join")
-        || lower.starts_with("__dirname")
-        || lower.starts_with("fileurltopath")
-        || lower.starts_with("new url(")
-        || lower.starts_with("resolve(")
-        || lower.starts_with("\"./")
-        || lower.starts_with("\"../")
-        || lower.starts_with("'./")
-        || lower.starts_with("'../");
-    if !references_local_path {
-        return None;
-    }
-    // Reduce the key to its first segment, mirroring import normalization:
-    // `@scope/name` keeps two segments, otherwise just the first path segment.
-    let prefix = if let Some(scoped) = key.strip_prefix('@') {
-        let mut segments = scoped.split('/');
-        let scope = segments.next()?;
-        match segments.next() {
-            Some(pkg) if !pkg.is_empty() => format!("@{}/{}", scope, pkg),
-            _ => format!("@{}", scope),
-        }
-    } else {
-        key.split('/').next()?.to_string()
-    };
-    let prefix = prefix.trim_end_matches('*').trim_end_matches('/');
-    if prefix.is_empty() {
-        return None;
-    }
-    Some(prefix.to_ascii_lowercase())
-}
-
-/// Extract a Deno import-map alias from a module-specifier entry.
-fn deno_import_prefix_from_line(line: &str) -> Option<String> {
-    let line = line.trim();
-    let rest = line.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    let key = &rest[..end];
-    let after = rest[end + 1..].trim_start();
-    let after = after.strip_prefix(':')?.trim_start();
-    let value = after.strip_prefix('"')?;
-    let value = &value[..value.find('"')?];
-    let is_specifier = ["jsr:", "npm:", "https://", "http://", "./", "../", "node:"]
-        .iter()
-        .any(|scheme| value.starts_with(scheme));
-    if !is_specifier {
-        return None;
-    }
-    let prefix = key.trim_end_matches('/');
-    if prefix.is_empty() {
-        return None;
-    }
-    Some(prefix.to_ascii_lowercase())
-}
-
-/// Extract an alias-marked `compilerOptions.paths` key without its trailing glob.
-fn path_alias_prefix_from_line(line: &str) -> Option<String> {
-    let line = line.trim();
-    let rest = line.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    let key = &rest[..end];
-    let after = rest[end + 1..].trim_start();
-    let after = after.strip_prefix(':')?.trim_start();
-    if !after.starts_with('[') {
-        return None;
-    }
-    let looks_like_alias =
-        key.contains('*') || key.contains('/') || key.starts_with('@') || key.starts_with('~');
-    if !looks_like_alias {
-        return None;
-    }
-    let prefix = key.trim_end_matches('*').trim_end_matches('/');
-    if prefix.is_empty() {
-        return None;
-    }
-    Some(prefix.to_ascii_lowercase())
-}
-
-#[cfg(test)]
-mod path_alias_tests {
-    use super::{is_framework_provided, path_alias_prefix_from_line};
-    use std::collections::HashSet;
-
-    fn set(items: &[&str]) -> HashSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn framework_provided_namespaces() {
-        let ember = set(&["ember-source"]);
-        assert!(is_framework_provided("@ember/component", &ember));
-        assert!(is_framework_provided("@glimmer/tracking", &ember));
-        assert!(!is_framework_provided("@vue/reactivity", &ember));
-
-        // Vue provides its own @vue/* internals; Nuxt bundles vue itself.
-        let vue = set(&["vue"]);
-        assert!(is_framework_provided("@vue/reactivity", &vue));
-        assert!(!is_framework_provided("vue", &vue)); // declared directly anyway
-        let nuxt = set(&["nuxt"]);
-        assert!(is_framework_provided("vue", &nuxt));
-        assert!(is_framework_provided("@vue/runtime-core", &nuxt));
-
-        // A real third-party package is never framework-provided.
-        assert!(!is_framework_provided("lodash", &nuxt));
-        assert!(!is_framework_provided("@ember/component", &set(&[])));
-    }
-
-    #[test]
-    fn extracts_alias_prefixes_and_ignores_plain_keys() {
-        assert_eq!(
-            path_alias_prefix_from_line(r#"      "@ui/*": ["./src/*"],"#),
-            Some("@ui".to_string())
-        );
-        assert_eq!(
-            path_alias_prefix_from_line(r#""@utils/*": ["./utils/*"]"#),
-            Some("@utils".to_string())
-        );
-        assert_eq!(
-            path_alias_prefix_from_line(r#""components/*": ["src/components/*"]"#),
-            Some("components".to_string())
-        );
-        // Non-alias tsconfig keys (arrays, but no alias marker) are ignored.
-        assert_eq!(path_alias_prefix_from_line(r#""types": ["node"]"#), None);
-        assert_eq!(path_alias_prefix_from_line(r#""lib": ["ESNext"]"#), None);
-        // Non-paths lines are ignored.
-        assert_eq!(path_alias_prefix_from_line(r#""strict": true,"#), None);
-        assert_eq!(path_alias_prefix_from_line("// a comment"), None);
-    }
-
-    #[test]
-    fn extracts_deno_import_map_prefixes() {
-        use super::deno_import_prefix_from_line;
-        assert_eq!(
-            deno_import_prefix_from_line(r#"    "@std/path": "jsr:@std/path@^1.0.0","#),
-            Some("@std/path".to_string())
-        );
-        assert_eq!(
-            deno_import_prefix_from_line(r#""preact": "npm:preact@^10.0.0""#),
-            Some("preact".to_string())
-        );
-        assert_eq!(
-            deno_import_prefix_from_line(r#""$fresh/": "./fresh/""#),
-            Some("$fresh".to_string())
-        );
-        // Tasks / config entries (value is not a module specifier) are ignored.
-        assert_eq!(
-            deno_import_prefix_from_line(r#""dev": "deno run -A main.ts""#),
-            None
-        );
-        assert_eq!(deno_import_prefix_from_line(r#""name": "my-app""#), None);
-    }
-
-    #[test]
-    fn extracts_bundler_alias_prefixes() {
-        use super::bundler_alias_prefix_from_line;
-        // Vite/Webpack alias to a local shim -- reduced to first segment so it
-        // matches an import that normalizes to that segment (plane: next/link).
-        assert_eq!(
-            bundler_alias_prefix_from_line(
-                r#"      "next/link": path.resolve(__dirname, "app/compat/next/link.tsx"),"#
-            ),
-            Some("next".to_string())
-        );
-        assert_eq!(
-            bundler_alias_prefix_from_line(
-                r#""@/components": path.join(__dirname, "src/components")"#
-            ),
-            Some("@/components".to_string())
-        );
-        assert_eq!(
-            bundler_alias_prefix_from_line(r#"'~': './src'"#),
-            Some("~".to_string())
-        );
-        // Non-alias config (value is not a local path) is ignored.
-        assert_eq!(
-            bundler_alias_prefix_from_line(
-                r#""process.env.NODE_ENV": JSON.stringify("production")"#
-            ),
-            None
-        );
-        assert_eq!(bundler_alias_prefix_from_line(r#""port": 3000"#), None);
-    }
 }

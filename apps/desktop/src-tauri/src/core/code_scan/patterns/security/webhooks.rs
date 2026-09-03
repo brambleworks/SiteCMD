@@ -20,6 +20,20 @@ pub(in crate::core::code_scan) static WEBHOOK_VERIFY_PATTERNS: LazyLock<Vec<rege
             regex::Regex::new(r"\bhmac\b\s*\(").expect("static hmac call regex"), // allow-expect: compile-time literal regex
             regex::Regex::new(r"timingSafeEqual\s*\(").expect("static timingSafeEqual regex"), // allow-expect: compile-time literal regex
             regex::Regex::new(r"\bverify(?:Signature|Webhook)\s*\(").unwrap(),
+            // NestJS moves verification into a guard: the controller names the
+            // guard type, whose body computes and compares the signature.
+            regex::Regex::new(r"(?i)\b\w*webhook\w*guard\b")
+                .expect("static webhook guard regex"), // allow-expect: compile-time literal regex
+            // A provider helper that reads the raw body and a signing secret is
+            // verifying the delivery, even when the crypto lives in a library.
+            // Both halves are anchored: the callee has to name an inspection,
+            // and the secret has to be an argument in its own right, so a
+            // sender such as `postWebhook(payload, { url, secret })` or a logger
+            // such as `logDelivery(rawBody, cfg.secretRef)` is not excused.
+            regex::Regex::new(
+                r"(?is)\b(?:verify|validate|check|assert|authenticate|parse|decode|construct)[A-Za-z0-9_]*\s*\(\s*[A-Za-z0-9_.]*(?:body|payload|raw)[A-Za-z0-9_]*\s*,(?:[^(){}\[\],;]*,)?\s*[A-Za-z0-9_.]*secret\s*[,)]",
+            )
+                .expect("static provider verifier regex"), // allow-expect: compile-time literal regex
         ]
     });
 

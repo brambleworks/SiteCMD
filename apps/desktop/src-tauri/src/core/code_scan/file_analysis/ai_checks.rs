@@ -56,15 +56,22 @@ pub(super) fn collect_ai_issues(issues: &mut Vec<CodeIssue>, ctx: &FileAnalysisC
         }
     }
 
-    // React PDF style props are document layout, not browser inline CSS.
+    // React PDF style props are document layout, not browser inline CSS, and
+    // next/og renders through Satori, which supports inline styles only.
     let react_pdf_renderer =
         content.contains("@react-pdf/renderer") || content.contains("react-pdf-browser");
-    if is_jsx_or_tsx_file(&file.relative_path) && !react_pdf_renderer {
-        let inline_style_count = JSX_INLINE_STYLE_PROP_PATTERN.find_iter(content).count();
+    // The imports and the metadata-route basenames are precise; a bare
+    // `ImageResponse` identifier is not, so it is deliberately not a needle.
+    let og_image_renderer = content.contains("next/og")
+        || content.contains("@vercel/og")
+        || is_og_image_route(&file.relative_path);
+    if is_jsx_or_tsx_file(&file.relative_path) && !react_pdf_renderer && !og_image_renderer {
+        let static_styles = static_inline_style_offsets(content);
+        let inline_style_count = static_styles.len();
         if inline_style_count >= 4 {
-            let line = JSX_INLINE_STYLE_PROP_PATTERN
-                .find(content)
-                .map(|mat| line_number(content, mat.start()));
+            let line = static_styles
+                .first()
+                .map(|offset| line_number(content, *offset));
             issues.push(build_issue(
                 "jsx-inline-style-density",
                 "architecture",
@@ -74,7 +81,7 @@ pub(super) fn collect_ai_issues(issues: &mut Vec<CodeIssue>, ctx: &FileAnalysisC
                 file,
                 line,
                 Some(format!(
-                    "Detected {} JSX inline style props (`style={{{{ ... }}}}`) in the same component file.",
+                    "Detected {} JSX inline style props (`style={{{{ ... }}}}`) with literal values in the same component file.",
                     inline_style_count
                 )),
                 Some("Keep genuinely dynamic values inline. If the detected declarations repeat one static visual pattern, move that pattern into the project's existing styling system or a small shared component; leave unrelated one-off declarations alone.".into()),
@@ -261,6 +268,87 @@ fn client_makes_direct_ai_call(lower: &str) -> bool {
     DIRECT_CALL_NEEDLES
         .iter()
         .any(|needle| lower.contains(needle))
+}
+
+/// Next.js metadata image routes render through `ImageResponse`.
+fn is_og_image_route(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let base = lower.rsplit('/').next().unwrap_or(&lower);
+    base.starts_with("opengraph-image.") || base.starts_with("twitter-image.")
+}
+
+/// Byte offsets of `style={{` props whose object carries a literal value. An
+/// object that does not close within the scan cap is counted rather than
+/// dropped, so an unread tail cannot silently shrink the density.
+fn static_inline_style_offsets(content: &str) -> Vec<usize> {
+    JSX_INLINE_STYLE_PROP_PATTERN
+        .find_iter(content)
+        .filter(|found| match style_object_window(content, found.end()) {
+            Some(window) => JSX_STATIC_STYLE_VALUE_PATTERN.is_match(window),
+            None => true,
+        })
+        .map(|found| found.start())
+        .collect()
+}
+
+/// The style object's text up to its closing brace. `None` when the object does
+/// not close within the scan cap, so the caller can fail safe instead of
+/// grading a partially read object.
+fn style_object_window(content: &str, after: usize) -> Option<&str> {
+    const CAP: usize = 600;
+    let bytes = content.as_bytes();
+    let mut depth = 1usize;
+    let mut end = after;
+    let cap = (after + CAP).min(content.len());
+    while end < cap {
+        match bytes[end] {
+            b'{' => depth += 1,
+            // An ASCII brace is always a character boundary, so the slice below
+            // is safe without a boundary walk.
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&content[after..end]);
+                }
+            }
+            _ => {}
+        }
+        end += 1;
+    }
+    None
+}
+
+#[cfg(test)]
+mod inline_style_tests {
+    use super::{static_inline_style_offsets, style_object_window};
+
+    #[test]
+    fn only_literal_valued_style_objects_are_counted() {
+        let runtime = "<span style={{ color: team.primaryColor }} />";
+        assert!(static_inline_style_offsets(runtime).is_empty());
+
+        let literal = "<span style={{ color: \"var(--team-primary, #2563eb)\" }} />";
+        assert_eq!(static_inline_style_offsets(literal).len(), 1);
+
+        // A nested object closes at its own brace, not the first one seen.
+        let nested = "<span style={{ transform: { scale: sizes.large } }} />";
+        assert!(static_inline_style_offsets(nested).is_empty());
+    }
+
+    #[test]
+    fn a_style_object_longer_than_the_scan_cap_is_counted_not_dropped() {
+        let filler = "runtimeValue, ".repeat(70);
+        let oversized = format!("<span style={{{{ a: {}b: last }}}} />", filler);
+        assert!(
+            style_object_window(&oversized, oversized.find("{{").unwrap() + 2).is_none(),
+            "the fixture must exceed the scan cap for this test to mean anything"
+        );
+        assert_eq!(
+            static_inline_style_offsets(&oversized).len(),
+            1,
+            "an object the scanner could not finish reading must not be graded as runtime-only"
+        );
+    }
 }
 
 #[cfg(test)]

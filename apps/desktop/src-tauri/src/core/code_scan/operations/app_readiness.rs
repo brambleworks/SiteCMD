@@ -1,5 +1,29 @@
 use super::*;
 
+/// A project-level absence anchors on the scanned manifest; the fallback file is
+/// only a place to report at, never the file at fault.
+fn manifest_anchor(
+    manifests: &[PackageManifest],
+    fallback: Option<&SourceFile>,
+) -> Option<(String, String)> {
+    manifests
+        .first()
+        .map(|manifest| {
+            (
+                manifest.relative_path.clone(),
+                manifest.absolute_path.to_string_lossy().to_string(),
+            )
+        })
+        .or_else(|| {
+            fallback.map(|file| {
+                (
+                    file.relative_path.clone(),
+                    file.absolute_path.to_string_lossy().to_string(),
+                )
+            })
+        })
+}
+
 struct AppReadinessContext<'a> {
     files: &'a [SourceFile],
     manifests: &'a [PackageManifest],
@@ -124,19 +148,30 @@ fn collect_service_operations_issues(
     let has_healthcheck = context.has_healthcheck;
 
     if app_like && !has_healthcheck {
-        if let Some(file) = route_files.first() {
-            issues.push(build_issue(
-                "healthcheck-missing",
-                "operations",
-                Severity::Medium,
-                "No recognized health or readiness endpoint was found",
-                "The scanned routes indicate a server application, but SiteCMD found no recognized liveness, readiness, health, status, or ping endpoint. A deploy-platform probe, externally configured route, custom naming convention, or code outside the scanned tree may already provide the required signal.",
-                file,
-                None,
-                Some("Server routes were detected, but no route path or handler looked like /health, /ready, /status, or /ping.".into()),
-                Some("First check the deploy platform for an existing process or instance probe. If an HTTP endpoint is needed, keep liveness cheap and dependency-free, and use a separate bounded readiness check only for dependencies required before the instance receives traffic. Return no sensitive diagnostics.".into()),
-                Some("Configure the actual platform probe and simulate both a healthy instance and a required-dependency outage. Confirm readiness can remove traffic without causing a liveness restart loop, and that unauthenticated responses expose no internals.".into()),
-            ));
+        // A project-level absence anchors on the manifest like its siblings;
+        // the first route file is only a fallback, never the file at fault.
+        let anchor = manifest_anchor(manifests, route_files.first().copied());
+        if let Some((relative_path, absolute_path)) = anchor {
+            const DESCRIPTION: &str = "The scanned routes indicate a server application, but SiteCMD found no recognized liveness, readiness, health, status, or ping endpoint. A deploy-platform probe, externally configured route, custom naming convention, or code outside the scanned tree may already provide the required signal.";
+            let (confidence, confidence_reason) = policy_confidence("healthcheck-missing");
+            issues.push(CodeIssue {
+                check_id: String::new(),
+                id: format!("healthcheck-missing:{}", relative_path),
+                category: "operations".into(),
+                severity: Severity::Medium,
+                title: "No recognized health or readiness endpoint was found".into(),
+                description: DESCRIPTION.into(),
+                relative_path,
+                absolute_path,
+                line: None,
+                source_excerpt: None,
+                evidence: Some(redact_evidence("Server routes were detected, but no route path or handler looked like /health, /ready, /status, or /ping.")),
+                why_now: Some(code_issue_rationale("healthcheck-missing").unwrap_or(DESCRIPTION).into()),
+                likely_fix: Some("First check the deploy platform for an existing process or instance probe. If an HTTP endpoint is needed, keep liveness cheap and dependency-free, and use a separate bounded readiness check only for dependencies required before the instance receives traffic. Return no sensitive diagnostics.".into()),
+                confidence,
+                confidence_reason,
+                verify_hint: Some("Configure the actual platform probe and simulate both a healthy instance and a required-dependency outage. Confirm readiness can remove traffic without causing a liveness restart loop, and that unauthenticated responses expose no internals.".into()),
+            });
         }
     }
 
@@ -147,26 +182,9 @@ fn collect_service_operations_issues(
         || !client_auth_files.is_empty();
 
     if (app_like || frontend_app) && needs_error_reporting && !has_error_reporting {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                    None,
-                )
-            })
-            .or_else(|| {
-                route_files.first().map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                        None,
-                    )
-                })
-            });
+        let anchor = manifest_anchor(manifests, route_files.first().copied());
 
-        if let Some((relative_path, absolute_path, line)) = anchor {
+        if let Some((relative_path, absolute_path)) = anchor {
             // Absence-of-signal heuristic: graded by the shared confidence
             // policy (NeedsReview), like its build_issue siblings.
             let (confidence, confidence_reason) = policy_confidence("error-reporting-missing");
@@ -179,7 +197,7 @@ fn collect_service_operations_issues(
                 description: "The scanned dependencies and initialization patterns do not show a recognized error-reporting integration for an app with several failure-prone surfaces. This does not establish that reporting is absent: a custom collector, platform logs, wrapper package, inherited runtime, or external configuration may provide it outside the patterns inspected.".into(),
                 relative_path,
                 absolute_path,
-                line,
+                line: None,
                 source_excerpt: None,
                 evidence: Some(redact_evidence("High-risk app surfaces were detected, but no common error-reporting dependency or initialization pattern was found.")),
                 why_now: Some("Without a tested failure-reporting path, production-only errors can be difficult to detect, group, and diagnose; unfiltered reporting can also expose personal or secret data.".into()),
@@ -268,26 +286,9 @@ fn collect_service_operations_issues(
     }
 
     if ai_heavy_project && !has_ai_observability_integration {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                    None,
-                )
-            })
-            .or_else(|| {
-                llm_files.first().map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                        None,
-                    )
-                })
-            });
+        let anchor = manifest_anchor(manifests, llm_files.first().copied());
 
-        if let Some((relative_path, absolute_path, line)) = anchor {
+        if let Some((relative_path, absolute_path)) = anchor {
             let (confidence, confidence_reason) =
                 policy_confidence("ai-observability-integration-missing");
             issues.push(CodeIssue {
@@ -299,7 +300,7 @@ fn collect_service_operations_issues(
                 description: "The scanned source and dependencies contain AI-heavy usage signals, but SiteCMD found no recognized AI-specific tracing, token-usage, or spend integration. Generic telemetry, provider dashboards, custom wrappers, inherited instrumentation, or external configuration may already provide equivalent coverage.".into(),
                 relative_path,
                 absolute_path,
-                line,
+                line: None,
                 source_excerpt: None,
                 evidence: Some(redact_evidence("AI-heavy usage signals were detected, but no recognized provider-aware tracing, token-usage, spend, or AI-observability integration was found in the scanned dependencies and source patterns.")),
                 why_now: Some("Without correlated latency, status, model, retry, and usage signals at the provider boundary, cost and reliability regressions are harder to attribute. Telemetry itself can create privacy risk if prompts, outputs, or identifiers are collected indiscriminately.".into()),
@@ -407,6 +408,124 @@ fn collect_runtime_control_issues(issues: &mut Vec<CodeIssue>, context: &AppRead
     }
 }
 
+/// Project kinds whose database use never implies a migration directory.
+///
+/// A WordPress plugin or theme changes schema through its activation and
+/// upgrade hooks, which is why plugins ship no migrations tree. A published
+/// library or framework repository has no database of its own either: its
+/// database dependencies belong to the samples and integration suites it
+/// bundles, and the packages it publishes are consumed by applications that
+/// own their own schema.
+fn owns_no_migration_workflow(context: &AppReadinessContext<'_>) -> bool {
+    is_wordpress_extension_project(context.files) || is_published_package_project(context)
+}
+
+/// The plugin or theme header WordPress itself requires in the main PHP file.
+///
+/// The header has to be in a top-level file of the scanned project, because
+/// that is what makes the SCANNED PROJECT the plugin. A monorepo that merely
+/// contains a plugin directory is still an application and keeps the check.
+fn is_wordpress_extension_project(files: &[SourceFile]) -> bool {
+    files.iter().any(|file| {
+        let path = file.relative_path.replace('\\', "/");
+        if !path.to_ascii_lowercase().ends_with(".php") || path.contains('/') {
+            return false;
+        }
+        let mut head_end = WORDPRESS_HEADER_SCAN_BYTES.min(file.content.len());
+        while !file.content.is_char_boundary(head_end) {
+            head_end += 1;
+        }
+        let head = &file.content[..head_end];
+        head.contains("Plugin Name:") || head.contains("Theme Name:")
+    })
+}
+
+/// How far into a PHP file the WordPress header is read, in bytes. The header
+/// block is the first comment in the file by WordPress's own rules.
+const WORDPRESS_HEADER_SCAN_BYTES: usize = 2_000;
+
+/// A repository that publishes packages rather than running a service.
+///
+/// Three conditions, and the third is what keeps this from swallowing every
+/// non-HTTP application: no server route surface, at least one manifest
+/// declaring a package entry point, AND every piece of database evidence
+/// confined to bundled samples, examples, integration suites, or benchmarks:
+/// no source file outside that material touches a database, and no manifest
+/// outside it declares a database client as a runtime dependency. A routeless
+/// worker, a command-line tool, or a bot that touches its own database fails
+/// the third condition and keeps the finding.
+fn is_published_package_project(context: &AppReadinessContext<'_>) -> bool {
+    if !context.route_files.is_empty() {
+        return false;
+    }
+    if !context.manifests.iter().any(|manifest| {
+        serde_json::from_str::<Value>(&manifest.content)
+            .ok()
+            .and_then(|json| json.as_object().cloned())
+            .is_some_and(|fields| {
+                ["main", "module", "exports", "types", "typings"]
+                    .iter()
+                    .any(|key| fields.contains_key(*key))
+            })
+    }) {
+        return false;
+    }
+    context
+        .manifests
+        .iter()
+        .filter(|manifest| manifest_declares_runtime_database_package(manifest))
+        .all(|manifest| is_bundled_suite_path(&manifest.relative_path))
+        && context
+            .files
+            .iter()
+            .filter(|file| has_any(&file.content, &DB_PATTERNS))
+            .all(|file| is_bundled_suite_path(&file.relative_path))
+}
+
+/// Whether a manifest pulls in a database client the project RUNS on.
+///
+/// Runtime `dependencies` only. A repository that publishes packages declares
+/// its database drivers under `devDependencies`, because they exist to run the
+/// bundled samples and integration suites, and `PackageManifest::dependencies`
+/// has already merged every section together by the time it reaches here.
+fn manifest_declares_runtime_database_package(manifest: &PackageManifest) -> bool {
+    serde_json::from_str::<Value>(&manifest.content)
+        .ok()
+        .and_then(|json| json.get("dependencies").and_then(Value::as_object).cloned())
+        .is_some_and(|dependencies| {
+            dependencies
+                .keys()
+                .any(|name| DATABASE_PACKAGES.contains(&name.as_str()))
+        })
+}
+
+/// Bundled material a repository ships to demonstrate or exercise itself,
+/// rather than code it runs in production.
+fn is_bundled_suite_path(relative_path: &str) -> bool {
+    let lower = format!("/{}", relative_path.replace('\\', "/").to_ascii_lowercase());
+    [
+        "/sample/",
+        "/samples/",
+        "/example/",
+        "/examples/",
+        "/example-apps/",
+        "/integration/",
+        "/integration-tests/",
+        "/integration_tests/",
+        "/benchmark/",
+        "/benchmarks/",
+        "/demo/",
+        "/demos/",
+        "/fixtures/",
+        "/test/",
+        "/tests/",
+        "/__tests__/",
+        "/e2e/",
+    ]
+    .iter()
+    .any(|segment| lower.contains(segment))
+}
+
 fn collect_data_operations_issues(issues: &mut Vec<CodeIssue>, context: &AppReadinessContext<'_>) {
     let manifests = context.manifests;
     let db_file = context.db_file;
@@ -418,23 +537,8 @@ fn collect_data_operations_issues(issues: &mut Vec<CodeIssue>, context: &AppRead
     let has_recovery_notes = context.has_recovery_notes;
     let has_backup_restore_notes = context.has_backup_restore_notes;
 
-    if db_backed && !has_migration_workflow {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                )
-            })
-            .or_else(|| {
-                db_file.map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
+    if db_backed && !has_migration_workflow && !owns_no_migration_workflow(context) {
+        let anchor = manifest_anchor(manifests, db_file);
 
         if let Some((relative_path, absolute_path)) = anchor {
             let (confidence, confidence_reason) = policy_confidence("migration-workflow-missing");
@@ -480,22 +584,7 @@ fn collect_data_operations_issues(issues: &mut Vec<CodeIssue>, context: &AppRead
     }
 
     if db_backed && complex_app && !has_recovery_notes {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                )
-            })
-            .or_else(|| {
-                db_file.map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
+        let anchor = manifest_anchor(manifests, db_file);
 
         if let Some((relative_path, absolute_path)) = anchor {
             let (confidence, confidence_reason) = policy_confidence("recovery-runbook-missing");
@@ -521,22 +610,7 @@ fn collect_data_operations_issues(issues: &mut Vec<CodeIssue>, context: &AppRead
     }
 
     if db_backed && complex_app && has_recovery_notes && !has_backup_restore_notes {
-        let anchor = manifests
-            .first()
-            .map(|manifest| {
-                (
-                    manifest.relative_path.clone(),
-                    manifest.absolute_path.to_string_lossy().to_string(),
-                )
-            })
-            .or_else(|| {
-                db_file.map(|file| {
-                    (
-                        file.relative_path.clone(),
-                        file.absolute_path.to_string_lossy().to_string(),
-                    )
-                })
-            });
+        let anchor = manifest_anchor(manifests, db_file);
 
         if let Some((relative_path, absolute_path)) = anchor {
             let (confidence, confidence_reason) = policy_confidence("backup-restore-plan-missing");

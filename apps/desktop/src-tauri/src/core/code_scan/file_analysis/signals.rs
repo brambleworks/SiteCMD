@@ -5,6 +5,8 @@ pub(super) struct FileAnalysisSignals {
     pub(super) pattern_registry: bool,
     pub(super) scanner_rule_impl: bool,
     pub(super) route_like: bool,
+    /// Why the file is route-like, phrased for evidence text.
+    pub(super) route_evidence: Option<String>,
     pub(super) wp_hook_handler: bool,
     pub(super) middleware_auth_protected: bool,
     pub(super) has_identity_auth: bool,
@@ -70,6 +72,9 @@ pub(super) struct FileAnalysisSignals {
     pub(super) write_handler: bool,
     pub(super) sensitive_handler: bool,
     pub(super) public_risk_endpoint: bool,
+    /// The abuse-sensitive word that made the route look public, and where it
+    /// was found.
+    pub(super) public_risk_match: Option<PublicRiskMatch>,
     pub(super) has_upload_flow: bool,
     pub(super) has_upload_input: bool,
     pub(super) has_upload_size_guard: bool,
@@ -114,9 +119,18 @@ impl FileAnalysisSignals {
         let middleware_throttled = laravel_controller
             .map(|status| status.throttled)
             .unwrap_or(false);
-        let route_like_raw = is_route_like(file, &lower);
+        let route_evidence_raw = route_like_evidence(file, &lower);
+        let route_like_raw = route_evidence_raw.is_some();
         let route_like = !pattern_registry
             && (route_like_raw || server_action_like || laravel_controller.is_some());
+        let route_evidence = route_evidence_raw
+            .or_else(|| server_action_like.then(|| "a `use server` directive".to_string()))
+            .or_else(|| {
+                laravel_controller
+                    .is_some()
+                    .then(|| "a Laravel route manifest entry".to_string())
+            })
+            .filter(|_| route_like);
         let wp_hook_handler = has_wp_handler_registration(&lower);
         // Logged-in WordPress actions prove identity; REST permission callbacks
         // also count as authorization because their bodies may live elsewhere.
@@ -142,9 +156,12 @@ impl FileAnalysisSignals {
         let has_cookie_same_site = has_any(content, &COOKIE_SAMESITE_PATTERNS);
         // Laravel manifests never show CSRF evidence in-file: VerifyCsrfToken
         // runs at the kernel middleware-group layer for web routes, and api
-        // routes authenticate statelessly.
+        // routes authenticate statelessly. Next.js Server Actions carry their
+        // own anti-forgery boundary: the framework rejects an invocation whose
+        // Origin does not match the Host before the action body runs.
         let has_csrf = has_any(content, &CSRF_PATTERNS)
-            || laravel_protection.is_routes_manifest(&file.relative_path);
+            || laravel_protection.is_routes_manifest(&file.relative_path)
+            || server_action_like;
         let has_request_token = has_any(content, &REQUEST_TOKEN_PATTERNS);
         let has_jwt_decode = has_any(content, &JWT_DECODE_PATTERNS);
         let has_jwt_verify = has_any(content, &JWT_VERIFY_PATTERNS);
@@ -164,7 +181,21 @@ impl FileAnalysisSignals {
         let has_timeout = has_any(content, &TIMEOUT_PATTERNS);
         let has_retry_guard = has_any(content, &RETRY_PATTERNS);
         let has_concurrency_guard = has_any(content, &CONCURRENCY_PATTERNS);
-        let uses_outbound_http = !pattern_registry && has_any(content, &OUTBOUND_HTTP_PATTERNS);
+        // A Stripe signature check and a bundled-asset URL load look like SDK
+        // and fetch calls but never leave the process. Removing them keeps a
+        // file that also makes a real remote call counted as outbound, and the
+        // copy is only paid by the files that contain one.
+        let uses_outbound_http = !pattern_registry
+            && if has_any(content, &LOCAL_ONLY_OUTBOUND_PATTERNS) {
+                let scanned = LOCAL_ONLY_OUTBOUND_PATTERNS
+                    .iter()
+                    .fold(content.to_string(), |scanned, pattern| {
+                        pattern.replace_all(&scanned, "").into_owned()
+                    });
+                has_any(&scanned, &OUTBOUND_HTTP_PATTERNS)
+            } else {
+                has_any(content, &OUTBOUND_HTTP_PATTERNS)
+            };
         let skips_internal_http = has_any(content, &OUTBOUND_HTTP_RETRY_SKIP_PATTERNS);
         let uses_llm = !pattern_registry && has_any(content, &LLM_PATTERNS);
         let uses_ai_sdk = !pattern_registry
@@ -216,34 +247,45 @@ impl FileAnalysisSignals {
             || lower.contains("rawbody");
         let is_webhook =
             filename_hints_webhook && (body_provider_signal || (route_like && reads_inbound_body));
-        let has_webhook_verify = has_any(content, &WEBHOOK_VERIFY_PATTERNS);
+        // Providers that sign with a static shared secret are authenticated by
+        // the same header-and-compare gate the token guard already recognizes.
+        let has_webhook_verify =
+            has_any(content, &WEBHOOK_VERIFY_PATTERNS) || (is_webhook && has_token_guard);
         let has_idempotency_guard = has_any(content, &IDEMPOTENCY_PATTERNS);
         let touches_db_raw = has_any(content, &DB_PATTERNS);
         let touches_db = !pattern_registry && touches_db_raw;
-        let db_write_count = count_matches(content, &DB_WRITE_PATTERNS);
+        let db_write_count = max_db_writes_per_handler(file, content);
         let has_db_query = has_any(content, &DB_QUERY_PATTERNS) || db_write_count > 0;
         let has_multi_tenant_context = has_any(content, &MULTI_TENANT_CONTEXT_PATTERNS);
         let has_tenant_scope_query = has_any(content, &TENANT_SCOPE_QUERY_PATTERNS);
-        let has_auth_owned_id_scope = has_any(content, &AUTH_OWNED_ID_SCOPE_PATTERNS);
+        let has_auth_owned_id_scope =
+            has_any(content, &AUTH_OWNED_ID_SCOPE_PATTERNS) || has_session_scoped_binding(content);
         let has_transaction = has_any(content, &TRANSACTION_PATTERNS);
         let has_unsafe_raw_sql = has_any(content, &RAW_SQL_UNSAFE_PATTERNS);
         // Ignore quoted sink definitions while preserving PHP markup sinks in
         // quoted HTML attributes; see `has_any_unquoted`.
-        let dangerous_html =
-            !pattern_registry && has_any_unquoted(content, &DANGEROUS_HTML_PATTERNS);
+        let dangerous_html = !pattern_registry
+            && has_any_unquoted(content, &DANGEROUS_HTML_PATTERNS)
+            && !is_json_ld_serialization_sink(content);
         let has_sanitization = has_any(content, &SANITIZATION_PATTERNS);
         let ssrf_like = has_any(content, &SSRF_PATTERNS);
         let has_ssrf_guard = has_any(content, &SSRF_GUARD_PATTERNS);
         let write_handler_raw = is_write_handler(&lower);
         let write_handler = write_handler_raw || server_action_like;
-        let sensitive_handler = is_sensitive_handler(file, &lower);
-        let public_risk_endpoint = is_publicly_abusable_route(file, &lower)
-            || has_any(content, &PUBLIC_RISK_ENDPOINT_PATTERNS);
-        let has_upload_flow = has_any(content, &UPLOAD_PATTERNS);
+        // The lowercased content already covers every case of the original,
+        // because each risk pattern is lowercase, so one lookup answers both
+        // the predicate and the evidence wording.
+        let public_risk_match = public_risk_match(file, &lower);
+        let public_risk_endpoint = public_risk_match.is_some();
         let has_upload_input = has_any(content, &UPLOAD_FILE_INPUT_PATTERNS);
+        let has_storage_write = has_any(content, &STORAGE_WRITE_PATTERNS);
+        // `formData()`, `File`, and `Blob` appear in every form-post handler, so
+        // an upload flow needs a named file input, a multipart body, or a
+        // storage write alongside them.
+        let has_upload_flow = has_any(content, &UPLOAD_PATTERNS)
+            && (has_upload_input || has_storage_write || lower.contains("multipart"));
         let has_upload_size_guard = has_any(content, &UPLOAD_SIZE_GUARD_PATTERNS);
         let has_upload_type_guard = has_any(content, &UPLOAD_TYPE_GUARD_PATTERNS);
-        let has_storage_write = has_any(content, &STORAGE_WRITE_PATTERNS);
         let has_user_controlled_storage_key =
             has_any(content, &USER_CONTROLLED_STORAGE_KEY_PATTERNS);
         let has_scoped_storage_key = has_any(content, &SCOPED_STORAGE_KEY_PATTERNS);
@@ -261,10 +303,25 @@ impl FileAnalysisSignals {
         let user_controlled_fetch = route_like && ssrf_like && !has_ssrf_guard;
         // Framework-enforced WordPress and Laravel access gates make handlers
         // non-public even when their content contains risky terms.
+        // A Server Action is a POST endpoint, but one that neither persists,
+        // calls out, sends mail, stores files, nor reads request input has no
+        // work to limit.
+        let server_action_does_work = server_action_like
+            && (touches_db_raw
+                || db_write_count > 0
+                || uses_outbound_http
+                || has_email_flow
+                || has_storage_write);
+        // The same emptiness makes it a non-sensitive handler: cache
+        // revalidation is the whole body, even though the action's path sits
+        // under `settings/` or `admin/`.
+        let sensitive_handler =
+            is_sensitive_handler(file, &lower) && !(server_action_like && !server_action_does_work);
         let likely_public_endpoint = route_like
             && !is_wp_gated_surface(&lower)
             && !middleware_auth_protected
-            && (public_risk_endpoint || (!has_auth && (write_handler || parses_body)));
+            && (public_risk_endpoint
+                || (!has_auth && (write_handler_raw || parses_body || server_action_does_work)));
 
         // Compute operation predicates during the shared lowercase pass; raw
         // pattern hits preserve the operations phase's established semantics.
@@ -333,6 +390,7 @@ impl FileAnalysisSignals {
             pattern_registry,
             scanner_rule_impl,
             route_like,
+            route_evidence,
             wp_hook_handler,
             middleware_auth_protected,
             has_identity_auth,
@@ -398,6 +456,7 @@ impl FileAnalysisSignals {
             write_handler,
             sensitive_handler,
             public_risk_endpoint,
+            public_risk_match,
             has_upload_flow,
             has_upload_input,
             has_upload_size_guard,

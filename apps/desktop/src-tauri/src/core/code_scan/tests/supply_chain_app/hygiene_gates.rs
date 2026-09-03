@@ -573,3 +573,45 @@ fn tooling_only_package_json_in_a_php_project_owes_no_build_script() {
     assert!(!fires(&report, "build-script-missing"));
     assert!(fires(&report, "ci-workflow-missing"));
 }
+
+#[test]
+fn laravel_mix_production_script_counts_as_the_build_script() {
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "package.json",
+        r#"
+                {
+                  "name": "theme",
+                  "scripts": {
+                    "dev": "mix",
+                    "watch": "mix watch",
+                    "production": "mix --production"
+                  },
+                  "devDependencies": {
+                    "bootstrap": "^5.3.3",
+                    "laravel-mix": "^6.0.18",
+                    "webpack": "^5.0.0"
+                  }
+                }
+            "#,
+    );
+    write_file(
+        temp.path(),
+        "webpack.mix.js",
+        "const mix = require('laravel-mix');\nmix.js('src/js/main.js', 'build/js').sass('src/scss/main.scss', 'build/css');\n",
+    );
+    write_file(
+        temp.path(),
+        "src/js/main.js",
+        "import 'bootstrap/js/dist/collapse';\nconsole.log('ready');\n",
+    );
+    std::fs::create_dir_all(temp.path().join(".git")).unwrap();
+
+    let report = audit_project(temp.path()).unwrap();
+    assert!(
+        !fires(&report, "build-script-missing"),
+        "`mix --production` is Laravel Mix's documented production build, got {:?}",
+        report.issues.iter().map(|i| &i.id).collect::<Vec<_>>()
+    );
+}
