@@ -57,10 +57,13 @@ function addedLines() {
     }
     if (!file || !line.startsWith("@@")) continue;
     // @@ -old,count +new,count @@
-    const hunk = /^@@ -\S+ \+(\d+)(?:,(\d+))? @@/.exec(line);
+    // One flat capture split by hand. Nesting \d+ inside an optional group
+    // raises the star height to two, which the regex audit refuses.
+    const hunk = /^@@ -[0-9,]+ \+([0-9,]+) @@/.exec(line);
     if (!hunk) continue;
-    const start = Number(hunk[1]);
-    const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+    const [startText, countText] = hunk[1].split(",");
+    const start = Number(startText);
+    const count = countText === undefined ? 1 : Number(countText);
     if (count === 0) continue;
     if (!ranges.has(file)) ranges.set(file, []);
     ranges.get(file).push([start, start + count - 1]);
@@ -75,7 +78,7 @@ function touched(ranges, file, line) {
 }
 
 /**
- * True when the flagged line, or either line above it, carries
+ * True when the flagged line, or the ten lines above it, carry
  * `codeql-allow: <rule id>`. A finding dismissed on GitHub stays dismissed
  * there; this marker is how the same decision is recorded in the source, where
  * a reviewer reading the code can see it.
@@ -89,8 +92,11 @@ function allowed(sources, file, line, rule) {
     }
   }
   const lines = sources.get(file);
+  // CodeQL points at the expression inside a call, which can sit several
+  // lines below the comment that explains it, so the window covers the
+  // statement rather than just the line.
   return lines
-    .slice(Math.max(0, line - 3), line)
+    .slice(Math.max(0, line - 11), line)
     .some((text) => text.includes(`${ALLOW_MARKER} ${rule}`));
 }
 

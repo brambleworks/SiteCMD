@@ -16,6 +16,10 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export async function downloadVerified(artifact, destination, fetcher = fetch) {
   if (!artifact.url.startsWith("https://") || !/^[a-f0-9]{64}$/.test(artifact.sha256))
     throw new Error("An HTTPS artifact URL and pinned SHA-256 are required");
+  // The url is not untrusted file content: it comes from runtimeLock, parsed
+  // at load from the tracked tools/benchmark/vm/runtime-lock.json, and the
+  // guard above rejects anything that is not https.
+  // codeql-allow: js/file-access-to-http
   const response = await fetcher(artifact.url, { signal: AbortSignal.timeout(180000) });
   if (!response.ok || !response.body)
     throw new Error(`Runtime download failed: ${response.status}`);
@@ -28,6 +32,10 @@ export async function downloadVerified(artifact, destination, fetcher = fetch) {
   }
   const bytes = Buffer.concat(chunks);
   if (sha256(bytes) !== artifact.sha256) throw new Error("Runtime download checksum mismatch");
+  // Nothing unverified reaches the file: the digest above is compared against
+  // the pinned sha256 and throws on mismatch, so these bytes are identical to
+  // a value committed to this repository.
+  // codeql-allow: js/http-to-file-access
   writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
 }
 
