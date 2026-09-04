@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
+  constants,
   fstatSync,
-  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -18,29 +18,31 @@ export function readCandidate(directory) {
   let bytes = 0;
   let entries = 0;
   const walk = (relative) => {
-    for (const name of readdirSync(path.join(directory, relative)).sort()) {
+    const listing = readdirSync(path.join(directory, relative), { withFileTypes: true });
+    for (const entry of listing.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const name = entry.name;
       if (!relative && name === ".git") continue;
       const key = path.join(relative, name);
       const file = path.join(directory, key);
-      const stat = lstatSync(file);
       if (++entries > 1000) throw new Error("Candidate exceeds 1000 entries");
-      if (stat.isSymbolicLink()) {
+      if (entry.isSymbolicLink()) {
         violations.push(`Symlink ${key}: ${readlinkSync(file)}`);
         continue;
       }
-      if (stat.isDirectory()) {
+      if (entry.isDirectory()) {
         walk(key);
         continue;
       }
-      if (!stat.isFile() || stat.nlink > 1) {
-        violations.push(`Non-regular or hard-linked file: ${key}`);
-        continue;
-      }
-      // Read through the descriptor the size came from, so a swap between the
-      // limit check and the read cannot smuggle in different bytes.
-      const handle = openSync(file, "r");
+      // Refuse to follow a link on the way in, then judge and read the
+      // descriptor itself, so a path swapped after the listing cannot redirect
+      // the read or change the bytes behind the size limit.
+      const handle = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
         const opened = fstatSync(handle);
+        if (!opened.isFile() || opened.nlink > 1) {
+          violations.push(`Non-regular or hard-linked file: ${key}`);
+          continue;
+        }
         bytes += opened.size;
         if (opened.size > 4 * 1024 * 1024 || bytes > 16 * 1024 * 1024)
           throw new Error("Candidate exceeds snapshot byte limits");
