@@ -2,49 +2,97 @@
 
 Use the [evaluation protocol](../../docs/qa/agent-workflow-benchmark.md) to measure
 repair quality, compute efficiency, and developer effort. The paired workflow
-tooling freezes assignments, imports evidence, records blinded reviews, and
-reports uncertainty. It does not yet launch agents, operate an isolated desktop,
-apply patches, or run arbitrary repository graders. Those are operator/adapter
-responsibilities; the evidence checker does not replace them.
+tooling freezes assignments, runs the subscription calibration in an isolated
+desktop, imports evidence, records blinded reviews, and reports uncertainty.
+This guide is for the operator preparing and executing that calibration. The
+runner supports the five included cases, not arbitrary repositories or Web Scan.
 
 The [benchmark VM](vm/README.md) supplies a separate Linux environment for building
-the desktop and running future trials. It does not copy host projects or accounts,
-install agent clients, or implement the trial executor.
+the desktop and running trials. Host projects and accounts are not mounted.
+Only a committed source archive is exported for the product build; subscription
+credentials must be created through login inside the guest.
 
 ## Configure the subscription pilot
 
 ```bash
 pnpm benchmark pilot
-pnpm benchmark doctor
 ```
 
 `pilot` prints the approved 30-trial settings from `pilot-policy.json`. It is a
-policy, not a runnable study or a generated case corpus. `doctor` reads the installed
-Codex/Claude CLI versions and saved authentication status without issuing prompts.
-It prints no account identifiers or credential values. It rejects billing/auth
-environment overrides and reports missing execution prerequisites. Exit code 2
-means execution is blocked; it is expected until the isolated runner is implemented.
+policy, not an execution command. Once the VM is prepared and running,
+`pnpm benchmark:vm doctor` reads the guest's installed
+Codex/Claude versions and saved authentication status without issuing prompts.
+It prints no account identifiers or credential values. Exit code 2 means a client
+or subscription login is missing. The separate `pnpm benchmark doctor` probes the
+host, not the guest. Neither doctor approves execution.
 Successful authentication does not verify model access, quota, global configuration
 isolation, or disabled paid overage.
 
-For the pilot, prepare four independently validated Code Scan repairs and one
-negative control. Freeze exact CLI versions, explicit reasoning settings, and the
-execution environment in the manifest. Copy the policy's `limits` and `billing`
-objects unchanged. Then require the policy when planning:
+The included corpus contains four seeded repairs (CORS, redirect, SQL injection,
+and path traversal) and a parameterized-query negative control. Ordinary tests
+are visible to agents; separate behavioral graders are not. These small, owned
+examples are calibration, not representative customer projects or marketing evidence.
+
+On a new VM, prepare the environment and build the committed product:
 
 ```bash
-pnpm benchmark plan --pilot --study tools/benchmark/.work/pilot.json --out tools/benchmark/.work/pilot-run
+pnpm benchmark:vm setup
+pnpm benchmark:vm:tools
+pnpm benchmark:vm:build
+pnpm benchmark:vm:smoke
+pnpm benchmark:vm:selftest
+pnpm benchmark:cases:validate
+pnpm benchmark:cases:scan
 ```
 
-No real case corpus or execution adapter is included yet. A desktop instance in a
-disposable environment must own the test database and process real verification.
-`SITECMD_DB_PATH` does not isolate the desktop itself. Do not use the personal
-desktop database or execute generated patches on the maintainer's host.
+These commands make no model calls. Building excludes uncommitted changes.
+`benchmark:vm:build --install-existing` installs or checks an already completed
+build without compiling again. The smoke test uses the shipped desktop/MCP flow
+and an owned reference repair, not an AI agent. Validation runs baseline and
+reference checks three times each. Scanning records actual full reports, including
+missed defects; a clean scan is not independent proof that a case is safe.
+The executor self-test uses explicitly synthetic Node clients and quota fixtures
+to exercise submission grading, evidence validation and timeout handling. It
+does not log in, contact models, or create measured usage evidence.
+
+Use the exact evidence paths printed by validation and scanning as the first two
+arguments, and choose a new run directory:
+
+```bash
+pnpm benchmark:prepare GRADES_JSON SCANS_JSON tools/benchmark/.work/calibration-run
+```
+
+Replace `GRADES_JSON` and `SCANS_JSON` with those paths. Preparation freezes the
+30 assignments, product, sources, graders, reports, protocol and runner. Client
+versions are Codex `0.153.0-alpha.5` and Claude Code `2.1.260`, both at explicit
+high reasoning. Changed runner or grader bytes require a new registration, not
+editing an existing plan. No agent has run merely because a plan exists.
+
+If Code Scan does not produce the repair handoff, the MCP assignment records a
+pre-agent product error with zero calls. Keep it in the assigned population;
+do not substitute an easier case. Inspect the scan evidence before interpreting
+workflow differences.
+
+### Subscription logins
+
+Open the guest shell and sign into the subscriptions there:
+
+```bash
+pnpm benchmark:vm shell
+codex login --device-auth
+claude auth login --claudeai
+```
+
+Follow each login's instructions, opening its URL in the host browser if needed.
+Do not select Console/API billing or copy host credential files. Exit the guest
+shell, then run `pnpm benchmark:vm doctor`. Login success does not prove either
+requested model is available. The first real assignment must establish that;
+an unavailable or different model is a failure, never permission to fall back.
 
 ### Account quota evidence
 
-Copy `quota-template.json` into the ignored run directory and fill it from actual
-provider readings. Use UTC timestamps for `capturedAt` and each `resetsAt`, stable
+Preparation creates blank quota files in the ignored run directory. Fill them
+from actual provider readings. Use UTC timestamps for `capturedAt` and each `resetsAt`, stable
 non-identifying account labels, `authMode: "subscription"`, and
 `extraUsageEnabled: false` only after verifying those facts. Record an evidence
 reference in `source`; preserve the complete provider reading privately. The
@@ -62,16 +110,51 @@ before and after every trial and at each submission; do not overwrite the baseli
 Keep snapshots with the trial evidence, including readings that paused the batch.
 
 ```bash
-pnpm benchmark quota --baseline tools/benchmark/.work/pilot-run/quota-baseline.json --current tools/benchmark/.work/pilot-run/quota-current.json
+pnpm benchmark quota --baseline tools/benchmark/.work/calibration-run/quota-baseline.json --current tools/benchmark/.work/calibration-run/quota-current.json
 ```
 
 Exit 0 means only that the supplied quota readings passed. Exit 2 means pause;
 invalid input exits 1. Readings older than five minutes, changed accounts or weekly
 resets, unknown extra usage, or either account reaching a stop threshold block the
 batch. A short-session reset does not replenish the weekly allocation. These are
-checks on supplied evidence, not a live quota collector or process supervisor.
-The execution adapter must enforce deadlines/submission limits, disable fallback,
-and stop on rate limits. Provider percentages are not precise in-flight cost caps.
+checks made by the quota command, not a live quota collector or process supervisor.
+The VM executor enforces the time/submission limits, stops on reported rate limits,
+and never requests a fallback model. Provider percentages are not precise
+in-flight cost caps.
+
+### Run one assignment
+
+With both logins verified, extra paid usage disabled, and actual baseline/current
+quota files in the run directory:
+
+```bash
+pnpm benchmark:run tools/benchmark/.work/calibration-run
+```
+
+Each invocation runs only the next unrecorded assignment. It serializes guest
+execution, creates a fresh source tree and desktop database, and imports the
+result before returning. Keep `quota-current.json` refreshed from actual readings
+while it runs, before its five-minute freshness window expires. The host forwards
+changes to the guest; the supervisor checks them every five seconds and at each
+submission. It does not collect provider quota automatically. Stale readings stop
+the current trial, which remains a recorded failure rather than being retried.
+
+When the agent stops, the command asks for new readings from both providers and
+waits up to five minutes before exporting. A still-fresh pretrial reading is not
+post-trial evidence. Missing closing readings record an infrastructure failure.
+Quota bookkeeping happens after the timed repair; no model keeps running while
+the command waits. The quota baseline is immutable once execution begins; never
+reset it to replenish the pilot allowance. Nonzero
+exit status means inspect the failure and preserved evidence before continuing.
+Do not rerun an assignment after model usage. If transport or import fails, retain
+the guest trial directory and recover/import that evidence instead of deleting it
+to start over. Ctrl-C stops the active agent; keep the VM running for evidence export.
+
+Normal/report workflows submit through the provided local submission command.
+MCP repairs submit through the real `request_verification` tool. Every candidate
+is frozen before forwarding verification, and hidden grader feedback is withheld
+in every workflow. Editing after the final submission prevents final acceptance.
+The product's verification result is retained separately from independent grading.
 
 ## Check the pipeline locally
 
@@ -138,11 +221,16 @@ first submitted candidate before returning external feedback, and freeze the
 final candidate before teardown. The grader must inspect those exact snapshots.
 Record unsuccessful and interrupted trials too.
 
-A trial JSON includes its assignment ID and study digest, observed model/agent
+A trial JSON includes its assignment ID and study digest, model selection/agent
 version, fixture flag, status, elapsed time, measured human-active time or `null`,
 warm/cold setup, submissions, reviews, transcript path, and usage. Non-completed
 statuses require a failure explanation. MCP trials also need a server digest and
 complete trace artifact. Submission times must be ordered and within trial time.
+The VM runner records its explicit CLI model request separately from identities
+actually emitted by the provider. Missing observed identity stays `null`; it is
+not copied from configuration. Missing or mismatched identity blocks claim review.
+A setup failure before client launch has `agentInvoked: false`, no model, no
+submissions, and zero calls. Interrupted or truncated usage remains unknown.
 
 All artifact paths are relative to the trial JSON's directory. Only referenced
 files are imported. Paths cannot be absolute, contain traversal, or use symlinks.

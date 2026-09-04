@@ -48,14 +48,18 @@ export function trialOutcome(record, limits) {
   }));
   const tokens = totalTokens(record.usage);
   const spend = accountedSpend(record.usage);
+  const unexpectedModel = record.modelSelection?.observed.some(
+    (model) => model !== record.modelSelection.requested,
+  );
   const overBudget =
     (limits.trialTokens !== null && tokens !== null && tokens > limits.trialTokens) ||
     (spend !== null && spend > limits.trialCostUsd);
-  const accepted = (entry) => entry?.outcome === "accepted" && entry.withinTime && !overBudget;
+  const accepted = (entry) =>
+    entry?.outcome === "accepted" && entry.withinTime && !overBudget && !unexpectedModel;
   return {
     recorded: true,
     first: accepted(outcomes[0]) || false,
-    eventual: accepted(outcomes.at(-1)) || false,
+    eventual: record.status === "completed" && (accepted(outcomes.at(-1)) || false),
     pendingReview: outcomes.some((entry) => entry.outcome === "pending_review"),
     regression: record.submissions.some((submission) => !submission.regressionsPass),
     integrityFailure: record.submissions.some((submission) => !submission.integrityPass),

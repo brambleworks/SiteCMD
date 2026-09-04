@@ -74,7 +74,7 @@ export function probeAgentAccounts({ environment = process.env, run = spawnSync 
   }
   const subscriptionAccountsVerified = blockers.length === 0;
   blockers.push(
-    "Agent/desktop orchestration and the independent grader adapter are not implemented; VM setup alone does not execute trials",
+    "This account probe does not verify the guest execution harness or its isolation checks",
     "A frozen, independently validated case corpus is required and is not checked by this command",
     "Fresh quota evidence and disabled extra paid usage must be verified before execution",
     "Exact model availability and runtime configuration have not been tested",

@@ -172,10 +172,43 @@ export function validateTrial(record, assignment, study) {
   );
   requireCondition(["cold", "warm"].includes(record.setup), "setup must be cold or warm");
   requireText(record.agentVersion, "observed agent version");
-  requireText(record.model, "observed model");
+  const beforeAgent = record.agentInvoked === false;
+  if (beforeAgent) {
+    requireCondition(
+      ["product_error", "infrastructure_error"].includes(record.status),
+      "only setup failures can precede the agent",
+    );
+    requireCondition(record.model === null, "an uninvoked agent has no observed model");
+    requireCondition(
+      record.submissions?.length === 0,
+      "an uninvoked agent cannot submit a candidate",
+    );
+  } else if (record.modelSelection === undefined) requireText(record.model, "observed model");
   const config = study.configurations.find((item) => item.id === assignment.configuration);
+  if (record.modelSelection !== undefined) {
+    const selection = record.modelSelection;
+    requireCondition(
+      selection.source === "explicit-cli-request" && selection.requested === config.model,
+      "requested model differs from the frozen configuration",
+    );
+    requireCondition(
+      Array.isArray(selection.observed),
+      "provider-observed models must be an array",
+    );
+    selection.observed.forEach((model) => requireText(model, "provider-observed model"));
+    unique(selection.observed, "provider-observed models");
+    requireCondition(
+      record.model === (selection.observed.length === 1 ? selection.observed[0] : null),
+      "model must equal the single provider-observed identity or remain unknown",
+    );
+    requireCondition(
+      !selection.observed.some((model) => model !== config.model) || record.status !== "completed",
+      "a provider model mismatch must remain a failed trial",
+    );
+  }
   requireCondition(
-    record.agentVersion === config.agentVersion && record.model === config.model,
+    record.agentVersion === config.agentVersion &&
+      (beforeAgent || record.modelSelection !== undefined || record.model === config.model),
     "observed model or agent version differs from the frozen configuration",
   );
   requireCondition(Array.isArray(record.submissions), "submissions must be an array");

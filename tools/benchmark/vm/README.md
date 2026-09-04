@@ -2,8 +2,10 @@
 
 This environment keeps benchmark builds and agent-generated patches off the
 maintainer's host. It provisions Linux build dependencies and verifies WebKit can
-load a page under a virtual display. It does not build or launch SiteCMD, install
-agent clients, authenticate accounts, or run a benchmark trial.
+load a page under a virtual display. Additional commands in the
+[operator guide](../README.md) install the pinned clients, build SiteCMD, validate
+cases, and execute trials. VM setup alone does not authenticate accounts or run
+any models.
 
 ## Run it
 
@@ -45,12 +47,12 @@ variables, existing SSH keys, and agent configurations are not forwarded.
 
 Guest roles have private homes and no administrator privileges:
 
-| User      | Workspace                           | Purpose                                         |
-| --------- | ----------------------------------- | ----------------------------------------------- |
-| `runner`  | `/srv/sitecmd-benchmark/workspaces` | Agent workspaces and future subscription logins |
-| `grader`  | `/srv/sitecmd-benchmark/graders`    | Independent acceptance tests and receipts       |
-| `sitecmd` | `/srv/sitecmd-benchmark/app-data`   | Isolated desktop data                           |
-| `builder` | `/srv/sitecmd-benchmark/build`      | Product builds                                  |
+| User      | Workspace                           | Purpose                                   |
+| --------- | ----------------------------------- | ----------------------------------------- |
+| `runner`  | `/srv/sitecmd-benchmark/workspaces` | Agent workspaces and subscription logins  |
+| `grader`  | `/srv/sitecmd-benchmark/graders`    | Independent acceptance tests and receipts |
+| `sitecmd` | `/srv/sitecmd-benchmark/app-data`   | Isolated desktop data                     |
+| `builder` | `/srv/sitecmd-benchmark/build`      | Product builds                            |
 
 The separate `benchadmin` account is reserved for host-controlled provisioning.
 Never run agents under that account or give them its management key. Guest user
@@ -69,6 +71,21 @@ The build environment includes GTK/WebKit, Node, pnpm, and Rust. GUI verificatio
 uses software rendering in Xvfb, with WebKit's sandbox retained. This verifies a
 Linux rendering prerequisite, not SiteCMD's complete desktop or MCP workflow, and
 does not establish performance parity with macOS or a hardware-accelerated desktop.
+
+The trial executor starts the real desktop under `sitecmd` with a separate XDG
+data directory per assignment. Guest-only bind mounts expose the same candidate
+under that user's home because Code Scan requires a source path inside its home.
+No host filesystem is mounted. WebDriver control ports are blocked for `runner`
+on every guest address; the controller checks the firewall and connection denial
+before launching an agent. Only the MCP arm gets a socket proxy to the real server.
+
+Each candidate workspace has a 128 MiB temporary filesystem and an inode cap.
+Agent processes have a 2 GiB memory limit, a 128-task limit, bounded temporary
+storage, and the registered time limit. Hidden grading runs in a separate
+Bubblewrap sandbox with a read-only candidate, no network, no credentials, and
+separate resource limits. An application-specific AppArmor profile permits
+Bubblewrap's user namespace without disabling AppArmor. These boundaries reduce
+risk; they do not make arbitrary agents or a guest kernel exploit harmless.
 
 ## Frozen configuration
 
@@ -93,13 +110,13 @@ never remove a broad VM state directory to resolve a setup error.
 
 ## Before real trials
 
-The [pilot protocol](../../../docs/qa/agent-workflow-benchmark.md) still requires
-validated cases, an agent/desktop execution adapter, and an independent grader.
-Install and authenticate the selected clients inside the VM using subscription
-login, never by copying host credential files. Verify exact model access, disabled
-paid overage/fallback, and fresh account quota evidence before any prompts.
+Follow the [operator guide](../README.md) to validate cases and freeze the study.
+Authenticate the selected clients inside the VM using subscription login, never
+by copying host credential files. Verify disabled paid overage and fresh account
+quota evidence before any prompts. Model availability remains unverified until
+the requested model actually runs; a failure must not select a substitute.
 
 The desktop must own its own guest database; `SITECMD_DB_PATH` does not redirect
-the desktop. The future adapter must export only an approved source snapshot,
-protect grader files, capture complete usage, and enforce the pilot's stop limits.
+the desktop. The executor captures candidate snapshots, verification traces and
+reported usage; missing model identity or incomplete usage is recorded as unknown.
 VM setup alone does not authorize API charges, paid resets, or trial execution.

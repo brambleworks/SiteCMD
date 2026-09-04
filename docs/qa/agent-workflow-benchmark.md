@@ -8,9 +8,10 @@ SiteCMD improves any of those outcomes yet.
 Protocol version: `agent-workflow-v1`.
 
 The [benchmark operator guide](../../tools/benchmark/README.md) documents the
-working planner, evidence importer, review receipts, and report commands. These
-tools do not launch paid agents or provide an isolated desktop runner. The
-included fixture exercises the evidence pipeline, not the product's benefit.
+planner, isolated Linux desktop executor, evidence importer, review receipts, and
+report commands. The subscription runner supports five owned calibration cases.
+The separate synthetic fixture exercises the evidence pipeline, not the product's
+benefit. Neither kind of calibration establishes a marketing claim.
 
 ## Comparisons
 
@@ -155,9 +156,19 @@ replace the real server with a benchmark stub or bespoke briefing logic.
 The desktop currently resolves its normal application data directory rather than
 honoring `SITECMD_DB_PATH`. That variable isolates the CLI/MCP database only, not
 the desktop verification worker. Do not point benchmark tools at the maintainer's
-live database. The full workflow needs a disposable desktop environment and a real
-execution adapter; the evidence pipeline and authentication doctor do not provide
-those yet. Starting Docker alone is not sufficient.
+live database. The included executor uses a separate guest user and XDG data
+directory, the actual desktop binary, and its bundled MCP server. The account
+doctor verifies neither this workflow nor model availability.
+
+The first corpus uses owned, single-file Node/Python examples with ordinary
+regression tests: credentialed CORS, redirect destinations, SQL injection,
+document paths, and a parameterized-query negative control. Each baseline and
+reference must pass its expected independent checks three times. Source hashes
+use canonical filename-to-content JSON; grader hashes cover the assertions,
+candidate adapters, and sandbox launcher. Preserve those bytes with the plan.
+This small seeded corpus tests the machinery, not real-project representativeness.
+If a defect has no SiteCMD repair handoff, record the MCP assignment as a pre-agent
+product error, with zero calls, and retain it in the denominator.
 
 Record setup as cold or warm and keep conditions identical across workflows.
 Cold includes installation, connection, and initial scan; warm begins with the
@@ -176,6 +187,14 @@ An agent may inspect code, edit, and run ordinary local tests before its first
 submission. Do not let one workflow inspect hidden tests while another submits
 blindly. Freeze an equivalent external feedback policy. Independently grade every
 submitted snapshot, even if the product later reports the finding resolved.
+
+The included runner withholds all hidden-grader feedback, captures candidates
+before forwarding the real MCP verification request, and requires an explicit
+submission in the other workflows. Ordinary project tests remain available.
+Unsubmitted edits or an interrupted run cannot count as final acceptance.
+Record explicit model selection separately from provider-observed identity;
+absent identity stays unknown and blocks claim review. An unexpected model stops
+the trial and must not contribute successful fixes to the requested model's results.
 
 Enforce token, dollar, submission, and elapsed-time caps in the execution adapter,
 including delegated agents and tool-triggered model calls. The importer detects

@@ -75,6 +75,17 @@ export function analyzeStudy(plan, results, { bootstrapSamples = 2000 } = {}) {
     blockers.push(`${plan.study.phase} studies are not confirmatory evidence`);
   if (records.size !== plan.assignments.length)
     blockers.push(`${plan.assignments.length - records.size} trials have not been recorded`);
+  if (
+    results.some(
+      (record) =>
+        record.modelSelection &&
+        (record.modelSelection.observed.length !== 1 ||
+          record.model !== record.modelSelection.requested),
+    )
+  )
+    blockers.push(
+      "Provider-observed model identity is missing or differs from the requested model",
+    );
   for (const group of groups) {
     const setupModes = new Set(Object.values(group.arms).flatMap((summary) => summary.setupModes));
     if (setupModes.size > 1)
