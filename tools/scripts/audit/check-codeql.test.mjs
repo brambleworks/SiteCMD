@@ -29,6 +29,8 @@ function installFakeCodeql() {
       "const args = process.argv.slice(2);",
       `fs.appendFileSync(${JSON.stringify(argsLog)}, args.join(" ") + "\\n");`,
       'if (args[0] === "version") { console.log("0.0.0-fake"); process.exit(0); }',
+      "// FAKE_CODEQL_FAIL names the subcommand that should report failure.",
+      "if (process.env.FAKE_CODEQL_FAIL === args[1]) process.exit(9);",
       'if (args[1] === "create") { fs.mkdirSync(args[2], { recursive: true }); process.exit(0); }',
       'if (args[1] === "analyze") {',
       '  const out = args.find((a) => a.startsWith("--output="));',
@@ -153,10 +155,30 @@ describe("check-codeql memory budget", () => {
 });
 
 describe("check-codeql cleanup discipline", () => {
+  const analyzed = { SITECMD_CODEQL_BASE: "HEAD~1" };
+
+  function leftovers() {
+    return fs.readdirSync(scratch).filter((name) => name.startsWith(WORK_PREFIX));
+  }
+
+  // die() calls process.exit, which skips the finally that frees the database,
+  // so it has to remove the directory itself. Both failures happen after the
+  // work directory exists, which is what makes them worth driving.
+  it.each([
+    ["create", "database creation failed"],
+    ["analyze", "analysis failed"],
+  ])("frees the database when codeql %s fails", (subcommand, message) => {
+    const result = runGate({ ...analyzed, FAKE_CODEQL_FAIL: subcommand });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(message);
+    expect(leftovers()).toEqual([]);
+  });
+
   it("exits through die(), so no path skips the finally that frees the database", () => {
-    // process.exit inside the try block abandons a database of several hundred
-    // megabytes. die() removes the directory first; the alert path sets
-    // process.exitCode instead so the finally still runs.
+    // The alert path cannot be driven here without a controlled diff, so its
+    // cleanup is guarded structurally: process.exit belongs only to die(),
+    // which removes the directory before it runs.
     const source = fs.readFileSync(SCRIPT, "utf8");
     const callers = source
       .split("\n")
