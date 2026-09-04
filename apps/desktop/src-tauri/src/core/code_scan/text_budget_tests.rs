@@ -93,7 +93,7 @@ fn database_collection_stops_at_the_cumulative_limit() {
         .to_string()
         .contains("32 byte source and configuration text budget"));
     assert!(budget.retained_bytes <= 32);
-    assert!(budget.retained_bytes < files.iter().map(|file| file.size).sum());
+    assert!(budget.retained_bytes < files.iter().map(|file| file.size).sum::<u64>());
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn cancellation_stops_artifact_collection_before_all_files_are_retained() {
 
     assert!(matches!(result, Err(CodeScanError::Cancelled)));
     assert!(budget.retained_bytes > 0);
-    assert!(budget.retained_bytes < files.iter().map(|file| file.size).sum());
+    assert!(budget.retained_bytes < files.iter().map(|file| file.size).sum::<u64>());
 }
 
 #[test]
