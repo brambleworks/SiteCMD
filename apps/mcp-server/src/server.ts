@@ -44,6 +44,7 @@ import {
   UNTRUSTED_DATA_INSTRUCTION,
 } from "./untrusted.js";
 import { describeScanAge } from "./freshness.js";
+import { formatRescanGuidance } from "./rescan_guidance.js";
 import { readDesktopHeartbeat, desktopStatusLine } from "./heartbeat.js";
 import { deriveFixStatus, DEPLOY_WAIT_NOTE } from "./fix_status.js";
 import {
@@ -897,20 +898,7 @@ function registerCoreTools(server: McpServer): void {
 
   function howToRescan(url: string): ToolResult {
     const latest = getLatestScanWithWorkspaceFallback(url);
-    return text(
-      [
-        `## How to rescan ${url}`,
-        "",
-        "SiteCMD does not queue a scan from this tool. Pick one path:", // allow-machine-smell: negation, describes what SiteCMD does NOT do
-        `1. CLI from the project folder: run \`sitecmd scan\` (it reads .sitecmd/config.json; if that folder is missing, run \`sitecmd init ${url}\` once). Without a config, run \`sitecmd scan --url ${url}\`. The CLI exports .sitecmd/ and syncs the desktop app when it is open.`,
-        "2. Desktop: open SiteCMD, select the project, and click Scan.",
-        "3. Then call `compare_scans` to see what was fixed, what is new, and what still fails.",
-        "",
-        latest
-          ? `**Last scan:** ${describeScanAge(latest.timestamp, Date.now())}; web scan graded ${latest.overall_score}/100 with ${latest.issues_total} findings.`
-          : "No previous scans found for this URL.",
-      ].join("\n"),
-    );
+    return text(formatRescanGuidance(url, latest));
   }
 
   server.registerTool(

@@ -1,30 +1,10 @@
 use super::*;
 
-pub(super) fn collect_ai_config_files(project_files: &[ProjectFile]) -> Vec<TextArtifact> {
-    project_files
-        .iter()
-        .filter_map(|file| {
-            let file_name = file.absolute_path.file_name()?.to_string_lossy();
-            if !looks_like_ai_config(&file.relative_path, &file_name) {
-                return None;
-            }
-            if file.size > 250_000 {
-                return None;
-            }
-            let bytes = read_project_file(file, 250_000)?;
-            if bytes.contains(&0) {
-                return None;
-            }
-            let Ok(content) = String::from_utf8(bytes) else {
-                return None;
-            };
-            Some(TextArtifact {
-                absolute_path: file.absolute_path.clone(),
-                relative_path: file.relative_path.clone(),
-                content,
-            })
-        })
-        .collect()
+pub(super) fn collect_ai_config_files(
+    project_files: &[ProjectFile],
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<TextArtifact>, CodeScanError> {
+    collect_text_artifacts(project_files, looks_like_ai_config, text_budget)
 }
 
 pub(super) fn collect_project_paths(project_files: &[ProjectFile]) -> Vec<String> {

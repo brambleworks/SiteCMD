@@ -1,6 +1,6 @@
 use super::issue_utils::redact_evidence;
-use super::CodeIssue;
 use super::MCP_SECRET_PATTERNS;
+use super::{CodeIssue, CodeScanError, ScanTextBudget};
 use crate::checks::{IssueConfidence, Severity};
 use std::path::Path;
 
@@ -103,18 +103,21 @@ fn hardcoded_secret_line(content: &str) -> Option<u32> {
 /// Inspect a project's AI agent instruction files and surface quality problems.
 /// Reads only the known instruction-file paths directly (no filesystem walk),
 /// mirroring how `project_hygiene` reads `.gitignore`.
-pub fn analyze_ai_scaffolding(root: &Path) -> Vec<CodeIssue> {
+pub(super) fn analyze_ai_scaffolding(
+    root: &Path,
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<CodeIssue>, CodeScanError> {
     let mut issues = Vec::new();
 
     // (relative_path, tool, content, meaningful_len) for every instruction file present.
-    let present: Vec<(String, &str, String, usize)> = INSTRUCTION_FILES
-        .iter()
-        .filter_map(|(rel, tool)| {
-            let content = super::filesystem::read_text_under_root(root, &root.join(rel))?;
-            let meaningful = meaningful_content_len(&content);
-            Some(((*rel).to_string(), *tool, content, meaningful))
-        })
-        .collect();
+    let mut present: Vec<(String, &str, String, usize)> = Vec::new();
+    for (rel, tool) in INSTRUCTION_FILES {
+        let Some(content) = text_budget.read_text_under_root(root, &root.join(rel))? else {
+            continue;
+        };
+        let meaningful = meaningful_content_len(&content);
+        present.push(((*rel).to_string(), *tool, content, meaningful));
+    }
 
     // Rule 1: an instruction file exists but carries almost no guidance.
     for (rel, tool, _content, meaningful) in &present {
@@ -224,16 +227,23 @@ pub fn analyze_ai_scaffolding(root: &Path) -> Vec<CodeIssue> {
     }
 
     // Check instruction and MCP config files for embedded credentials.
+    let mut mcp_configs = Vec::new();
+    for (rel, tool) in MCP_CONFIG_FILES {
+        if let Some(content) = text_budget.read_text_under_root(root, &root.join(rel))? {
+            mcp_configs.push((*rel, *tool, content));
+        }
+    }
     let secret_candidates = present
         .iter()
-        .map(|(rel, tool, content, _)| (rel.clone(), *tool, content.clone()))
-        .chain(MCP_CONFIG_FILES.iter().filter_map(|(rel, tool)| {
-            let content = super::filesystem::read_text_under_root(root, &root.join(rel))?;
-            Some(((*rel).to_string(), *tool, content))
-        }));
+        .map(|(rel, tool, content, _)| (rel.as_str(), *tool, content.as_str()))
+        .chain(
+            mcp_configs
+                .iter()
+                .map(|(rel, tool, content)| (*rel, *tool, content.as_str())),
+        );
 
     for (rel, tool, content) in secret_candidates {
-        if let Some(line) = hardcoded_secret_line(&content) {
+        if let Some(line) = hardcoded_secret_line(content) {
             issues.push(CodeIssue {
                 check_id: String::new(),
                 id: format!("agent-instructions-secret:{}", rel),
@@ -244,8 +254,8 @@ pub fn analyze_ai_scaffolding(root: &Path) -> Vec<CodeIssue> {
                     "`{}` (read by {}) has a line that matches an API key or credential pattern. The scan did not inspect or test the value, query an issuing provider, or determine whether the file is tracked, shared, logged, or deployed, so this match does not prove a valid credential or exposure.",
                     rel, tool
                 ),
-                relative_path: rel.clone(),
-                absolute_path: root.join(&rel).to_string_lossy().to_string(),
+                relative_path: rel.to_string(),
+                absolute_path: root.join(rel).to_string_lossy().to_string(),
                 line: Some(line),
                 source_excerpt: None,
                 evidence: Some(redact_evidence(format!(
@@ -319,7 +329,7 @@ pub fn analyze_ai_scaffolding(root: &Path) -> Vec<CodeIssue> {
         });
     }
 
-    issues
+    Ok(issues)
 }
 
 #[cfg(test)]
@@ -327,6 +337,12 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    fn analyze_ai_scaffolding(root: &Path) -> Vec<CodeIssue> {
+        let mut text_budget =
+            ScanTextBudget::new(crate::constants::CODE_SCAN_MAX_TEXT_BYTES, &|| false);
+        super::analyze_ai_scaffolding(root, &mut text_budget).expect("AI scaffolding analysis")
+    }
 
     #[test]
     fn flags_a_stub_instruction_file() {

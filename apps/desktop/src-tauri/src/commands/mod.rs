@@ -2,6 +2,7 @@
 
 mod agent_tools;
 mod alerts;
+mod app_settings;
 pub mod catalog;
 mod code_scan;
 pub(crate) mod connected;
@@ -377,6 +378,7 @@ pub async fn update_tray_scan_status(
 
 pub use agent_tools::*;
 pub use alerts::*;
+pub use app_settings::*;
 pub use catalog::*;
 pub use code_scan::*;
 pub use connected::*;

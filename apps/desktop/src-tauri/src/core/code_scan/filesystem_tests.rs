@@ -305,6 +305,46 @@ fn security_regression_read_text_under_root_rejects_symlink_escape() {
 }
 
 #[test]
+fn source_budget_counts_retained_rust_content_after_removing_tests() {
+    let project = tempdir().unwrap();
+    let retained = "pub fn start() {}\n";
+    let source = format!(
+        "{retained}#[cfg(test)]\nmod tests {{\n{}\n}}\n",
+        "// test fixture\n".repeat(100)
+    );
+    fs::write(project.path().join("app.rs"), &source).unwrap();
+    let limits = CollectionLimits {
+        max_total_bytes: 32,
+        ..super::DEFAULT_COLLECTION_LIMITS
+    };
+    assert!(source.len() as u64 > limits.max_total_bytes);
+    let mut files = Vec::new();
+    let mut project_files = Vec::new();
+    let mut state = CollectionState::default();
+    let canonical_root = fs::canonicalize(project.path()).unwrap();
+    let scope = GitignoreChain::for_root(project.path());
+
+    collect_project_inventory_with_limits(
+        project.path(),
+        &canonical_root,
+        project.path(),
+        &scope,
+        &mut files,
+        &mut project_files,
+        limits,
+        &mut state,
+        0,
+    )
+    .expect("sanitized source fits the retained-text budget");
+
+    assert_eq!(project_files.len(), 1);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].content, retained);
+    assert_eq!(state.total_bytes, files[0].content.capacity() as u64);
+    assert!(state.total_bytes <= limits.max_total_bytes);
+}
+
+#[test]
 fn security_regression_source_file_collection_enforces_total_byte_budget() {
     let temp = tempdir().expect("temp dir");
     fs::write(

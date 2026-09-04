@@ -148,33 +148,38 @@ const GUIDE: &str = r#"Use std::env::var("QUOTED_RUST_KEY")"#;
 pub(in crate::core::code_scan) fn collect_env_files(
     project_files: &[ProjectFile],
     include_local_values: bool,
-) -> Vec<EnvFileSnapshot> {
-    project_files
-        .iter()
-        .filter_map(|file| {
-            let file_name = file.absolute_path.file_name()?.to_string_lossy();
-            if !file_name.starts_with(".env")
-                || file.size > 64_000
-                || (!include_local_values && !is_example_env_file(&file.relative_path))
-            {
-                return None;
-            }
-            let content = String::from_utf8(read_project_file(file, 64_000)?).ok()?;
-            let entries = parse_env_entries(&content);
-            if entries.is_empty() {
-                return None;
-            }
-            let keys = entries.keys().cloned().collect::<HashSet<_>>();
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<EnvFileSnapshot>, CodeScanError> {
+    let mut env_files = Vec::new();
+    for file in project_files {
+        text_budget.check_cancelled()?;
+        let Some(file_name) = file.absolute_path.file_name() else {
+            continue;
+        };
+        if !file_name.to_string_lossy().starts_with(".env")
+            || file.size > 64_000
+            || (!include_local_values && !is_example_env_file(&file.relative_path))
+        {
+            continue;
+        }
+        let Some(content) = text_budget.read_project_file(file, 64_000)? else {
+            continue;
+        };
+        let entries = parse_env_entries(&content);
+        if entries.is_empty() {
+            continue;
+        }
+        let keys = entries.keys().cloned().collect::<HashSet<_>>();
 
-            Some(EnvFileSnapshot {
-                absolute_path: file.absolute_path.clone(),
-                relative_path: file.relative_path.clone(),
-                content,
-                keys,
-                entries,
-            })
-        })
-        .collect()
+        env_files.push(EnvFileSnapshot {
+            absolute_path: file.absolute_path.clone(),
+            relative_path: file.relative_path.clone(),
+            content,
+            keys,
+            entries,
+        });
+    }
+    Ok(env_files)
 }
 
 fn parse_env_entries(content: &str) -> HashMap<String, String> {

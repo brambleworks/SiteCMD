@@ -61,6 +61,8 @@ mod laravel_routes;
 use laravel_routes::{collect_laravel_route_protection, LaravelRouteProtection};
 
 mod filesystem;
+mod text_budget;
+use text_budget::ScanTextBudget;
 mod scan_scope;
 mod vendored;
 use filesystem::{
@@ -249,6 +251,26 @@ where
     F: Fn(CodeScanAuditProgress),
     C: Fn() -> bool + Sync,
 {
+    audit_project_with_text_budget(
+        root,
+        options,
+        progress,
+        cancelled,
+        crate::constants::CODE_SCAN_MAX_TEXT_BYTES,
+    )
+}
+
+fn audit_project_with_text_budget<F, C>(
+    root: &Path,
+    options: CodeScanOptions,
+    progress: F,
+    cancelled: C,
+    max_text_bytes: u64,
+) -> Result<CodeScanReport, CodeScanError>
+where
+    F: Fn(CodeScanAuditProgress),
+    C: Fn() -> bool + Sync,
+{
     if !root.is_dir() {
         return Err(CodeScanError::Failed(
             "Project path is not a valid directory".into(),
@@ -265,7 +287,9 @@ where
     let project_files = inventory.project_files;
     // Carry pruned-directory counts into the scan summary.
     let skipped_scopes = inventory.skipped_scopes;
-    let manifests = collect_package_manifests(&project_files);
+    let mut text_budget = ScanTextBudget::new(max_text_bytes, &cancelled);
+    text_budget.account_sources(&files)?;
+    let manifests = collect_package_manifests(&project_files, &mut text_budget)?;
     emit_code_scan_progress(&progress, "code-scan.collect-files", "complete", 0, 15);
     if files.is_empty() && !has_project_root_marker(root) {
         return Err(CodeScanError::Failed(
@@ -380,7 +404,8 @@ where
         &files,
         &project_files,
         &manifests,
-    ));
+        &mut text_budget,
+    )?);
     emit_code_scan_progress(
         &progress,
         "code-scan.supply-chain",
@@ -405,6 +430,7 @@ where
         &project_files,
         &manifests,
         options,
+        &mut text_budget,
     )?);
     emit_code_scan_progress(
         &progress,
@@ -423,7 +449,7 @@ where
         issues.len(),
         81,
     );
-    issues.extend(analyze_ai_scaffolding(root));
+    issues.extend(analyze_ai_scaffolding(root, &mut text_budget)?);
     emit_code_scan_progress(
         &progress,
         "code-scan.ai-scaffolding",

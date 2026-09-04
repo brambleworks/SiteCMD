@@ -17,10 +17,6 @@
     "process:allow-restart",
     "os:default",
     "clipboard-manager:allow-write-text",
-    "store:allow-load",
-    "store:allow-get",
-    "store:allow-set",
-    "store:allow-save",
     "global-shortcut:default",
     "autostart:default"
   ]

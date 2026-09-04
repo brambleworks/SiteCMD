@@ -36,6 +36,8 @@ const CHECKOUT_URL_PREFIX: &str = "https://shop.sitecmd.com/checkout/buy/";
 #[cfg(feature = "desktop")]
 const APP_COMMANDS: &[&str] = &[
     "ping",
+    "get_app_setting",
+    "set_app_setting",
     "add_project",
     "add_project_by_url",
     "rename_project",

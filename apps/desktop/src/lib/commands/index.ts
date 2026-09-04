@@ -1,6 +1,7 @@
 /** Typed Tauri wrappers; raw invoke calls stay in the transport layer. */
 export * from "./agent-tools";
 export * from "./alerts";
+export * from "./app-settings";
 export * from "./catalog";
 export * from "./connected";
 export * from "./correlation";

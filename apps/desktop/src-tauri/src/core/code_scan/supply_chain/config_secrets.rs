@@ -6,8 +6,9 @@ pub(super) fn collect_config_secret_issues(
     issues: &mut Vec<CodeIssue>,
     seen_ids: &mut HashSet<String>,
     project_files: &[ProjectFile],
-) {
-    for artifact in collect_ai_config_files(project_files) {
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<(), CodeScanError> {
+    for artifact in collect_ai_config_files(project_files, text_budget)? {
         if let Some((line, kind)) = find_hardcoded_config_secret(&artifact.content) {
             let id = format!("config-secret:{}", artifact.relative_path);
             if seen_ids.insert(id.clone()) {
@@ -62,4 +63,5 @@ pub(super) fn collect_config_secret_issues(
             }
         }
     }
+    Ok(())
 }

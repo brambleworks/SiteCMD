@@ -621,7 +621,7 @@ describe.concurrent(
             fixtureRoot,
             "apps/desktop/src/lib/store.ts",
             store
-              .replace("store.get<unknown>(storeKey)", "store.get<T>(storeKey)")
+              .replace("getAppSetting<unknown>(storeKey)", "getAppSetting<T>(storeKey)")
               .replace(
                 "const parsed = parseStoredValue(JSON.parse(raw) as unknown);",
                 "const parsed = JSON.parse(raw) as T;",

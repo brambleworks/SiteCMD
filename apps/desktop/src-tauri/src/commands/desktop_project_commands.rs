@@ -121,26 +121,58 @@ const ALLOWED_EXECUTABLES: &[&str] = &[
     "npm", "pnpm", "yarn", "bun", "cargo", "go", "composer", "drush", "wp", "bundle", "gem",
 ];
 
-fn has_flag(args: &[String], names: &[&str]) -> bool {
-    args.iter().any(|arg| {
-        names.iter().any(|name| {
-            if arg == name {
-                return true;
-            }
-            if name.contains('=') {
-                return false;
-            }
-            arg.strip_prefix(name)
-                .map(|suffix| matches!(suffix, "=true" | "=1"))
-                .unwrap_or(false)
-        })
-    })
+fn script_option_alias(candidate: &str, expected: &str) -> bool {
+    let normalize = |option: &str| {
+        let option = option.trim_start_matches('-');
+        let compact = option.to_ascii_lowercase().replace(['-', '_'], "");
+        let mut name = compact.as_str();
+        while let Some(stripped) = name
+            .strip_prefix("no")
+            .or_else(|| name.strip_prefix("config."))
+        {
+            name = stripped;
+        }
+        name.to_string()
+    };
+    let candidate = normalize(candidate);
+    let expected = normalize(expected);
+    expected.starts_with(&candidate)
 }
 
-fn has_all_flags(args: &[String], names: &[&str]) -> bool {
-    names
-        .iter()
-        .all(|name| has_flag(args, std::slice::from_ref(name)))
+fn has_script_opt_out(args: &[String], name: &str, boolean_values: bool) -> bool {
+    if args.iter().any(|arg| arg == "--") {
+        return false;
+    }
+
+    let mut found = false;
+    for (index, arg) in args.iter().enumerate().skip(1) {
+        if !arg.starts_with('-') {
+            continue;
+        }
+        let (option, value) = arg
+            .split_once('=')
+            .map_or((arg.as_str(), None), |(name, value)| (name, Some(value)));
+        if option != name {
+            if script_option_alias(option, name) {
+                return false;
+            }
+            continue;
+        }
+        match value {
+            Some("true" | "1") if boolean_values => {}
+            Some(_) => return false,
+            None => {
+                let next = args.get(index + 1).map(String::as_str);
+                if matches!(next, Some("false" | "0" | "off" | "no"))
+                    || (!boolean_values && matches!(next, Some("true" | "1")))
+                {
+                    return false;
+                }
+            }
+        }
+        found = true;
+    }
+    found
 }
 
 fn installer_requires_script_opt_out(
@@ -155,7 +187,7 @@ fn installer_requires_script_opt_out(
             Some(&["--ignore-scripts"])
         }
         "yarn" if matches!(command, "install" | "add" | "upgrade" | "up") => {
-            Some(&["--ignore-scripts", "--mode=skip-builds"])
+            Some(&["--ignore-scripts"])
         }
         "bun" if matches!(command, "install" | "add" | "update" | "upgrade") => {
             Some(&["--ignore-scripts"])
@@ -247,6 +279,9 @@ pub(crate) fn validate_project_command_policy(
     }
 
     let first = args.first().map(String::as_str).unwrap_or_default();
+    if first.is_empty() {
+        return Err("Project commands must include an explicit command name.".into());
+    }
     if first.starts_with('-') {
         return Err(
             "Project commands must put the command name before flags so SiteCMD can verify it."
@@ -260,7 +295,7 @@ pub(crate) fn validate_project_command_policy(
         }
         "cargo" => matches!(first, "run"),
         "go" => matches!(first, "run" | "generate"),
-        "composer" => matches!(first, "exec" | "run" | "run-script"),
+        "composer" => !matches!(first, "install" | "update" | "require" | "remove"),
         "bundle" => matches!(first, "exec"),
         "gem" => matches!(first, "exec"),
         "wp" => matches!(first, "eval" | "eval-file" | "shell"),
@@ -276,9 +311,13 @@ pub(crate) fn validate_project_command_policy(
     }
 
     if let Some(required_flags) = installer_requires_script_opt_out(executable, first) {
-        if !has_flag(args, required_flags) {
+        let boolean_values = matches!(executable, "npm" | "pnpm");
+        if !required_flags
+            .iter()
+            .all(|flag| has_script_opt_out(args, flag, boolean_values))
+        {
             return Err(format!(
-                "'{} {}' can run dependency lifecycle scripts. Add {} or run it manually in a terminal if you trust it.",
+                "'{} {}' can run dependency lifecycle scripts. Use {} without conflicting, negated, or abbreviated options or a -- separator, or run it manually in a terminal if you trust it.",
                 executable,
                 first,
                 required_flags.join(" or ")
@@ -288,7 +327,9 @@ pub(crate) fn validate_project_command_policy(
 
     if executable == "composer"
         && matches!(first, "install" | "update" | "require" | "remove")
-        && !has_all_flags(args, &["--no-scripts", "--no-plugins"])
+        && !["--no-scripts", "--no-plugins"]
+            .iter()
+            .all(|flag| has_script_opt_out(args, flag, false))
     {
         return Err(format!(
             "'composer {}' can execute dependency scripts or Composer plugins. Add --no-scripts and --no-plugins, or run it manually in a terminal if you trust the project.",
@@ -304,6 +345,25 @@ pub(crate) fn validate_project_command_policy(
     }
 
     Ok(())
+}
+
+fn enforced_project_command_args(
+    executable: &str,
+    mut args: Vec<String>,
+) -> Result<Vec<String>, String> {
+    validate_project_command_policy(executable, &args)?;
+    let first = args.first().map(String::as_str).unwrap_or_default();
+    let flags = if executable == "composer"
+        && matches!(first, "install" | "update" | "require" | "remove")
+    {
+        &["--no-scripts", "--no-plugins"][..]
+    } else {
+        installer_requires_script_opt_out(executable, first).unwrap_or_default()
+    };
+    // Bookend user options so a value-consuming flag cannot swallow the opt-out.
+    args.splice(1..1, flags.iter().map(|flag| (*flag).to_string()));
+    args.extend(flags.iter().map(|flag| (*flag).to_string()));
+    Ok(args)
 }
 
 pub(crate) fn resolve_registered_project_target(
@@ -333,6 +393,7 @@ pub(crate) async fn run_project_command_process(
     args: Vec<String>,
     working_dir: &Path,
 ) -> Result<DesktopCommandResult, String> {
+    let args = enforced_project_command_args(&executable, args)?;
     run_project_command_process_with_timeouts(
         executable,
         args,
@@ -398,6 +459,10 @@ async fn run_project_command_process_with_timeouts(
         success,
     })
 }
+
+#[cfg(test)]
+#[path = "desktop_project_command_policy_tests.rs"]
+mod policy_tests;
 
 #[cfg(test)]
 mod tests {

@@ -45,7 +45,7 @@ export function desktopFrontendJsonSafetyFailures(read, sourceFiles) {
   );
   check(
     storeSource.includes("parseStoredValue: (value: unknown) => T | null") &&
-      storeSource.includes("store.get<unknown>(storeKey)") &&
+      storeSource.includes("getAppSetting<unknown>(storeKey)") &&
       !storeSource.includes("JSON.parse(raw) as T") &&
       uncheckedRawLocalStorageCasts.length === 0 &&
       migrateCallsWithoutParser.length === 0,
