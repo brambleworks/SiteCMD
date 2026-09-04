@@ -63,6 +63,10 @@ const TIERS = [
       name: "gitleaks",
       cmd: 'gitleaks git --redact --no-banner --log-opts="origin/main..HEAD"',
     },
+    // The same engine and suite the CodeQL workflow runs, limited to alerts on
+    // lines this branch added, so a pull-request blocker surfaces here instead
+    // of one CI round trip at a time.
+    { name: "codeql", cmd: "pnpm run audit:codeql" },
     { name: "agents-md", cmd: "node tools/scripts/audit/check-agents-md.mjs" },
     { name: "regex-audit", cmd: "pnpm run audit:regex" },
     {
