@@ -116,13 +116,39 @@ fn test_warn_applies_half_penalty() {
 }
 
 #[test]
-fn warn_contributes_half_weight_to_the_overall_curve() {
-    let warns: Vec<CheckResult> = (0..4)
-        .map(|_| make_result(ScanCategory::Security, Severity::High, CheckStatus::Warn))
-        .collect();
-    let fails: Vec<CheckResult> = (0..4)
+fn one_check_reported_several_times_deducts_once() {
+    // Some checks emit a row per occurrence, such as one per malformed
+    // Set-Cookie header. The issue list files those under one check id and the
+    // dashboard score deducts once for that group, so a scan's score must too.
+    let repeated: Vec<CheckResult> = (0..4)
         .map(|_| make_result(ScanCategory::Security, Severity::High, CheckStatus::Fail))
         .collect();
+    let (many, _) = calculate_scores(&repeated);
+    let (once, _) = calculate_scores(&repeated[..1]);
+    assert_eq!(many, once, "four rows of one check are one defect");
+
+    // Negative control: distinct checks still deduct separately.
+    let mut two_checks = repeated[..2].to_vec();
+    two_checks[1].check_id = "security.other".into();
+    let (separate, _) = calculate_scores(&two_checks);
+    assert!(separate < once, "two different checks still cost twice");
+}
+
+#[test]
+fn warn_contributes_half_weight_to_the_overall_curve() {
+    // Four distinct checks: this test is about the weight curve, not identity.
+    // Four rows of one check are one defect and deduct once, which
+    // `one_check_reported_several_times_deducts_once` pins.
+    let distinct = |status| -> Vec<CheckResult> {
+        (0..4)
+            .map(|i| CheckResult {
+                check_id: format!("security.test_{i}"),
+                ..make_result(ScanCategory::Security, Severity::High, status)
+            })
+            .collect()
+    };
+    let warns = distinct(CheckStatus::Warn);
+    let fails = distinct(CheckStatus::Fail);
     let (warn_overall, _) = calculate_scores(&warns);
     let (fail_overall, _) = calculate_scores(&fails);
     assert!(

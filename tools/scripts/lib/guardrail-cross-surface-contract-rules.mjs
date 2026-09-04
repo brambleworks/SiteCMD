@@ -137,8 +137,11 @@ export function crossSurfaceContractFailures(read) {
   const sitemapSource = read("apps/desktop/src-tauri/src/core/sitemap.rs");
   check(
     sitemapSource.includes("async fn validate_sitemap_target(") &&
-      /validate_sitemap_target\(&?sitemap_url, allow_local_dev\)/.test(sitemapSource) &&
-      /validate_sitemap_target\(&?child_url, allow_local_dev\)/.test(sitemapSource),
+      // The second argument became the scan's LocalOrigin when derived URLs
+      // started inheriting the originating target's reach; the invariant is
+      // still that both attacker-supplied URLs are validated before a fetch.
+      /validate_sitemap_target\(&?sitemap_url, origin\)/.test(sitemapSource) &&
+      /validate_sitemap_target\(&?child_url, origin\)/.test(sitemapSource),
     "core::sitemap must call validate_sitemap_target on every attacker-supplied URL (robots.txt Sitemap: directive AND <sitemapindex> child entry) before fetching. Removing either call re-opens an SSRF vector via crafted target sites.",
   );
 

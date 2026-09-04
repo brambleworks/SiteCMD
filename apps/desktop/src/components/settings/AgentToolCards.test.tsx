@@ -22,6 +22,21 @@ function renderAgentTools(ui: React.ReactElement) {
   return render(ui, { wrapper: withQueryClient() });
 }
 
+function AgentToolsFixture() {
+  return (
+    <AgentToolCards
+      renderActiveTools={(rows) =>
+        rows.length > 0 ? (
+          <section>
+            <p>Active</p>
+            {rows}
+          </section>
+        ) : null
+      }
+    />
+  );
+}
+
 const PLANNED_CHANGE = 'Add a "sitecmd" entry to mcpServers in ~/.claude.json';
 
 function toolStatus(
@@ -66,7 +81,7 @@ describe("AgentToolCards", () => {
       toolStatus({ tool: "codex", installed: false }),
     ]);
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     expect(await screen.findByText("Claude Code")).toBeInTheDocument();
     const claudeRow = rowByName("Claude Code");
@@ -93,12 +108,12 @@ describe("AgentToolCards", () => {
       return secondRead;
     });
     const queryClient = createTestQueryClient();
-    const first = render(<AgentToolCards />, { wrapper: withQueryClient(queryClient) });
+    const first = render(<AgentToolsFixture />, { wrapper: withQueryClient(queryClient) });
     expect(await screen.findByText("Claude Code")).toBeInTheDocument();
     expect(rowByName("Claude Code")).toHaveTextContent("Connect");
     first.unmount();
 
-    render(<AgentToolCards />, { wrapper: withQueryClient(queryClient) });
+    render(<AgentToolsFixture />, { wrapper: withQueryClient(queryClient) });
 
     // The cached row remains available while the filesystem detection is in
     // flight, so revisiting Settings does not flash the full skeleton.
@@ -125,7 +140,7 @@ describe("AgentToolCards", () => {
       return null;
     });
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     fireEvent.click(await screen.findByText("Claude Code"));
 
@@ -168,7 +183,7 @@ describe("AgentToolCards", () => {
       return null;
     });
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     await screen.findByText("Codex");
     const row = rowByName("Codex");
@@ -195,7 +210,7 @@ describe("AgentToolCards", () => {
       return null;
     });
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     const cursorRow = (await screen.findByText("Cursor")).closest("button")!;
     expect(cursorRow).toHaveTextContent("Manage");
@@ -215,7 +230,7 @@ describe("AgentToolCards", () => {
   it("node missing shows the shared notice and disables the row", async () => {
     mockDetect([toolStatus({ tool: "claude-code", installed: true, nodeAvailable: false })]);
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     expect(
       await screen.findByText(
@@ -233,7 +248,7 @@ describe("AgentToolCards", () => {
     });
     invokeMock.mockRejectedValueOnce(new Error("detection blew up"));
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     expect(await screen.findByText("Error: detection blew up")).toBeInTheDocument();
 
@@ -256,7 +271,7 @@ describe("AgentToolCards", () => {
       return null;
     });
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     fireEvent.click(await screen.findByText("Claude Code"));
     fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
@@ -269,7 +284,7 @@ describe("AgentToolCards", () => {
   it("closing the modal does not register", async () => {
     mockDetect([toolStatus({ tool: "claude-code", installed: true })]);
 
-    renderAgentTools(<AgentToolCards />);
+    renderAgentTools(<AgentToolsFixture />);
 
     fireEvent.click(await screen.findByText("Claude Code"));
     expect(screen.getByText(PLANNED_CHANGE)).toBeInTheDocument();

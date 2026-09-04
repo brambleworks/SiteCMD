@@ -204,6 +204,10 @@ pub async fn set_telemetry_consent(
         super::confirm_sensitive_action(
             app,
             "Enable Optional Telemetry",
+            // Opting in is a grant the person just made, not something being
+            // done to them, so the prompt confirms intent without the icon
+            // that the destructive actions rely on to mean something.
+            super::SensitiveActionTone::Notice,
             format!(
                 "Allow SiteCMD to send {channels}? Usage data goes only to telemetry.sitecmd.com. Crash reports go only to SiteCMD's Sentry ingest project. Scan URLs, source code, credentials, and local file paths are excluded."
             ),

@@ -10,9 +10,9 @@ use super::{run_blocking, sanitize_error, validate_url_async};
 pub async fn discover_sitemap(url: String) -> Result<crate::core::sitemap::SitemapResult, String> {
     validate_url_async(&url).await?;
     let parsed = url::Url::parse(&url).map_err(|e| sanitize_error(format!("Invalid URL: {e}")))?;
-    let is_strict_local = crate::core::localhost::is_strict_localhost(&parsed);
-    let client = crate::http_client::for_url(is_strict_local).clone();
-    Ok(crate::core::sitemap::discover_sitemap(&client, &url, is_strict_local).await)
+    let origin = crate::network_policy::LocalOrigin::classify_resolved(&parsed).await;
+    let client = crate::http_client::for_scan_origin(origin).clone();
+    Ok(crate::core::sitemap::discover_sitemap(&client, &url, origin).await)
 }
 
 /// Fetch a sitemap from a user-specified URL (manual entry).
@@ -24,9 +24,9 @@ pub async fn fetch_sitemap_manual(
     validate_url_async(&sitemap_url).await?;
     let parsed =
         url::Url::parse(&sitemap_url).map_err(|e| sanitize_error(format!("Invalid URL: {e}")))?;
-    let is_strict_local = crate::core::localhost::is_strict_localhost(&parsed);
-    let client = crate::http_client::for_url(is_strict_local).clone();
-    Ok(crate::core::sitemap::fetch_sitemap_url(&client, &sitemap_url, is_strict_local).await)
+    let origin = crate::network_policy::LocalOrigin::classify_resolved(&parsed).await;
+    let client = crate::http_client::for_scan_origin(origin).clone();
+    Ok(crate::core::sitemap::fetch_sitemap_url(&client, &sitemap_url, origin).await)
 }
 
 /// Save a list of page URLs to the pages table for a site.
@@ -68,8 +68,8 @@ pub async fn refresh_sitemap(
 ) -> Result<crate::core::sitemap::SitemapResult, String> {
     validate_url_async(&url).await?;
     let parsed = url::Url::parse(&url).map_err(|e| sanitize_error(format!("Invalid URL: {e}")))?;
-    let is_strict_local = crate::core::localhost::is_strict_localhost(&parsed);
-    let client = crate::http_client::for_url(is_strict_local).clone();
+    let origin = crate::network_policy::LocalOrigin::classify_resolved(&parsed).await;
+    let client = crate::http_client::for_scan_origin(origin).clone();
 
     // Check if there's a stored sitemap URL
     let db = (*db).clone();
@@ -80,9 +80,9 @@ pub async fn refresh_sitemap(
 
     let result = if let Some(ref smap_url) = sitemap_url {
         validate_url_async(smap_url).await?;
-        crate::core::sitemap::fetch_sitemap_url(&client, smap_url, is_strict_local).await
+        crate::core::sitemap::fetch_sitemap_url(&client, smap_url, origin).await
     } else {
-        crate::core::sitemap::discover_sitemap(&client, &url, is_strict_local).await
+        crate::core::sitemap::discover_sitemap(&client, &url, origin).await
     };
 
     persist_refreshed_sitemap(db, site_id, &result, sitemap_url.is_some()).await?;

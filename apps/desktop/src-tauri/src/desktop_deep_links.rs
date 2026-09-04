@@ -226,6 +226,7 @@ async fn handle_cli_import_deep_link(
     crate::commands::confirm_sensitive_action(
         app.clone(),
         "Import SiteCMD Project?",
+        crate::commands::SensitiveActionTone::Warning,
         message,
         "Import Project",
     )

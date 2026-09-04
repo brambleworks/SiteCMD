@@ -25,6 +25,7 @@ Use `docs/` only for information that should be treated as current project truth
 - [Issue and alert architecture](engineering/issue-and-alert-architecture.md)
 - [Manual testing runbook](qa/manual-testing-runbook.md)
 - [Acceptance review template](qa/acceptance-review-template.md)
+- [Agent workflow benchmark](qa/agent-workflow-benchmark.md)
 
 ## Historical procedures
 

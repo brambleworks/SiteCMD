@@ -24,7 +24,7 @@ pub use sitecmd_engine::checks::seo::url_structure::UrlStructureCheck;
 /// page-subresource network policy as the engine's allow-target gate.
 fn targets_for(ctx: &CheckContext) -> LinkTargets {
     resolve_link_targets(&ctx.page, |resolved| {
-        crate::network_policy::validate_page_subresource_target(resolved, ctx.is_strict_localhost)
+        crate::network_policy::validate_page_subresource_target(resolved, ctx.subordinate_policy())
             .is_ok()
     })
 }

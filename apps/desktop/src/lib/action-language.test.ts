@@ -167,8 +167,8 @@ describe("action language", () => {
     expect(getWebCategoryOpenLabel("performance")).toBe("Open Performance Results");
     expect(getWebCategoryOpenLabel("accessibility")).toBe("Open Accessibility Results");
     expect(getWebCategoryOpenLabel("polish")).toBe("Open Polish Results");
-    expect(getWebCategoryOpenLabel("compliance")).toBe("Open Legal Results");
-    expect(getWebCategoryOpenLabel("legal")).toBe("Open Legal Results");
+    expect(getWebCategoryOpenLabel("compliance")).toBe("Open Privacy Results");
+    expect(getWebCategoryOpenLabel("legal")).toBe("Open Privacy Results");
     expect(getWebCategoryOpenLabel("unknown")).toBe("Open Issues");
   });
 

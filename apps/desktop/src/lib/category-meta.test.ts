@@ -27,7 +27,13 @@ describe("CATEGORY_META", () => {
     }
   });
 
-  it("compliance is labeled 'Legal' per the product copy", () => {
-    expect(CATEGORY_META.compliance.label).toBe("Legal");
+  it("compliance is labeled for what it observes, not a legal verdict", () => {
+    // The checks under this category disclaim legal conclusions in their own
+    // copy (consent_mode.rs, cookie_consent.rs, gdpr.rs, trackers.rs), so the
+    // label above them must not promise one either.
+    expect(CATEGORY_META.compliance.label).toBe("Privacy & Policies");
+    expect(CATEGORY_META.compliance.shortLabel).toBe("Privacy");
+    expect(CATEGORY_META.compliance.label).not.toMatch(/legal/i);
+    expect(CATEGORY_META.compliance.description).not.toMatch(/legal/i);
   });
 });

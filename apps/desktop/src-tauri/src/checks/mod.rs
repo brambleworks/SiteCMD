@@ -62,6 +62,28 @@ impl CheckContext {
         self
     }
 
+    /// Record the scan target's reach so subordinate fetches inherit it.
+    pub(crate) fn with_origin(self, origin: crate::network_policy::LocalOrigin) -> Self {
+        self.probe_cache
+            .origin
+            .set(origin)
+            .expect("origin is assigned once while building a scan context");
+        self
+    }
+
+    /// The policy for a URL this page steers the scan to. A page may name any
+    /// URL; it never earns more reach than the target the person asked for.
+    /// Without a recorded origin the target's own address answers, which loses
+    /// only the case of a hostname that resolves into a private network.
+    pub(crate) fn subordinate_policy(&self) -> crate::network_policy::UrlPolicy {
+        self.probe_cache
+            .origin
+            .get()
+            .copied()
+            .unwrap_or_else(|| crate::network_policy::LocalOrigin::classify(&self.url))
+            .subordinate_policy()
+    }
+
     pub(crate) fn requested_url(&self) -> &url::Url {
         self.probe_cache.requested_url.get().unwrap_or(&self.url)
     }

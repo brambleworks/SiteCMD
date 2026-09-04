@@ -127,17 +127,18 @@ pub(crate) fn sanitize_error(msg: impl std::fmt::Display) -> String {
     crate::log_sanitizer::redact_secrets(&restored)
 }
 
-/// Validate a scan URL. Local development loopback URLs are allowed, but
-/// private/link-local targets and DNS names resolving to them are rejected.
+/// Validate a scan URL the person named. It may point at their own machine or
+/// the networks it is attached to; link-local targets, the addresses that are
+/// not hosts, and DNS names resolving to them are rejected.
 #[cfg(test)]
 pub(crate) fn validate_url(url: &str) -> Result<(), String> {
-    crate::network_policy::validate_url_blocking(url, crate::network_policy::UrlPolicy::Scan)
+    crate::network_policy::validate_url_blocking(url, crate::network_policy::UrlPolicy::ScanTarget)
 }
 
 /// Async version of `validate_url`; use this from Tauri commands so DNS
 /// resolution does not occupy Tokio's foreground IPC workers.
 pub(crate) async fn validate_url_async(url: &str) -> Result<(), String> {
-    crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::Scan).await
+    crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::ScanTarget).await
 }
 
 /// Validate an outbound callback/webhook URL. Unlike scans, external callbacks
@@ -187,6 +188,17 @@ impl From<SensitiveActionError> for String {
     }
 }
 
+/// How loud a native confirmation should be. `Warning` is for an action that
+/// destroys data, revokes access, or discloses a secret, where the dialog is
+/// telling the person what is about to happen to them. `Notice` is for the
+/// rest, where the dialog exists only to prove a person asked for the action
+/// and a warning icon would overstate a save they just clicked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SensitiveActionTone {
+    Notice,
+    Warning,
+}
+
 /// Whether a native confirmation dialog is currently on screen. See the swap
 /// in `confirm_sensitive_action` for why this outlives the timeout.
 static CONFIRM_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -194,10 +206,16 @@ static CONFIRM_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 pub(crate) async fn confirm_sensitive_action(
     app: tauri::AppHandle,
     title: &'static str,
+    tone: SensitiveActionTone,
     message: String,
     approve_label: &'static str,
 ) -> Result<(), SensitiveActionError> {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    let kind = match tone {
+        SensitiveActionTone::Notice => MessageDialogKind::Info,
+        SensitiveActionTone::Warning => MessageDialogKind::Warning,
+    };
 
     // Native dialogs cannot be cancelled, so serialize them until each closes.
     if CONFIRM_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -211,7 +229,7 @@ pub(crate) async fn confirm_sensitive_action(
             .dialog()
             .message(message)
             .title(title)
-            .kind(MessageDialogKind::Warning)
+            .kind(kind)
             .buttons(MessageDialogButtons::OkCancelCustom(
                 approve_label.to_string(),
                 "Cancel".to_string(),
@@ -288,10 +306,21 @@ mod tests {
     }
 
     #[test]
-    fn validate_url_rejects_private_non_loopback_targets() {
-        assert!(validate_url("http://192.168.1.10").is_err());
-        assert!(validate_url("http://10.0.0.5").is_err());
+    fn validate_url_accepts_a_dev_server_on_the_persons_own_network() {
+        // The app and the CLI reach the same scanner, so they answer the same
+        // way about a LAN dev server. They did not before: the app refused it
+        // here while the CLI never checked a bare address at all.
+        assert!(validate_url("http://192.168.1.10").is_ok());
+        assert!(validate_url("http://10.0.0.5").is_ok());
+        assert!(validate_url("http://100.100.4.7").is_ok());
+    }
+
+    #[test]
+    fn validate_url_still_rejects_link_local_and_the_addresses_that_are_not_hosts() {
+        // Cloud metadata answers on link-local and a scan body travels.
         assert!(validate_url("http://169.254.169.254").is_err());
+        assert!(validate_url("http://[fe80::1]").is_err());
+        assert!(validate_url("http://224.0.0.1").is_err());
     }
 
     #[test]

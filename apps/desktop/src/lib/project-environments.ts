@@ -67,6 +67,31 @@ export function getProjectUrlIdentityKey(raw: string): string {
 // src-tauri/src/core/localhost.rs.
 const LOCAL_DEV_HOST_SUFFIXES = [".ddev.site", ".lndo.site", ".docksal.site", ".test"];
 
+// A dev server on the local network is reached by address, with no hostname to
+// match: 192.168.x, 10.x, 172.16-31.x, the shared range tailnets use, and IPv6
+// unique-local. Link-local is absent on purpose, matching the scan boundary
+// that refuses it. Mirrored by `is_private_network_ip` in
+// src-tauri/src/network_policy.rs, which decides what a scan may reach; a name
+// this misses would read Local in Rust and Production here.
+function isPrivateNetworkHost(hostname: string): boolean {
+  const bare =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(bare);
+  if (octets) {
+    const parts = octets.slice(1).map(Number);
+    if (parts.some((part) => part > 255)) return false;
+    const [a, b] = parts;
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127)
+    );
+  }
+  return /^f[cd][0-9a-f]{2}:/i.test(bare);
+}
+
 export function inferProjectEnvironmentFromUrl(raw: string): ProjectEnvironment {
   const normalized = normalizeProjectUrlInput(raw);
   if (!normalized) return "production";
@@ -82,7 +107,8 @@ export function inferProjectEnvironmentFromUrl(raw: string): ProjectEnvironment 
       lower === "::1" ||
       lower.endsWith(".local") ||
       lower.includes("localhost") ||
-      LOCAL_DEV_HOST_SUFFIXES.some((suffix) => lower.endsWith(suffix))
+      LOCAL_DEV_HOST_SUFFIXES.some((suffix) => lower.endsWith(suffix)) ||
+      isPrivateNetworkHost(lower)
     ) {
       return "local";
     }

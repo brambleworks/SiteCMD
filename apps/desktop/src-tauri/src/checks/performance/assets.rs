@@ -26,14 +26,13 @@ impl AsyncCheck for AssetSamplerCheck {
     }
 
     async fn run(&self, ctx: &CheckContext) -> Vec<CheckResult> {
-        let allow_local_dev = ctx.is_strict_localhost;
+        let policy = ctx.subordinate_policy();
         let collection = assets::collect_assets(
             &ctx.body,
             ctx.body_lower(),
             &ctx.url,
             |target| {
-                crate::network_policy::validate_page_subresource_target(target, allow_local_dev)
-                    .is_ok()
+                crate::network_policy::validate_page_subresource_target(target, policy).is_ok()
             },
             crate::constants::ASSET_SAMPLE_LIMIT,
         );
@@ -43,7 +42,7 @@ impl AsyncCheck for AssetSamplerCheck {
         ));
         let mut futures = Vec::new();
         for asset in &collection.sampled {
-            let client = measurement_client(allow_local_dev).clone();
+            let client = measurement_client(ctx.is_strict_localhost).clone();
             let asset = asset.clone();
             let sem = semaphore.clone();
             futures.push(tokio::spawn(async move {
@@ -129,7 +128,15 @@ mod tests {
             html,
             &lower,
             &page_url,
-            |target| crate::network_policy::validate_page_subresource_target(target, false).is_ok(),
+            |target| {
+                crate::network_policy::validate_page_subresource_target(
+                    target,
+                    crate::network_policy::UrlPolicy::Redirect {
+                        allow_local_dev: false,
+                    },
+                )
+                .is_ok()
+            },
             30,
         );
         assert_eq!(collection.sampled.len(), 1);
@@ -145,14 +152,14 @@ mod tests {
         let html = r#"<img src="http://127.0.0.1:5173/hero.png" alt="a">"#;
         let lower = html.to_ascii_lowercase();
         let collect = |page: &str, allow_local_dev: bool| {
+            let policy = crate::network_policy::UrlPolicy::Redirect { allow_local_dev };
             let page_url = url::Url::parse(page).expect("page url");
             assets::collect_assets(
                 html,
                 &lower,
                 &page_url,
                 |target| {
-                    crate::network_policy::validate_page_subresource_target(target, allow_local_dev)
-                        .is_ok()
+                    crate::network_policy::validate_page_subresource_target(target, policy).is_ok()
                 },
                 30,
             )

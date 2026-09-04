@@ -195,7 +195,7 @@ pub async fn verify_checks<F: Fn() -> bool>(
             &ctx.body,
             &ctx.url,
             &ctx.client,
-            ctx.is_strict_localhost,
+            crate::network_policy::LocalOrigin::classify(&ctx.url),
             // Verification re-reads the page under test; never reuse scan CSS.
             None,
         )

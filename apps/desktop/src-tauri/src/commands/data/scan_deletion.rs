@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use crate::commands::{confirm_sensitive_action, run_blocking, sanitize_error};
+use crate::commands::{
+    confirm_sensitive_action, run_blocking, sanitize_error, SensitiveActionTone,
+};
 use crate::db::Database;
 
 /// Delete all scan history (scans + issues) across all sites. Keeps projects and integrations.
@@ -13,6 +15,7 @@ pub async fn clear_scan_history(
     if let Err(e) = confirm_sensitive_action(
         app,
         "Clear scan history?",
+        SensitiveActionTone::Warning,
         "This deletes all saved scans and issue history while keeping your projects and integrations.".to_string(),
         "Clear History",
     )
@@ -58,6 +61,7 @@ pub async fn delete_scan(
     if let Err(e) = confirm_sensitive_action(
         app,
         "Delete this scan?",
+        SensitiveActionTone::Warning,
         "This removes the selected scan and the issues created from it.".to_string(),
         "Delete Scan",
     )
@@ -95,6 +99,7 @@ pub async fn delete_site_scans(
     if let Err(e) = confirm_sensitive_action(
         app,
         "Delete this site's scan history?",
+        SensitiveActionTone::Warning,
         "This removes every saved scan and issue tied to the selected site.".to_string(),
         "Delete Scans",
     )

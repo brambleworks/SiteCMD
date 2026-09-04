@@ -29,6 +29,11 @@ pub struct ScoreFinding<'a> {
     pub weight: f64,
     /// Whether this member alone is a full-weight Critical finding.
     pub full_weight_critical: bool,
+    /// The defect this finding reports, when that is not the check itself.
+    /// Two checks that grade one defect name the same identity, so the score
+    /// charges it once. `None` derives the identity from `check_id`: the Code
+    /// Scan rule behind an occurrence, or the check id itself.
+    pub identity: Option<&'a str>,
 }
 
 /// One deduped display row, aggregated across its members.
@@ -61,7 +66,9 @@ pub fn dedup_score_rows<'a>(
     let mut index_by_key: HashMap<&'a str, usize> = HashMap::new();
     let mut rows: Vec<ScoreRow<'a>> = Vec::new();
     for finding in findings {
-        let key = code_rule_id(finding.check_id).unwrap_or(finding.check_id);
+        let key = finding
+            .identity
+            .unwrap_or_else(|| code_rule_id(finding.check_id).unwrap_or(finding.check_id));
         let cap_eligible = finding_cap_eligible(&finding);
         match index_by_key.get(key) {
             None => {
@@ -164,6 +171,7 @@ mod tests {
             cap_confidence,
             weight: 1.0,
             full_weight_critical: severity == Severity::Critical,
+            identity: None,
         }
     }
 
@@ -175,6 +183,7 @@ mod tests {
             cap_confidence: false,
             weight,
             full_weight_critical: severity == Severity::Critical && weight >= 1.0,
+            identity: None,
         }
     }
 
@@ -254,6 +263,7 @@ mod tests {
                 cap_confidence: false,
                 weight: 1.0,
                 full_weight_critical: false,
+                identity: None,
             },
             ScoreFinding {
                 check_id: "code_scan.some-rule",
@@ -262,6 +272,7 @@ mod tests {
                 cap_confidence: false,
                 weight: 1.0,
                 full_weight_critical: true,
+                identity: None,
             },
         ]);
         assert_eq!(rows[0].category, "security");

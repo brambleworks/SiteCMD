@@ -101,7 +101,7 @@ pub(super) async fn dispatch(
             json_response(result)
         }
         "open_external_url" => {
-            cmds::desktop::open_external_url(app, arg_string(&args, "url", "url")?).await?;
+            cmds::desktop::open_external_url(arg_string(&args, "url", "url")?)?;
             json_response(())
         }
         _ => Err(format!(

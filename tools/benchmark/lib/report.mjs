@@ -77,10 +77,17 @@ function fmtInt(n) {
   return Math.round(n).toLocaleString("en-US");
 }
 
-export function renderMarkdown({ perArm, arms, targets, config, stamp }) {
+export function renderMarkdown({ perArm, arms, targets, config, stamp, dryRun = false }) {
+  if (dryRun || targets.some((target) => target.runs.some((run) => run.fix?.dryRun))) {
+    return "# Context-efficiency benchmark\n\nDry run only. No agent calls or repair outcomes were measured. Not evidence for product claims.\n";
+  }
   const ref = perArm.brief; // brief is the reference arm
   const lines = [];
   lines.push("# Context-efficiency benchmark");
+  lines.push("");
+  lines.push(
+    "Exploratory scanner-clearance results only, not independently verified repairs or evidence for marketing claims. Metric-less failures are excluded from these legacy aggregates; use the paired workflow benchmark for complete accounting.",
+  );
   lines.push("");
   lines.push(`Generated: ${stamp}`);
   lines.push(
@@ -100,7 +107,7 @@ export function renderMarkdown({ perArm, arms, targets, config, stamp }) {
   lines.push("## Per-arm results");
   lines.push("");
   lines.push(
-    "| Arm | Runs | Resolved | Resolution rate | Regressions | Turns | Tokens | Cost (USD) | Wall (s) |",
+    "| Arm | Runs | Findings cleared | Clearance rate | New findings | Turns | Tokens | Estimated cost (USD) | Wall (s) |",
   );
   lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const arm of arms) {
@@ -123,17 +130,17 @@ export function renderMarkdown({ perArm, arms, targets, config, stamp }) {
     lines.push("");
   }
 
-  lines.push("## Efficiency: compute per issue actually fixed");
+  lines.push("## Exploratory compute per scanner finding cleared");
   lines.push("");
-  lines.push("| Arm | Tokens / resolved issue | Cost / resolved issue | vs brief (cost) |");
+  lines.push("| Arm | Tokens / finding cleared | Cost / finding cleared | vs brief (cost) |");
   lines.push("| --- | --- | --- | --- |");
   for (const arm of arms) {
     const a = perArm[arm];
     let tpr, cpr, vs;
-    if (!a.costPerResolved) {
-      tpr = "0 fixed";
-      cpr = `$${fmt(a.meanCost, 2)} spent, 0 fixed`;
-      vs = "never breaks even";
+    if (a.costPerResolved === null) {
+      tpr = "n/a";
+      cpr = "n/a";
+      vs = "n/a";
     } else {
       tpr = fmtInt(a.tokensPerResolved);
       cpr = `$${fmt(a.costPerResolved, 4)}`;
@@ -143,15 +150,15 @@ export function renderMarkdown({ perArm, arms, targets, config, stamp }) {
     lines.push(`| ${ARM_LABEL[arm] || arm} | ${tpr} | ${cpr} | ${vs} |`);
   }
   lines.push("");
-  lines.push("> `vs brief (cost)` is cost-per-resolved-issue relative to the brief arm.");
-  lines.push("> A value of 2.0x means that arm spent twice as much to fix the same issue.");
+  lines.push("> `vs brief (cost)` compares pooled spending per scanner finding cleared.");
   lines.push(
-    "> `never breaks even` = the arm spent real money but resolved zero scanner findings.",
+    "> Arms may clear different findings; this is not a paired comparison of the same repair.",
   );
+  lines.push("> No clearances produce n/a, not an infinite savings or break-even claim.");
   lines.push("");
 
   if (arms.some((arm) => perArm[arm].isConverge)) {
-    lines.push("## Convergence (cost to reach zero issues)");
+    lines.push("## Convergence (cost to clear baseline scanner findings)");
     lines.push("");
     lines.push("| Arm | Outcome | Mean rounds | Final resolution | Total turns | Total cost |");
     lines.push("| --- | --- | --- | --- | --- | --- |");
@@ -171,7 +178,7 @@ export function renderMarkdown({ perArm, arms, targets, config, stamp }) {
     }
     lines.push("");
     lines.push(
-      "> `done` = resolved every baseline issue. `stalled` = stopped making progress. `capped` = hit the round backstop.",
+      "> `done` = cleared every baseline finding. `stalled` = stopped making progress. `capped` = hit the round backstop.",
     );
     lines.push(
       "> Total cost here is summed across all rounds: the real spend to get the repo to that state.",
@@ -182,13 +189,13 @@ export function renderMarkdown({ perArm, arms, targets, config, stamp }) {
   lines.push("## Fairness notes");
   lines.push("");
   lines.push(
-    "- All arms run the SAME task on a FRESH copy of the SAME repo with the SAME model and turn cap; only context richness differs.",
+    "- Arms use fresh copies of the same repository and model, but prompts provide different discovery help. They do not measure the MCP workflow.",
   );
   lines.push(
-    "- Resolution is verified by re-running the scanner and diffing `checkId` sets, not by trusting the agent's self-report.",
+    "- Clearance means a scanner checkId disappeared. Renames, suppressions, or broken functionality can clear findings without repairing a defect.",
   );
   lines.push(
-    "- The brief is produced by a deterministic scanner (no LLM tokens), so the brief arm is not charged model tokens for its context. Scanner wall-time is reported separately in the raw JSON.",
+    "- Creating the brief uses no model tokens, but the model consumes tokens when reading it. Scanner wall-time is recorded separately in the raw JSON.",
   );
   lines.push("");
   return lines.join("\n");

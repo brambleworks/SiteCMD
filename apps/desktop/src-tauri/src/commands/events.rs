@@ -4,7 +4,7 @@ use chrono::Utc;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use super::{confirm_sensitive_action, run_blocking, sanitize_error};
+use super::{confirm_sensitive_action, run_blocking, sanitize_error, SensitiveActionTone};
 
 /// Parse a frontend-supplied severity string into `EventSeverity`. Falls back
 /// to `Info` for `None`, empty, or unrecognized values - record_*_event
@@ -86,6 +86,7 @@ pub async fn delete_event(
     confirm_sensitive_action(
         app,
         "Delete this activity event?",
+        SensitiveActionTone::Warning,
         "This removes the selected activity entry from the timeline.".to_string(),
         "Delete Event",
     )

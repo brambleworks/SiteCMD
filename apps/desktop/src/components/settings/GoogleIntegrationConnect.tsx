@@ -110,24 +110,6 @@ export function GoogleIntegrationConnect({
         flowId: started.flow_id,
       });
 
-      // If the grant returned choices for BOTH services and neither is already
-      // connected, open the combined picker so one grant connects both.
-      const connected = new Set(configs.map((c) => c.integrationType));
-      const gaHasChoices = googleChoiceCount(data, "googleanalytics") > 0;
-      const gscHasChoices = googleChoiceCount(data, "googlesearchconsole") > 0;
-      const gaUnconnected = !connected.has("googleanalytics");
-      const gscUnconnected = !connected.has("googlesearchconsole");
-      const bothConnectable = gaHasChoices && gscHasChoices && gaUnconnected && gscUnconnected;
-
-      if (bothConnectable) {
-        // One grant connects both; show the combined picker and close the
-        // single-service connect modal so only one dialog is up.
-        onModalServiceChange(null);
-        setGooglePickerTarget(null);
-        setGooglePickerData(data);
-        return;
-      }
-
       // Single-service path: fast-connect if there is exactly one preferred choice.
       const projectHost = url ? getHostname(url) : "";
       const preferredChoice = target ? pickPreferredGoogleChoice(data, target, projectHost) : null;
@@ -176,7 +158,11 @@ export function GoogleIntegrationConnect({
   };
 
   const handlePickGoogleProperty = async (type: string, siteIdVal: string) => {
-    if (!googleFlowId || !isGoogleIntegrationType(type)) {
+    if (
+      !googleFlowId ||
+      !isGoogleIntegrationType(type) ||
+      (googlePickerTarget !== null && type !== googlePickerTarget)
+    ) {
       toast.error("Connection expired", "Reconnect Google and try again.");
       return;
     }

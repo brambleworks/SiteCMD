@@ -113,7 +113,7 @@ describe.concurrent(
       );
     });
 
-    it("fails when a Google OAuth client secret is embedded in the desktop", () => {
+    it("fails when the Google Desktop client credential stops being embedded", () => {
       expectGuardrailFailure(
         desktopOAuthSafetyFailures,
         (fixtureRoot) => {
@@ -121,29 +121,10 @@ describe.concurrent(
           writeFixtureFile(
             fixtureRoot,
             "apps/desktop/src-tauri/build.rs",
-            mustMutate(
-              buildScript,
-              [
-                "const OPTIONAL_BAKED_ENVS: &[&str] = &[",
-                '    "GOOGLE_CLIENT_ID",',
-                '    "GITHUB_CLIENT_ID",',
-                '    "SITECMD_CONNECTED_ENDPOINT",',
-                '    "VITE_SITECMD_SENTRY_DSN",',
-                "];",
-              ].join("\n"),
-              [
-                "const OPTIONAL_BAKED_ENVS: &[&str] = &[",
-                '    "GOOGLE_CLIENT_ID",',
-                '    "GOOGLE_CLIENT_SECRET",',
-                '    "GITHUB_CLIENT_ID",',
-                '    "SITECMD_CONNECTED_ENDPOINT",',
-                '    "VITE_SITECMD_SENTRY_DSN",',
-                "];",
-              ].join("\n"),
-            ),
+            mustMutate(buildScript, '    "GOOGLE_CLIENT_SECRET",\n', ""),
           );
         },
-        "Desktop Google OAuth must use a native public client with PKCE and must never bake in or transmit GOOGLE_CLIENT_SECRET.",
+        "Desktop Google OAuth must embed the configured GOOGLE_CLIENT_SECRET",
       );
     });
 

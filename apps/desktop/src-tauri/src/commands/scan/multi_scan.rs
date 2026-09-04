@@ -402,21 +402,19 @@ async fn session_sitemap(
     base_url: &str,
 ) -> Option<crate::core::sitemap::SitemapResult> {
     let parsed = url::Url::parse(base_url).ok()?;
-    let allow_local_dev = crate::core::localhost::is_localhost(&parsed);
-    let client = crate::http_client::for_url(crate::core::localhost::is_strict_localhost(&parsed));
+    let origin = crate::network_policy::LocalOrigin::classify_resolved(&parsed).await;
+    let client = crate::http_client::for_scan_origin(origin);
 
     if let Some(sitemap_url) = stored_sitemap_url {
         if validate_url_async(sitemap_url).await.is_ok() {
-            let result =
-                crate::core::sitemap::fetch_sitemap_url(client, sitemap_url, allow_local_dev).await;
+            let result = crate::core::sitemap::fetch_sitemap_url(client, sitemap_url, origin).await;
             if !result.urls.is_empty() {
                 return Some(result);
             }
         }
     }
 
-    let discovered =
-        crate::core::sitemap::discover_sitemap(client, base_url, allow_local_dev).await;
+    let discovered = crate::core::sitemap::discover_sitemap(client, base_url, origin).await;
     (!discovered.urls.is_empty()).then_some(discovered)
 }
 

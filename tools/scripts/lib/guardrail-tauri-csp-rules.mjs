@@ -32,17 +32,17 @@ export function tauriCspSafetyFailures(read, exists) {
       !desktopPackage.includes("@tauri-apps/plugin-opener") &&
       openUrlHelper.includes("await openExternalUrl({ url: safeUrl })") &&
       openUrlHelper.includes('if (import.meta.env.DEV || import.meta.env.MODE === "test")'),
-    "Tauri main renderer must not have a generic URL opener; production external links must cross the native-confirmed broker without a browser fallback.",
+    "Tauri main renderer must not have a generic URL opener; production external links must cross the validated Rust broker without a browser fallback.",
   );
 
-  // Production must not bypass the native-confirmed URL broker.
+  // Production must not bypass the validated Rust URL broker.
   check(
     (openUrlHelper.match(/window\.open/g) || []).length <= 1,
-    "open-url.ts must contain at most one window.open (the DEV/test fallback); a second occurrence is a production browser egress that bypasses the native-confirmed broker.",
+    "open-url.ts must contain at most one window.open (the DEV/test fallback); a second occurrence is a production browser egress that bypasses the validated Rust broker.",
   );
   check(
     /throw new Error\(/.test(openUrlHelper),
-    "open-url.ts must throw for production external links outside the Tauri boundary; without the terminal throw a non-Tauri build would silently skip the native-confirmed broker.",
+    "open-url.ts must throw for production external links outside the Tauri boundary; without the terminal throw a non-Tauri build would silently skip the validated Rust broker.",
   );
 
   // Dev overlays must narrow or extend CSP, never disable it.

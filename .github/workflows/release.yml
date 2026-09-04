@@ -547,8 +547,9 @@ jobs:
           SITECMD_LICENSE_PRO_ANNUAL_VARIANT_ID: ${{ secrets.SITECMD_LICENSE_PRO_ANNUAL_VARIANT_ID }}
           SITECMD_LICENSE_CORE_CHECKOUT_URL: ${{ secrets.SITECMD_LICENSE_CORE_CHECKOUT_URL }}
           SITECMD_LICENSE_PRO_CHECKOUT_URL: ${{ secrets.SITECMD_LICENSE_PRO_CHECKOUT_URL }}
-          # Public PKCE client IDs embedded for desktop OAuth.
+          # Desktop OAuth credentials are embedded in the app; Google also uses PKCE.
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GITHUB_CLIENT_ID: ${{ secrets.SITECMD_GITHUB_CLIENT_ID }}
           # Public connected-service configuration embedded by Rust.
           SITECMD_CONNECTED_ENDPOINT: "https://connect.sitecmd.com"

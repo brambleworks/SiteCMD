@@ -37,9 +37,9 @@ function searchConsoleSiteMatchesProject(siteUrl: string, projectHost: string) {
 
   try {
     const siteHost = normalizeHost(new URL(siteUrl).hostname);
-    return siteHost === normalizedProjectHost || siteHost.endsWith(`.${normalizedProjectHost}`);
+    return siteHost === normalizedProjectHost;
   } catch {
-    return siteUrl.toLowerCase().includes(normalizedProjectHost);
+    return false;
   }
 }
 
@@ -74,13 +74,12 @@ export function pickPreferredGoogleChoice(
   projectHost: string,
 ) {
   if (type === "googleanalytics") {
-    return data.ga4_properties.length === 1 ? data.ga4_properties[0]?.property_id : null;
+    return null;
   }
 
   const matchingSites = data.gsc_sites.filter((site) =>
     searchConsoleSiteMatchesProject(site.site_url, projectHost),
   );
   if (matchingSites.length === 1) return matchingSites[0]?.site_url ?? null;
-  if (data.gsc_sites.length === 1) return data.gsc_sites[0]?.site_url ?? null;
   return null;
 }

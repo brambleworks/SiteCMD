@@ -1,9 +1,10 @@
 use super::token_state::TokenStore;
 use super::{
-    arg_i64, arg_string, privileged_action_argument_summary, privileged_action_sentence,
-    privileged_token_issue_requires_user_intent, BrokerScope, PrivilegedCommandRequest,
-    PrivilegedCommandTokenState, DATA_ADMIN_COMMANDS, FILESYSTEM_ACCESS_COMMANDS,
-    FILESYSTEM_EXPORT_COMMANDS, PROJECT_EXECUTION_COMMANDS, SCOPES, SENSITIVE_CONNECTOR_COMMANDS,
+    arg_i64, arg_string, privileged_action_argument_summary, privileged_action_prompt,
+    privileged_action_sentence, privileged_token_issue_requires_user_intent, BrokerScope,
+    PrivilegedCommandRequest, PrivilegedCommandTokenState, SensitiveActionTone,
+    DATA_ADMIN_COMMANDS, FILESYSTEM_ACCESS_COMMANDS, FILESYSTEM_EXPORT_COMMANDS,
+    PRIVILEGED_ACTION_PROMPTS, PROJECT_EXECUTION_COMMANDS, SCOPES, SENSITIVE_CONNECTOR_COMMANDS,
     SENSITIVE_FILESYSTEM_ACCESS_COMMANDS,
 };
 use serde_json::{json, Value};
@@ -530,6 +531,72 @@ fn every_token_issue_prompted_command_has_purpose_written_copy() {
             )
             .is_some(),
             "{command} needs purpose-written confirmation copy (with args)",
+        );
+    }
+}
+
+/// Commands whose confirmation carries the warning icon. Kept separate from
+/// `PRIVILEGED_ACTION_PROMPTS` on purpose: the table is copy, this is the
+/// policy the copy has to obey, so adding a row cannot quietly widen the set
+/// of dialogs that shout at people.
+const DESTRUCTIVE_PRIVILEGED_ACTIONS: &[&str] = &[
+    "export_connected_connection",
+    "unlink_connected_site",
+    "disconnect_connected_site",
+    "erase_connected_site",
+    "delete_connected_alert_webhook",
+    "delete_connected_destination",
+    "revoke_connected_site_credential",
+    "revoke_connected_provider_connection",
+    "revoke_connected_report",
+];
+
+#[test]
+fn every_token_issue_prompted_command_has_a_written_heading() {
+    for command in SENSITIVE_CONNECTOR_COMMANDS
+        .iter()
+        .chain(SENSITIVE_FILESYSTEM_ACCESS_COMMANDS)
+    {
+        let (title, _) = privileged_action_prompt(command)
+            .unwrap_or_else(|| panic!("{command} needs a heading in PRIVILEGED_ACTION_PROMPTS"));
+        assert!(
+            !title.trim().is_empty(),
+            "{command} has an empty confirmation heading",
+        );
+        assert_ne!(
+            title, "Allow Protected Action",
+            "{command} still uses the generic fallback heading",
+        );
+    }
+}
+
+#[test]
+fn only_destructive_privileged_actions_carry_the_warning_icon() {
+    for command in SENSITIVE_CONNECTOR_COMMANDS
+        .iter()
+        .chain(SENSITIVE_FILESYSTEM_ACCESS_COMMANDS)
+    {
+        let (_, tone) = privileged_action_prompt(command)
+            .unwrap_or_else(|| panic!("{command} needs a heading in PRIVILEGED_ACTION_PROMPTS"));
+        let expected = if DESTRUCTIVE_PRIVILEGED_ACTIONS.contains(command) {
+            SensitiveActionTone::Warning
+        } else {
+            SensitiveActionTone::Notice
+        };
+        assert_eq!(
+            tone, expected,
+            "{command} has the wrong confirmation tone; the warning icon is for actions that destroy data, revoke access, or disclose a secret",
+        );
+    }
+}
+
+#[test]
+fn the_prompt_table_holds_no_rows_for_commands_that_never_prompt() {
+    for (command, _, _) in PRIVILEGED_ACTION_PROMPTS {
+        assert!(
+            SENSITIVE_CONNECTOR_COMMANDS.contains(command)
+                || SENSITIVE_FILESYSTEM_ACCESS_COMMANDS.contains(command),
+            "{command} has confirmation copy but never reaches a confirmation",
         );
     }
 }

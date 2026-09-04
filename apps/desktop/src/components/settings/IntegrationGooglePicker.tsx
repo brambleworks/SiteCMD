@@ -5,6 +5,7 @@ import { Dialog } from "@/components/ui/dialog";
 import {
   filterGooglePickerData,
   googleIntegrationLabel,
+  pickPreferredGoogleChoice,
   sortSearchConsoleSites,
   type GoogleIntegrationType,
   type GooglePickerData,
@@ -34,10 +35,10 @@ export function GooglePicker({
   const showGsc = sortedGsc.length > 0 && !connectedTypes.has("googlesearchconsole");
   const hasAnyItems = showGa4 || showGsc;
 
-  const [selectedGa4, setSelectedGa4] = useState<string>(
-    () => visibleData.ga4_properties[0]?.property_id ?? "",
+  const [selectedGa4, setSelectedGa4] = useState("");
+  const [selectedGsc, setSelectedGsc] = useState<string>(
+    () => pickPreferredGoogleChoice(visibleData, "googlesearchconsole", projectHost) ?? "",
   );
-  const [selectedGsc, setSelectedGsc] = useState<string>(() => sortedGsc[0]?.site_url ?? "");
 
   const title = targetType
     ? `Choose a ${googleIntegrationLabel(targetType)} ${targetType === "googleanalytics" ? "property" : "site"}`
@@ -97,7 +98,7 @@ export function GooglePicker({
                   className="field-control field-control--select"
                   value={selectedGa4}
                   onChange={(e) => setSelectedGa4(e.target.value)}>
-                  <option value="">Do not connect</option>
+                  <option value="">{targetType ? "Choose a property" : "Do not connect"}</option>
                   {visibleData.ga4_properties.map((prop) => (
                     <option key={prop.property_id} value={prop.property_id}>
                       {prop.display_name} ({prop.account_name})
@@ -117,7 +118,7 @@ export function GooglePicker({
                   className="field-control field-control--select"
                   value={selectedGsc}
                   onChange={(e) => setSelectedGsc(e.target.value)}>
-                  <option value="">Do not connect</option>
+                  <option value="">{targetType ? "Choose a site" : "Do not connect"}</option>
                   {sortedGsc.map((site) => (
                     <option key={site.site_url} value={site.site_url}>
                       {site.site_url}

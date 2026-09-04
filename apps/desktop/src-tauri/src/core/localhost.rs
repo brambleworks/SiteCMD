@@ -13,6 +13,22 @@ fn has_host_token(host: &str, token: &str) -> bool {
 /// Mirrored by LOCAL_DEV_HOST_SUFFIXES in src/lib/project-environments.ts.
 const LOCAL_DEV_HOST_SUFFIXES: &[&str] = &[".ddev.site", ".lndo.site", ".docksal.site", ".test"];
 
+/// Whether a host is an IP literal on a network this machine is attached to.
+/// A name-matching rule cannot see these: a dev server on the LAN is reached
+/// as `http://192.168.1.40:8080/`, with no hostname to recognize.
+///
+/// `network_policy` owns the ranges, and it is the same set a named scan
+/// target may reach, so every address a scan can fetch that is not public is
+/// graded as a local environment.
+fn is_private_ip_literal(host: &str) -> bool {
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(host);
+    bare.parse::<std::net::IpAddr>()
+        .is_ok_and(crate::network_policy::is_private_network_ip)
+}
+
 fn environment_from_host(host: &str) -> &'static str {
     let lower = host.to_lowercase();
 
@@ -26,6 +42,7 @@ fn environment_from_host(host: &str) -> &'static str {
         || LOCAL_DEV_HOST_SUFFIXES
             .iter()
             .any(|suffix| lower.ends_with(suffix))
+        || is_private_ip_literal(&lower)
     {
         return "local";
     }
@@ -117,6 +134,18 @@ mod tests {
             ("https://myapp.lndo.site", true),
             ("https://myapp.docksal.site", true),
             ("https://myapp.test", true),
+            // A dev server reached by LAN address has no hostname to match.
+            ("http://192.168.1.40:8080", true),
+            ("http://10.0.0.5:3000", true),
+            ("http://172.16.4.2", true),
+            ("http://[fd00::1]:8080", true),
+            ("http://100.100.4.7", true),
+            // Link-local is refused at the scan boundary rather than graded,
+            // because cloud metadata answers there.
+            ("http://169.254.169.254", false),
+            // A public literal stays public; the ranges are the whole test.
+            ("http://93.184.216.34", false),
+            ("http://[2606:2800:220:1::248]", false),
             ("https://ddev.site.example.com", false),
             ("https://localhost.example.com", false),
             ("https://example.com", false),
@@ -142,6 +171,10 @@ mod tests {
             // A dev-environment hostname is a local environment, but it is
             // resolved through DNS, so it never earns the loopback exception.
             ("https://myapp.ddev.site", false),
+            // A LAN address is a local environment, but it is another machine
+            // on the network, so it never earns the loopback exception.
+            ("http://192.168.1.40:8080", false),
+            ("http://[fd00::1]:8080", false),
             // Obviously not localhost
             ("https://example.com", false),
             ("https://www.google.com", false),
@@ -172,6 +205,9 @@ mod tests {
             ("https://myapp.lndo.site", "local"),
             ("http://myapp.docksal.site", "local"),
             ("http://myapp.test", "local"),
+            ("http://192.168.1.40:8080", "local"),
+            ("http://10.0.0.5:3000", "local"),
+            ("http://93.184.216.34", "production"),
             ("https://localhost.example.com", "production"),
             ("https://ddev.site.example.com", "production"),
             ("https://upstage.example.com", "production"),

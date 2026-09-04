@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, State, Window};
 
+use super::SensitiveActionTone;
+
 mod data_admin;
 mod external_connectors;
 mod filesystem_access;
@@ -200,9 +202,84 @@ pub(super) async fn confirm_sensitive_token_issue(
             )
         }
     };
-    super::confirm_sensitive_action(app, "Allow Protected Action", message, "Allow")
+    // Same fallback reasoning as the message: a command without a written
+    // prompt gets the generic heading and the louder icon.
+    let (title, tone) = privileged_action_prompt(command)
+        .unwrap_or(("Allow Protected Action", SensitiveActionTone::Warning));
+    super::confirm_sensitive_action(app, title, tone, message, "Allow")
         .await
         .map_err(String::from)
+}
+
+/// Dialog heading and severity for every command that prompts before a token
+/// is issued. The heading names the action so the title bar says what is
+/// happening, while `privileged_action_sentence` asks the question. `Warning`
+/// is reserved for commands that destroy data, revoke access, or disclose a
+/// secret, so the warning icon still means something where it does appear; a
+/// save the person just clicked gets `Notice`.
+pub(super) const PRIVILEGED_ACTION_PROMPTS: &[(&str, &str, SensitiveActionTone)] = {
+    use SensitiveActionTone::{Notice, Warning};
+    &[
+        ("save_integration", "Save Integration", Notice),
+        ("save_webhook_config", "Save Webhook", Notice),
+        ("test_webhook", "Send Test Webhook", Notice),
+        ("sync_connected_site", "Sync Site", Notice),
+        ("import_connected_connection", "Import Connection", Notice),
+        ("export_connected_connection", "Export Connection", Warning),
+        ("unlink_connected_site", "Unlink Site", Warning),
+        ("disconnect_connected_site", "Disconnect Site", Warning),
+        ("erase_connected_site", "Erase Site Data", Warning),
+        (
+            "create_connected_alert_webhook",
+            "Add Alert Webhook",
+            Notice,
+        ),
+        ("test_connected_alert_webhook", "Send Test Alert", Notice),
+        (
+            "delete_connected_alert_webhook",
+            "Delete Alert Webhook",
+            Warning,
+        ),
+        ("create_connected_destination", "Add Alert Email", Notice),
+        (
+            "resend_connected_destination_verification",
+            "Resend Confirmation Email",
+            Notice,
+        ),
+        (
+            "delete_connected_destination",
+            "Remove Alert Email",
+            Warning,
+        ),
+        (
+            "revoke_connected_site_credential",
+            "Revoke Credential",
+            Warning,
+        ),
+        (
+            "revoke_connected_provider_connection",
+            "Revoke Provider Access",
+            Warning,
+        ),
+        ("revoke_connected_report", "Revoke Report Link", Warning),
+        ("update_project_path", "Change Project Folder", Notice),
+        ("open_path_in_editor", "Open in Editor", Notice),
+        ("reveal_path", "Show in File Manager", Notice),
+        ("register_agent_tool", "Allow Agent Tool", Notice),
+        ("unregister_agent_tool", "Remove Agent Tool", Notice),
+    ]
+};
+
+/// The heading and severity for `command`, or `None` when it has no
+/// purpose-written prompt. The broker tests fail when a sensitive command
+/// reaches that state, so the fallback is unreachable in a shipped build.
+pub(super) fn privileged_action_prompt(
+    command: &str,
+) -> Option<(&'static str, SensitiveActionTone)> {
+    PRIVILEGED_ACTION_PROMPTS
+        .iter()
+        .find(|(name, _, _)| *name == command)
+        .map(|(_, title, tone)| (*title, *tone))
 }
 
 /// Build token-bound confirmation copy for every sensitive broker command.

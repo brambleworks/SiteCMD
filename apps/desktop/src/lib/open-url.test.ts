@@ -43,22 +43,26 @@ describe("openUrl", () => {
     );
   });
 
-  it("routes Tauri URLs through the native-confirmed command without a browser fallback", async () => {
+  it.each([
+    "https://sitecmd.com/docs",
+    "https://www.bing.com/webmasters/",
+    "http://localhost:4321/",
+  ])("routes %s through the validated command without a browser fallback", async (url) => {
     isTauriMock.mockReturnValue(true);
 
-    await openUrl("https://sitecmd.com/docs");
+    await openUrl(url);
 
-    expect(openExternalUrlMock).toHaveBeenCalledWith({
-      url: "https://sitecmd.com/docs",
-    });
+    expect(openExternalUrlMock).toHaveBeenCalledExactlyOnceWith({ url });
     expect(windowOpen).not.toHaveBeenCalled();
   });
 
-  it("does not bypass a rejected native confirmation", async () => {
+  it("does not bypass a failed native browser launch", async () => {
     isTauriMock.mockReturnValue(true);
-    openExternalUrlMock.mockRejectedValueOnce(new Error("cancelled"));
+    openExternalUrlMock.mockRejectedValueOnce(new Error("Browser unavailable"));
 
-    await expect(openUrl("https://sitecmd.com/docs")).rejects.toThrow("cancelled");
+    await expect(openUrl("https://www.bing.com/webmasters/")).rejects.toThrow(
+      "Browser unavailable",
+    );
 
     expect(windowOpen).not.toHaveBeenCalled();
   });

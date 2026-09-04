@@ -2,7 +2,7 @@ use crate::db::Database;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use super::{confirm_sensitive_action, run_blocking, sanitize_error};
+use super::{confirm_sensitive_action, run_blocking, sanitize_error, SensitiveActionTone};
 
 /// Get all webhook configurations for a project.
 #[tauri::command]
@@ -125,6 +125,7 @@ pub async fn delete_webhook_config(
     confirm_sensitive_action(
         app.clone(),
         "Delete this webhook?",
+        SensitiveActionTone::Warning,
         "This removes the saved webhook destination and its stored signing secret.".to_string(),
         "Delete Webhook",
     )

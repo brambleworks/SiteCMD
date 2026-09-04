@@ -24,7 +24,7 @@ impl AsyncCheck for OgImageResolvableCheck {
         };
         if crate::network_policy::validate_page_subresource_target(
             &image_url,
-            ctx.is_strict_localhost,
+            ctx.subordinate_policy(),
         )
         .is_err()
         {

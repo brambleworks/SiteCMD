@@ -95,17 +95,21 @@ where
     ensure_not_cancelled(cancel_check)?;
 
     let url = url::Url::parse(url_str).map_err(|e| ScanError::InvalidUrl(e.to_string()))?;
-    let requested_is_strict_local = localhost::is_strict_localhost(&url);
+    // Every entry point reaches the scanner here, so the target is validated
+    // here rather than at each command. The CLI calls this directly, and while
+    // the connect-time resolver refused a hostname pointing into private
+    // space, a bare private address literal never resolves and so was never
+    // checked at all.
+    crate::network_policy::validate_url_target(&url, crate::network_policy::UrlPolicy::ScanTarget)
+        .await
+        .map_err(ScanError::InvalidUrl)?;
+    // The origin's reach picks the client, and the client carries that reach
+    // into every redirect and subresource the page steers it to.
+    let origin = crate::network_policy::LocalOrigin::classify_resolved(&url).await;
     let timeout = timeout_secs.unwrap_or(30);
 
-    let (mut ctx, detected_stack) = fetch_page(
-        &url,
-        requested_is_strict_local,
-        timeout,
-        progress,
-        cancel_check,
-    )
-    .await?;
+    let (mut ctx, detected_stack) =
+        fetch_page(&url, origin, timeout, progress, cancel_check).await?;
     ensure_not_cancelled(cancel_check)?;
     // Checks grade the response that was actually fetched. This matters when
     // the requested URL redirects to a different scheme, host, or local/live
@@ -170,6 +174,7 @@ where
     if !matches!(scan_type, ScanType::Security | ScanType::Accessibility) {
         run_polish_phase(
             &mut ctx,
+            origin,
             progress,
             &mut all_results,
             cancel_check,
@@ -186,7 +191,13 @@ where
 
     finalize_check_results(&mut all_results);
 
-    let (overall_score, categories) = calculator::calculate_scores(&all_results);
+    // Score the defects, not the reports: a finding two checks both grade is
+    // filed under one canonical id in the issue list, and costs one deduction.
+    let (overall_score, categories) =
+        calculator::calculate_scores_with_identity(&all_results, |result| {
+            crate::core::correlation::web_scan_check_id(&result.check_id)
+                .unwrap_or(result.check_id.as_str())
+        });
 
     Ok(ScanResult {
         url: effective_url,
@@ -206,7 +217,7 @@ where
 /// Fetch the page and build a CheckContext + detect tech stack
 async fn fetch_page<C>(
     url: &url::Url,
-    is_strict_local: bool,
+    origin: crate::network_policy::LocalOrigin,
     timeout: u64,
     progress: Option<&ProgressFn>,
     cancel_check: Option<&C>,
@@ -214,7 +225,7 @@ async fn fetch_page<C>(
 where
     C: Fn() -> bool + ?Sized,
 {
-    let client = crate::http_client::for_url(is_strict_local).clone();
+    let client = crate::http_client::for_scan_origin(origin).clone();
     ensure_not_cancelled(cancel_check)?;
 
     emit_progress(
@@ -290,7 +301,8 @@ where
         },
         client,
     )
-    .with_requested_url(url.clone());
+    .with_requested_url(url.clone())
+    .with_origin(origin);
 
     Ok((ctx, detected_stack))
 }
@@ -358,6 +370,7 @@ pub(crate) fn collect_checks(
 /// execution already read; it is `None` for a single-page scan.
 async fn run_polish_phase<C>(
     ctx: &mut CheckContext,
+    origin: crate::network_policy::LocalOrigin,
     progress: Option<&ProgressFn>,
     results: &mut Vec<CheckResult>,
     cancel_check: Option<&C>,
@@ -382,13 +395,7 @@ where
     // Fetch linked CSS for polish analysis. Coverage travels with the content:
     // a failed fetch must not turn an unobserved CSS pattern into a Pass.
     let css_fetch = await_or_cancel(
-        css_fetch::fetch_stylesheets(
-            &ctx.body,
-            &ctx.url,
-            &ctx.client,
-            ctx.is_strict_localhost,
-            stylesheet_cache,
-        ),
+        css_fetch::fetch_stylesheets(&ctx.body, &ctx.url, &ctx.client, origin, stylesheet_cache),
         cancel_check,
     )
     .await?;

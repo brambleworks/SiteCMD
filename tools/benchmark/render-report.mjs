@@ -16,6 +16,7 @@ const md = renderMarkdown({
   targets: raw.targets,
   config: raw.config,
   stamp: raw.stamp,
+  dryRun: raw.dryRun,
 });
 const out = path.join(path.dirname(rawPath), "report.md");
 writeFileSync(out, md);

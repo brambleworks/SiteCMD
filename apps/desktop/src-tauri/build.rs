@@ -24,6 +24,7 @@ const CHECKOUT_URL_ENVS: &[&str] = &[
 // Bake optional public connected-service configuration into release binaries.
 const OPTIONAL_BAKED_ENVS: &[&str] = &[
     "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
     "GITHUB_CLIENT_ID",
     "SITECMD_CONNECTED_ENDPOINT",
     "VITE_SITECMD_SENTRY_DSN",

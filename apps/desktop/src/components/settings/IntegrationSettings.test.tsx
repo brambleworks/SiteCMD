@@ -320,7 +320,7 @@ describe("IntegrationSettings", () => {
     });
   });
 
-  it("finishes Search Console setup automatically when Google returns one available site", async () => {
+  it("finishes Search Console setup automatically for one matching site", async () => {
     let connected = false;
     invokeMock.mockImplementation(async (command: string) => {
       switch (command) {
@@ -359,7 +359,7 @@ describe("IntegrationSettings", () => {
     });
 
     renderIntegrationSettings(
-      <IntegrationSettings projectId={7} projectName="SiteCMD" url="https://sitecmd.test" />,
+      <IntegrationSettings projectId={7} projectName="SiteCMD" url="https://example.com" />,
     );
 
     fireEvent.click(await screen.findByText("Google Search Console"));
@@ -445,9 +445,24 @@ describe("IntegrationSettings", () => {
     expect(invokeMock).not.toHaveBeenCalledWith("save_google_integration", expect.anything());
   });
 
-  it("connects both Google Analytics and Search Console from one OAuth grant", async () => {
+  it.each([
+    {
+      type: "googleanalytics",
+      row: "Google Analytics (GA4)",
+      label: "Google Analytics property",
+      otherLabel: "Search Console site",
+      choice: "properties/111",
+    },
+    {
+      type: "googlesearchconsole",
+      row: "Google Search Console",
+      label: "Search Console site",
+      otherLabel: "Google Analytics property",
+      choice: "https://example.com/",
+    },
+  ])("connects only $type when Google returns both services", async (target) => {
     const savedIntegrations: Array<{ integrationType: string; siteId: string }> = [];
-    invokeMock.mockImplementation(async (command: string) => {
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       switch (command) {
         case "get_integrations":
           return savedIntegrations.map((s) => ({
@@ -464,18 +479,24 @@ describe("IntegrationSettings", () => {
             ga4_properties: [
               {
                 property_id: "properties/111",
-                display_name: "My Site GA4",
+                display_name: "Unrelated Site GA4",
                 account_name: "My Account",
               },
             ],
-            gsc_sites: [{ site_url: "https://example.com/", permission: "siteOwner" }],
+            gsc_sites: [
+              { site_url: "https://example.com/", permission: "siteOwner" },
+              { site_url: "sc-domain:example.com", permission: "siteOwner" },
+            ],
           };
         case "save_google_integration":
-          savedIntegrations.push({ integrationType: "googlesearchconsole", siteId: "x" });
+          savedIntegrations.push({
+            integrationType: String(args?.integrationType),
+            siteId: String(args?.siteId),
+          });
           return "Connected";
         case "fetch_integration_data":
           return {
-            integrationType: "googlesearchconsole",
+            integrationType: args?.integrationType,
             data: {},
             fetchedAt: new Date().toISOString(),
             error: null,
@@ -489,32 +510,32 @@ describe("IntegrationSettings", () => {
       <IntegrationSettings projectId={7} projectName="SiteCMD" url="https://example.com" />,
     );
 
-    // Open the Google Analytics row and start the grant.
-    fireEvent.click(await screen.findByText("Google Analytics (GA4)"));
+    fireEvent.click(await screen.findByText(target.row));
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("Choose what to connect")).toBeInTheDocument();
-    });
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByLabelText("Google Analytics property")).toBeInTheDocument();
-    expect(screen.getByLabelText("Search Console site")).toBeInTheDocument();
-    expect(screen.getAllByRole("option", { name: "Do not connect" }).length).toBeGreaterThanOrEqual(
-      1,
-    );
+    const select = await screen.findByLabelText(target.label);
+    await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
+    expect(screen.queryByLabelText(target.otherLabel)).not.toBeInTheDocument();
+    expect(select).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
+    expect(invokeMock).not.toHaveBeenCalledWith("save_google_integration", expect.anything());
 
+    fireEvent.change(select, { target: { value: target.choice } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
       const saveCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === "save_google_integration");
-      expect(saveCalls).toHaveLength(2);
-      const types = saveCalls
-        .map(([, args]) => (args as Record<string, unknown>).integrationType)
-        .sort();
-      expect(types).toEqual(["googleanalytics", "googlesearchconsole"]);
-      const flowIds = saveCalls.map(([, args]) => (args as Record<string, unknown>).flowId);
-      expect(flowIds[0]).toBe("dual-flow");
-      expect(flowIds[1]).toBe("dual-flow");
+      expect(saveCalls).toEqual([
+        [
+          "save_google_integration",
+          {
+            projectId: 7,
+            flowId: "dual-flow",
+            integrationType: target.type,
+            siteId: target.choice,
+          },
+        ],
+      ]);
     });
   });
 });

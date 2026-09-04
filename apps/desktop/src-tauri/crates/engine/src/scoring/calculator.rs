@@ -240,6 +240,22 @@ fn result_effective_weight(result: &CheckResult) -> f64 {
 /// A focused scan's issue counts are already scoped to that focus, so the
 /// caller's scan type never enters the computation.
 pub fn calculate_scores(results: &[CheckResult]) -> (u32, Vec<CategoryScore>) {
+    calculate_scores_with_identity(results, |result| result.check_id.as_str())
+}
+
+/// As [`calculate_scores`], with `identity` naming the defect each result
+/// reports. Two checks that grade one defect return one identity, and the
+/// overall score then charges that defect once rather than once per check.
+/// Category bars are untouched: each still reports what its own checks saw.
+///
+/// The desktop app passes the same canonical identity the issue store files a
+/// finding under, so a defect that shows as one row in the list also costs one
+/// deduction. A portable caller with no such mapping gets the check id, which
+/// makes the collapse a no-op.
+pub fn calculate_scores_with_identity<'a>(
+    results: &'a [CheckResult],
+    identity: impl Fn(&'a CheckResult) -> &'a str,
+) -> (u32, Vec<CategoryScore>) {
     let mut categories: Vec<CategoryScore> = Vec::new();
 
     for cat in &SCAN_CATEGORY_ORDER {
@@ -296,36 +312,37 @@ pub fn calculate_scores(results: &[CheckResult]) -> (u32, Vec<CategoryScore>) {
         return (0, categories);
     }
 
-    // Route web results through the canonical SiteCMD score. Web check IDs are
-    // already one-to-one, so effective counts need no code-rule deduplication.
-    let mut eff = [0.0f64; 4]; // critical, high, medium, low
-    let mut has_full_weight_critical = false;
-    let mut has_exploitable = false;
-    for r in results {
-        if matches!(r.status, CheckStatus::Pass | CheckStatus::Skipped) {
-            continue;
-        }
-        let weight = result_effective_weight(r);
-        // sort_rank: Critical 0, High 1, Medium 2, Low 3 - matches `eff` order.
-        eff[r.severity.sort_rank() as usize] += weight;
-        // A half-weight (Warn or NeedsReview) critical must NOT arm the
-        // floor-piercing full-weight-critical flag.
-        if r.severity == Severity::Critical && weight >= 1.0 {
-            has_full_weight_critical = true;
-        }
-        if is_score_cap_candidate_check(&r.check_id, r.severity)
-            && r.confidence.can_trigger_score_cap()
-        {
-            has_exploitable = true;
-        }
-    }
+    // Route web results through the canonical SiteCMD score, collapsing the
+    // results that report one defect so it deducts once. Cap eligibility and
+    // the full-weight-critical flag stay tied to each result's own check id,
+    // never stitched across the members of a collapsed row.
+    let rows = dedup::dedup_score_rows(
+        results
+            .iter()
+            .filter(|r| !matches!(r.status, CheckStatus::Pass | CheckStatus::Skipped))
+            .map(|r| {
+                let weight = result_effective_weight(r);
+                dedup::ScoreFinding {
+                    check_id: r.check_id.as_str(),
+                    category: r.category.as_str(),
+                    severity: r.severity,
+                    cap_confidence: r.confidence.can_trigger_score_cap(),
+                    weight,
+                    // A half-weight (Warn or NeedsReview) critical must NOT arm
+                    // the floor-piercing full-weight-critical flag.
+                    full_weight_critical: r.severity == Severity::Critical && weight >= 1.0,
+                    identity: Some(identity(r)),
+                }
+            }),
+    );
+    let counts = dedup::severity_counts(&rows);
     let overall = health_score_from_severity(
-        eff[0],
-        eff[1],
-        eff[2],
-        eff[3],
-        has_full_weight_critical,
-        has_exploitable,
+        counts.eff_critical,
+        counts.eff_high,
+        counts.eff_medium,
+        counts.eff_low,
+        counts.has_full_weight_critical,
+        counts.has_cap_eligible,
     );
 
     (overall, categories)
@@ -436,6 +453,8 @@ pub fn compute_score(groups: &[ScoreInputGroup], now_ms: i64) -> ScoreSnapshot {
                 cap_confidence: g.can_trigger_cap(),
                 weight: g.confidence_weight(),
                 full_weight_critical: g.has_full_weight_critical(),
+                // Stored groups already carry the canonical check id.
+                identity: None,
             }),
     );
     // Category bars use the overall curve and retain unseeded categories.

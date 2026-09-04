@@ -60,6 +60,7 @@ pub async fn deactivate_license(
     crate::commands::confirm_sensitive_action(
         app.clone(),
         "Deactivate this license?",
+        crate::commands::SensitiveActionTone::Warning,
         confirmation_body(&key_source).to_string(),
         "Deactivate License",
     )

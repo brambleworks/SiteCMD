@@ -3,7 +3,7 @@ use crate::report;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use super::{confirm_sensitive_action, run_blocking, sanitize_error};
+use super::{confirm_sensitive_action, run_blocking, sanitize_error, SensitiveActionTone};
 
 const MAX_REPORT_PERIOD_DAYS: u32 = 365;
 
@@ -148,6 +148,7 @@ pub async fn delete_report_history(
     confirm_sensitive_action(
         app,
         "Delete this saved report?",
+        SensitiveActionTone::Warning,
         "This removes the selected report history entry.".to_string(),
         "Delete Report",
     )

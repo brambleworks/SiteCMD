@@ -5,7 +5,9 @@ use tauri::AppHandle;
 use tempfile::NamedTempFile;
 
 use super::ensure_within_home;
-use crate::commands::{confirm_sensitive_action, run_blocking, sanitize_error};
+use crate::commands::{
+    confirm_sensitive_action, run_blocking, sanitize_error, SensitiveActionTone,
+};
 
 pub(super) fn validate_export_write_path(path: &str) -> Result<(), String> {
     let p = Path::new(path);
@@ -121,7 +123,7 @@ async fn confirm_export_write(app: AppHandle, path: &str) -> Result<bool, String
         )
     };
 
-    confirm_sensitive_action(app, title, message, action).await?;
+    confirm_sensitive_action(app, title, SensitiveActionTone::Warning, message, action).await?;
     Ok(allow_overwrite)
 }
 

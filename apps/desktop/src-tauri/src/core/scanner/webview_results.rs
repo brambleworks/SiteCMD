@@ -62,7 +62,10 @@ pub fn append_webview_results(
 
     super::finalize_check_results(&mut result.issues);
 
-    let (score, cats) = calculator::calculate_scores(&result.issues);
+    let (score, cats) = calculator::calculate_scores_with_identity(&result.issues, |issue| {
+        crate::core::correlation::web_scan_check_id(&issue.check_id)
+            .unwrap_or(issue.check_id.as_str())
+    });
     result.overall_score = score;
     result.categories = cats;
 }

@@ -11,8 +11,66 @@ public repository history.
 
 ## [Unreleased]
 
+### Added
+
+- Scans can target a development server on your own network, such as
+  `http://192.168.1.40:8080/`, a container by its service name in CI, or a
+  machine on a tailnet. SiteCMD runs as you, on your machine, with your
+  network, so a target you name reaches what you can already reach. Only the
+  target you name gains that reach: a redirect, a stylesheet, a sitemap entry,
+  or any other URL a fetched page chooses still reaches no further than the
+  origin you asked for, and link-local addresses stay refused everywhere
+  because cloud metadata answers there. The hidden browser keeps the narrower
+  loopback boundary, so a private-network scan reports its browser measurements
+  as unavailable.
+
+### Changed
+
+- The scan category labeled "Legal" is now "Privacy & Policies". Its checks
+  observe what a page shows: whether a privacy notice, terms, accessibility
+  statement, consent banner, or tracker is present, and how long a cookie
+  lives. They do not determine whether a site meets a legal obligation, and
+  every one of those findings already said so in its own words. The label now
+  agrees with them, and the scales-of-justice icon that made the same claim
+  without words is now a fingerprint. The category id is unchanged, so saved
+  scans and issue history carry over untouched.
+- Confirmation dialogs for protected actions now name the action in the title
+  bar, and the warning icon is reserved for actions that destroy data, revoke
+  access, or disclose a secret. Saving an integration used to raise a warning
+  triangle headed "Allow Protected Action"; it now reads "Save Integration"
+  and asks the same question in the same words. The confirmation itself is
+  unchanged, so storing a credential, configuring a webhook, or syncing a
+  connected site still needs a native dialog that nothing inside the app can
+  answer on your behalf.
+
 ### Fixed
 
+- Web links, including Bing setup, open without an extra confirmation dialog.
+- Google integration setup stays on the selected service and no longer defaults
+  to an unrelated Analytics property or Search Console site.
+- Google Analytics and Search Console connections include Google's required
+  desktop client credential during sign-in and token refresh.
+- A Web Scan's score charged one defect more than once. Open Graph tags, form
+  labels, the document language, heading structure, and page-level SEO markers
+  are each graded by a Web Scan check and again by a polish signal, and both
+  deductions landed even though the issue list already showed them as a single
+  finding. A check that reports one row per occurrence, such as one per
+  malformed `Set-Cookie` header, also deducted once per row while the dashboard
+  score deducted once for the group. Both now charge a defect once, under the
+  identity the issue list files it under, so a scan's score and the dashboard's
+  agree. Category bars still report what each category observed, and scores on
+  affected pages will read a little higher.
+- The app and the CLI disagreed about what could be scanned. The app refused a
+  private address outright, while the CLI never checked a bare address at all
+  and would scan one, yet refused the same machine named by hostname. Both now
+  answer the same way, because the scanner validates its target itself rather
+  than trusting each entry point to have done it.
+- A development server reached by its address on the local network was graded
+  as a public production site. It earned a High "served over HTTP" finding
+  measured against whatever answered port 443 at that address, and the custom
+  404 page and CORS reflection checks had the same gap. Private network
+  addresses now count as local, the way a `localhost` or `.test` hostname
+  already did.
 - Web scans of pages that embed third-party iframes graded the wrong
   document. The hidden browser followed the iframe and measured that page
   instead, producing an accessibility failure, a load time, and a JavaScript

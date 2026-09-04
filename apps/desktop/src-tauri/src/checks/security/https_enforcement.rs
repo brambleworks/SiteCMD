@@ -79,6 +79,9 @@ mod tests {
             "http://localhost:4321/",
             "http://my-app.ddev.site/",
             "http://shop.test/checkout",
+            // A dev server on the LAN, recognized by address range because it
+            // has no hostname to match.
+            "http://192.168.1.40:8080/",
         ] {
             let results = HttpsEnforcementCheck.run(&ctx_for(target)).await;
             assert_eq!(results[0].status, CheckStatus::Skipped, "{target}");
@@ -90,30 +93,26 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_private_lan_address_is_not_recognized_as_local_yet() {
-        // A known gap, pinned so it is visible rather than implied.
-        // `environment_from_host` matches names, so a bare RFC 1918 literal
-        // falls through to "production" and this check plans a probe against
-        // whatever answers 443 on that address, with the dev port stripped.
-        // Widening `core::localhost::is_localhost` is the fix, and it belongs
-        // there because config.custom_404 and security.cors_reflection read
-        // the same flag and have the same gap. When that lands, this test
-        // should flip to the skip assertion above.
+    fn a_private_address_is_local_by_range_while_a_public_one_is_still_probed() {
+        // Name matching cannot see a LAN dev server, so this check used to
+        // plan an HTTPS probe against whatever answers 443 on that address
+        // and grade a preview box like a production site. `is_localhost` now
+        // reads the address ranges, which closes the same gap in
+        // config.custom_404 and security.cors_reflection.
         let lan = url::Url::parse("http://192.168.1.40:8080/").expect("static test url");
-        assert!(
-            !crate::core::localhost::is_localhost(&lan),
-            "if this now passes, move the host into the local-skip test above"
-        );
-        assert!(
-            matches!(
-                sitecmd_engine::checks::security::https_enforcement::plan_https_enforcement(
-                    &lan,
-                    crate::core::localhost::is_localhost(&lan),
-                ),
-                HttpsEnforcementStep::ProbeHttpsOrigin { .. }
-            ),
-            "the gap is that a LAN dev server is probed like a public host"
-        );
+        assert!(crate::core::localhost::is_localhost(&lan));
+        assert!(matches!(
+            plan_https_enforcement(&lan, crate::core::localhost::is_localhost(&lan)),
+            HttpsEnforcementStep::Done(_)
+        ));
+
+        // Negative control: a public literal is not swept up by the ranges.
+        let public = url::Url::parse("http://93.184.216.34/").expect("static test url");
+        assert!(!crate::core::localhost::is_localhost(&public));
+        assert!(matches!(
+            plan_https_enforcement(&public, crate::core::localhost::is_localhost(&public)),
+            HttpsEnforcementStep::ProbeHttpsOrigin { .. }
+        ));
     }
 
     #[tokio::test]

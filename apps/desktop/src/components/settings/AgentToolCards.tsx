@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/useToast";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,11 @@ function AgentToolBadge({ tool }: { tool: AgentTool }) {
   );
 }
 
-export function AgentToolCards() {
+export function AgentToolCards({
+  renderActiveTools,
+}: {
+  renderActiveTools: (rows: ReactNode[]) => ReactNode;
+}) {
   const toast = useToast();
   const queryClient = useQueryClient();
   const queryKey = queryKeys.settings.agentTools();
@@ -113,6 +117,27 @@ export function AgentToolCards() {
 
   const modalItem = modalTool ? (tools.find((item) => item.tool === modalTool) ?? null) : null;
   const nodeMissing = tools.some((item) => item.installed && !item.nodeAvailable);
+  const activeTools = detectError ? [] : tools.filter((item) => item.healthy);
+  const availableTools = tools.filter((item) => !item.healthy);
+
+  const renderToolRow = (item: AgentToolStatus) => (
+    <IntegrationRow
+      key={item.tool}
+      dataIntegration={item.tool}
+      icon={<AgentToolBadge tool={item.tool} />}
+      name={AGENT_TOOL_LABELS[item.tool]}
+      connected={item.healthy}
+      actionLabel={item.needsRepair ? "Repair" : item.healthy ? "Manage" : "Connect"}
+      disabled={
+        Boolean(busyTools[item.tool]) ||
+        (!item.registered && (!item.installed || !item.nodeAvailable))
+      }
+      onOpen={() => {
+        clearCardError(item.tool);
+        setModalTool(item.tool);
+      }}
+    />
+  );
 
   const renderModalBody = (item: AgentToolStatus) => {
     const label = AGENT_TOOL_LABELS[item.tool];
@@ -206,6 +231,7 @@ export function AgentToolCards() {
 
   return (
     <>
+      {renderActiveTools(activeTools.map(renderToolRow))}
       <section className="stack-base">
         <div className="stack-tight">
           <p className="row-title-md">Agent tools</p>
@@ -241,26 +267,9 @@ export function AgentToolCards() {
                 </p>
               </div>
             ) : null}
-            <div className="integration-section-list">
-              {tools.map((item) => (
-                <IntegrationRow
-                  key={item.tool}
-                  dataIntegration={item.tool}
-                  icon={<AgentToolBadge tool={item.tool} />}
-                  name={AGENT_TOOL_LABELS[item.tool]}
-                  connected={item.healthy}
-                  actionLabel={item.needsRepair ? "Repair" : item.healthy ? "Manage" : "Connect"}
-                  disabled={
-                    Boolean(busyTools[item.tool]) ||
-                    (!item.registered && (!item.installed || !item.nodeAvailable))
-                  }
-                  onOpen={() => {
-                    clearCardError(item.tool);
-                    setModalTool(item.tool);
-                  }}
-                />
-              ))}
-            </div>
+            {availableTools.length > 0 ? (
+              <div className="integration-section-list">{availableTools.map(renderToolRow)}</div>
+            ) : null}
           </>
         )}
         <AgentToolManualSetup />

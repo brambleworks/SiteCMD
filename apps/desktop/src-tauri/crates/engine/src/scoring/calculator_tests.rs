@@ -18,6 +18,58 @@ fn result(category: ScanCategory, status: CheckStatus, severity: Severity) -> Ch
     }
 }
 
+fn result_id(
+    check_id: &str,
+    category: ScanCategory,
+    status: CheckStatus,
+    severity: Severity,
+) -> CheckResult {
+    CheckResult {
+        check_id: check_id.into(),
+        ..result(category, status, severity)
+    }
+}
+
+#[test]
+fn two_results_reporting_one_defect_deduct_once() {
+    // The caller names the defect. Two checks that grade the same one share
+    // an identity, so the SiteCMD Score charges it a single time while each
+    // category bar keeps reporting what its own check saw.
+    let pair = [
+        result_id(
+            "seo.open_graph",
+            ScanCategory::Seo,
+            CheckStatus::Fail,
+            Severity::Medium,
+        ),
+        result_id(
+            "polish.missing-og-tags",
+            ScanCategory::Polish,
+            CheckStatus::Fail,
+            Severity::Medium,
+        ),
+    ];
+
+    let (deduped, categories) = calculate_scores_with_identity(&pair, |_| "seo.open_graph");
+    let (authority_alone, _) = calculate_scores(&pair[..1]);
+    assert_eq!(
+        deduped, authority_alone,
+        "the second report of one defect adds no second deduction"
+    );
+
+    for (category, label) in [(ScanCategory::Seo, "seo"), (ScanCategory::Polish, "polish")] {
+        let bar = categories
+            .iter()
+            .find(|c| c.category == category)
+            .unwrap_or_else(|| panic!("{label} bar"));
+        assert_eq!(bar.issues_total, 1, "{label} still reports its own finding");
+    }
+
+    // Negative control: distinct identities still cost two deductions.
+    let (separate, _) = calculate_scores(&pair);
+    assert!(separate < deduped, "unrelated findings still both deduct");
+}
+
 #[test]
 fn a_category_with_an_open_low_issue_never_reads_as_a_perfect_100() {
     // A Warn at NeedsReview confidence is an effective count of 0.25, whose

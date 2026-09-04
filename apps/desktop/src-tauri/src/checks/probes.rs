@@ -19,6 +19,10 @@ use super::{
 #[derive(Default)]
 pub struct ProbeCache {
     pub(in crate::checks) requested_url: std::sync::OnceLock<url::Url>,
+    /// How far outside the public internet the scan target sits, resolved once
+    /// per scan. Unset in a context built without one, where the target's own
+    /// address answers instead.
+    pub(in crate::checks) origin: std::sync::OnceLock<crate::network_policy::LocalOrigin>,
     pub(in crate::checks) robots_txt: tokio::sync::OnceCell<RobotsTxtFetch>,
     pub(in crate::checks) sitemap: tokio::sync::OnceCell<SitemapProbe>,
     pub(in crate::checks) redirect_chain: tokio::sync::OnceCell<RedirectWalk>,

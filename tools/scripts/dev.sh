@@ -105,6 +105,20 @@ cleanup_tauri_target_if_needed
 
 cd "$REPO_ROOT"
 load_repo_env_if_present
+
+# macOS ties keychain access to the calling binary's code signature. A dev
+# build is ad-hoc signed and its hash changes on every rebuild, so every
+# background credential read prompts for a password and no "Always Allow"
+# survives the next build. Debug builds honour this opt-out and keep secrets in
+# dev-secrets.json (mode 0600) instead. Set it to 0 to exercise the keychain
+# path deliberately; a value in .env or the environment wins over this default.
+export SITECMD_DEV_PLAINTEXT_SECRETS="${SITECMD_DEV_PLAINTEXT_SECRETS:-1}"
+if [ "$SITECMD_DEV_PLAINTEXT_SECRETS" = "1" ]; then
+  echo "Secrets: dev-secrets.json (set SITECMD_DEV_PLAINTEXT_SECRETS=0 for the OS keychain)."
+else
+  echo "Secrets: OS keychain. Expect a password prompt after every rebuild."
+fi
+
 trap cleanup EXIT INT TERM
 
 echo "Starting pnpm tauri:dev (desktop app)..."
