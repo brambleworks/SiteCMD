@@ -13,7 +13,7 @@
  * was JavaScript.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,69 @@ const BASE_REF = process.env.SITECMD_CODEQL_BASE ?? "origin/main";
 /** Inline escape hatch, matching how the rest of the guardrails are silenced. */
 const ALLOW_MARKER = "codeql-allow:";
 
+const WORK_PREFIX = "sitecmd-codeql-";
+
+/**
+ * Cap the analysis budget so a loaded machine keeps some headroom. CodeQL
+ * splits this between JVM heap and off-heap: 4096 resolves to a 1800M heap
+ * plus 1379M off-heap, while 2048 gives 1188M and no off-heap at all, which
+ * the security-extended evaluation exhausts and dies on without a message.
+ */
+const RAM_DEFAULT_MB = 4096;
+const RAM_MB = positiveInteger(process.env.SITECMD_CODEQL_RAM) ?? RAM_DEFAULT_MB;
+
+/** CodeQL rejects --ram unless it is a positive integer, and "" coerces to 0. */
+function positiveInteger(value) {
+  if (value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** An hour is far longer than a run takes, so this only sees abandoned work. */
+const STALE_MS = 60 * 60 * 1000;
+
+/** Still running, so its directory is in use no matter how old it looks. */
+function ownerAlive(name) {
+  const pid = Number(name.slice(WORK_PREFIX.length).split("-")[0]);
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the pid exists but belongs to another user.
+    return error.code === "EPERM";
+  }
+}
+
+/**
+ * Delete databases an earlier run left behind. Cleanup happens in a finally
+ * block, which a SIGKILL skips, and each database runs to several hundred
+ * megabytes.
+ *
+ * A directory has to be both idle and ownerless to qualify. CodeQL writes
+ * below work/db, so the parent mtime stops advancing once the database exists,
+ * and the age test alone would eventually see a live run as abandoned.
+ */
+function sweepStaleDatabases() {
+  let entries;
+  try {
+    entries = readdirSync(tmpdir());
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    if (!name.startsWith(WORK_PREFIX)) continue;
+    if (ownerAlive(name)) continue;
+    const directory = join(tmpdir(), name);
+    try {
+      if (Date.now() - statSync(directory).mtimeMs < STALE_MS) continue;
+      rmSync(directory, { recursive: true, force: true });
+    } catch {
+      // A directory that vanished or refuses removal is not worth failing over.
+    }
+  }
+}
+
 function run(command, args, { capture = false } = {}) {
   return spawnSync(command, args, {
     cwd: ROOT,
@@ -35,7 +98,13 @@ function run(command, args, { capture = false } = {}) {
   });
 }
 
+/** Set once the database directory exists, so die() can still remove it. */
+let workDirectory = null;
+
 function die(message) {
+  // process.exit skips the finally block, and an abandoned database is several
+  // hundred megabytes, so the cleanup has to happen here too.
+  if (workDirectory) rmSync(workDirectory, { recursive: true, force: true });
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
@@ -146,13 +215,18 @@ function main() {
         "  reports the alerts that would otherwise block the pull request.",
     );
 
+  // Ahead of the early return below, so a run with nothing to analyze still
+  // clears what an earlier one abandoned.
+  sweepStaleDatabases();
+
   const ranges = addedLines();
   if (ranges.size === 0) {
     console.log("check-codeql: no added lines to analyze.");
     return;
   }
 
-  const work = mkdtempSync(join(tmpdir(), "sitecmd-codeql-"));
+  const work = mkdtempSync(join(tmpdir(), `${WORK_PREFIX}${process.pid}-`));
+  workDirectory = work;
   try {
     // No paths-ignore config: the extractor already skips node_modules, and
     // analysis covers every tracked JavaScript and TypeScript file.
@@ -164,6 +238,7 @@ function main() {
       `--language=${LANGUAGE}`,
       "--build-mode=none",
       `--source-root=${ROOT}`,
+      `--ram=${RAM_MB}`,
       "--overwrite",
     ]);
     if (created.status !== 0) die("check-codeql: database creation failed.");
@@ -176,6 +251,7 @@ function main() {
       SUITE,
       "--format=sarif-latest",
       `--output=${sarif}`,
+      `--ram=${RAM_MB}`,
       "--download",
     ]);
     if (analyzed.status !== 0) die("check-codeql: analysis failed.");
@@ -229,9 +305,12 @@ function main() {
       "These are the alerts the CodeQL check reports on the pull request.\n" +
         `Fix them, or record the decision in the source with a ${ALLOW_MARKER} <rule id> comment.\n`,
     );
-    process.exit(1);
+    // Not process.exit: that skips the finally below, and reporting alerts is
+    // the failure this gate takes most often. Nothing runs after main().
+    process.exitCode = 1;
   } finally {
     rmSync(work, { recursive: true, force: true });
+    workDirectory = null;
   }
 }
 
