@@ -11,6 +11,8 @@ public repository history.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-04
+
 ### Added
 
 - Scans can target a development server on your own network, such as
