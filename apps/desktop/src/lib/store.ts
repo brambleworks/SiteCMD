@@ -1,11 +1,9 @@
-import { LazyStore } from "@tauri-apps/plugin-store";
-
-const store = new LazyStore("settings.json", { defaults: {}, autoSave: true });
+import { getAppSetting, setAppSetting } from "@/lib/commands/app-settings";
 
 /** Read a value from the Tauri store. Returns `fallback` if not found. */
 export async function storeGet<T>(key: string, fallback: T): Promise<T> {
   try {
-    const value = await store.get<T>(key);
+    const value = await getAppSetting<T>(key);
     return value ?? fallback;
   } catch {
     return fallback;
@@ -15,7 +13,7 @@ export async function storeGet<T>(key: string, fallback: T): Promise<T> {
 /** Write a value to the durable Tauri store. */
 export async function storeSet<T>(key: string, value: T): Promise<void> {
   try {
-    await store.set(key, value);
+    await setAppSetting(key, value);
   } catch {
     // localStorage remains the fallback.
   }
@@ -38,7 +36,7 @@ export async function migrateFromLocalStorage<T>(
   };
 
   try {
-    const existing = await store.get<unknown>(storeKey);
+    const existing = await getAppSetting<unknown>(storeKey);
     const parsedExisting = parseStoredValue(existing);
     if (parsedExisting != null) {
       writeLocalStorageFallback(parsedExisting);
@@ -51,7 +49,7 @@ export async function migrateFromLocalStorage<T>(
     if (raw) {
       const parsed = parseStoredValue(JSON.parse(raw) as unknown);
       if (parsed == null) return fallback;
-      await store.set(storeKey, parsed);
+      await setAppSetting(storeKey, parsed);
       return parsed;
     }
   } catch {

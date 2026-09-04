@@ -35,7 +35,7 @@ fn scan_retention_from_settings_value(settings: Option<&serde_json::Value>) -> u
 
 pub(crate) fn configured_scan_retention(app: &tauri::AppHandle) -> u32 {
     let settings = app
-        .store("settings.json")
+        .store(crate::commands::app_settings::APP_SETTINGS_FILE)
         .ok()
         .and_then(|store| store.get("scan-prefs"));
     scan_retention_from_settings_value(settings.as_ref())

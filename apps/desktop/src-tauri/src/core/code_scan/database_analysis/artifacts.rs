@@ -2,8 +2,9 @@ use super::*;
 
 pub(in crate::core::code_scan) fn collect_database_artifacts(
     project_files: &[ProjectFile],
-) -> Vec<TextArtifact> {
-    collect_text_artifacts(project_files, looks_like_database_artifact)
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<TextArtifact>, CodeScanError> {
+    collect_text_artifacts(project_files, looks_like_database_artifact, text_budget)
 }
 
 fn looks_like_database_artifact(relative_path: &str, file_name: &str) -> bool {
@@ -30,8 +31,9 @@ fn looks_like_database_artifact(relative_path: &str, file_name: &str) -> bool {
 
 pub(in crate::core::code_scan) fn collect_deploy_config_files(
     project_files: &[ProjectFile],
-) -> Vec<TextArtifact> {
-    collect_text_artifacts(project_files, looks_like_deploy_config)
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<TextArtifact>, CodeScanError> {
+    collect_text_artifacts(project_files, looks_like_deploy_config, text_budget)
 }
 
 fn looks_like_deploy_config(relative_path: &str, file_name: &str) -> bool {
@@ -52,27 +54,30 @@ fn looks_like_deploy_config(relative_path: &str, file_name: &str) -> bool {
     ) || relative_path.ends_with("/dockerfile")
 }
 
-fn collect_text_artifacts(
+pub(in crate::core::code_scan) fn collect_text_artifacts(
     project_files: &[ProjectFile],
     matches_artifact: fn(&str, &str) -> bool,
-) -> Vec<TextArtifact> {
-    project_files
-        .iter()
-        .filter_map(|file| {
-            let file_name = file.absolute_path.file_name()?.to_string_lossy();
-            if !matches_artifact(&file.relative_path, &file_name) || file.size > 250_000 {
-                return None;
-            }
-            let bytes = read_project_file(file, 250_000)?;
-            if bytes.contains(&0) {
-                return None;
-            }
-            let content = String::from_utf8(bytes).ok()?;
-            Some(TextArtifact {
-                absolute_path: file.absolute_path.clone(),
-                relative_path: file.relative_path.clone(),
-                content,
-            })
-        })
-        .collect()
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<TextArtifact>, CodeScanError> {
+    let mut artifacts = Vec::new();
+    for file in project_files {
+        text_budget.check_cancelled()?;
+        let Some(file_name) = file.absolute_path.file_name() else {
+            continue;
+        };
+        if !matches_artifact(&file.relative_path, &file_name.to_string_lossy())
+            || file.size > 250_000
+        {
+            continue;
+        }
+        let Some(content) = text_budget.read_project_file(file, 250_000)? else {
+            continue;
+        };
+        artifacts.push(TextArtifact {
+            absolute_path: file.absolute_path.clone(),
+            relative_path: file.relative_path.clone(),
+            content,
+        });
+    }
+    Ok(artifacts)
 }

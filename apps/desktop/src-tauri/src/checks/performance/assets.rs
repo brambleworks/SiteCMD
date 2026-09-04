@@ -2,7 +2,10 @@
 
 mod measure;
 
+use std::future::Future;
+
 use crate::checks::{AsyncCheck, CheckContext, CheckResult, ScanCategory};
+use futures_util::{stream, StreamExt};
 use sitecmd_engine::checks::performance::assets;
 use sitecmd_engine::checks::performance::assets::MeasuredAsset;
 
@@ -37,33 +40,32 @@ impl AsyncCheck for AssetSamplerCheck {
             crate::constants::ASSET_SAMPLE_LIMIT,
         );
 
-        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
-            crate::constants::ASSET_FETCH_CONCURRENCY,
-        ));
-        let mut futures = Vec::new();
-        for asset in &collection.sampled {
-            let client = measurement_client(ctx.is_strict_localhost).clone();
-            let asset = asset.clone();
-            let sem = semaphore.clone();
-            futures.push(tokio::spawn(async move {
-                let _permit = match sem.acquire().await {
-                    Ok(permit) => permit,
-                    // Semaphore is never closed; treat as unfetched if it ever is.
-                    Err(_) => return MeasuredAsset::unfetched(&asset),
-                };
-                measure::fetch_asset(client, asset).await
-            }));
-        }
-
-        let mut measured = Vec::new();
-        for future in futures {
-            if let Ok(asset) = future.await {
-                measured.push(asset);
-            }
-        }
+        let client = measurement_client(ctx.is_strict_localhost);
+        let measured = collect_measurements(
+            collection
+                .sampled
+                .clone()
+                .into_iter()
+                .map(move |asset| measure::fetch_asset(client.clone(), asset)),
+        )
+        .await;
 
         assets::evaluate_asset_sample(ctx.body.len() as u64, &collection, &measured)
     }
+}
+
+async fn collect_measurements<F>(fetches: impl IntoIterator<Item = F>) -> Vec<MeasuredAsset>
+where
+    F: Future<Output = MeasuredAsset>,
+{
+    // Owning each future ties running and queued requests to the check lifetime.
+    let mut measured: Vec<_> = stream::iter(fetches.into_iter().enumerate())
+        .map(|(index, fetch)| async move { (index, fetch.await) })
+        .buffer_unordered(crate::constants::ASSET_FETCH_CONCURRENCY)
+        .collect()
+        .await;
+    measured.sort_unstable_by_key(|(index, _)| *index);
+    measured.into_iter().map(|(_, asset)| asset).collect()
 }
 
 /// The sampler reports transfer size, so it fetches through the client that
@@ -78,6 +80,113 @@ fn measurement_client(is_strict_local: bool) -> &'static reqwest::Client {
 mod tests {
     use super::*;
     use crate::checks::CheckStatus;
+
+    #[test]
+    fn dropping_the_sampler_cancels_running_fetches_without_starting_queued_assets() {
+        use std::cell::Cell;
+        use std::task::{Context, Poll};
+
+        struct RunningFetch<'a>(&'a Cell<usize>);
+
+        impl Drop for RunningFetch<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() - 1);
+            }
+        }
+
+        let started = Cell::new(0);
+        let running = Cell::new(0);
+        let fetches = (0..crate::constants::ASSET_SAMPLE_LIMIT).map(|_| async {
+            started.set(started.get() + 1);
+            running.set(running.get() + 1);
+            let _running = RunningFetch(&running);
+            std::future::pending::<MeasuredAsset>().await
+        });
+        let mut sampler = Box::pin(collect_measurements(fetches));
+        let mut context = Context::from_waker(futures_util::task::noop_waker_ref());
+
+        assert!(matches!(sampler.as_mut().poll(&mut context), Poll::Pending));
+        assert_eq!(started.get(), crate::constants::ASSET_FETCH_CONCURRENCY);
+        assert_eq!(running.get(), crate::constants::ASSET_FETCH_CONCURRENCY);
+
+        drop(sampler);
+
+        assert_eq!(running.get(), 0, "in-flight fetch futures must be dropped");
+        assert_eq!(
+            started.get(),
+            crate::constants::ASSET_FETCH_CONCURRENCY,
+            "queued assets must never start after the parent is dropped"
+        );
+    }
+
+    #[test]
+    fn sampler_refills_when_later_fetches_finish_and_preserves_sample_order() {
+        use std::cell::Cell;
+        use std::task::{Context, Poll};
+
+        let measured_asset = |index| {
+            MeasuredAsset::unfetched(&assets::CollectedAsset {
+                url: url::Url::parse(&format!("https://example.com/{index}.png"))
+                    .expect("asset URL"),
+                kind: assets::AssetKind::Image,
+                has_srcset: false,
+                group: 0,
+            })
+        };
+        let (mut senders, receivers): (Vec<_>, Vec<_>) = (0..crate::constants::ASSET_SAMPLE_LIMIT)
+            .map(|_| {
+                let (sender, receiver) = tokio::sync::oneshot::channel();
+                (Some(sender), receiver)
+            })
+            .unzip();
+        let started = Cell::new(0);
+        let fetches = receivers.into_iter().map(|receiver| async {
+            started.set(started.get() + 1);
+            receiver.await.expect("measurement")
+        });
+        let mut sampler = Box::pin(collect_measurements(fetches));
+        let mut context = Context::from_waker(futures_util::task::noop_waker_ref());
+        assert!(matches!(sampler.as_mut().poll(&mut context), Poll::Pending));
+
+        for (index, sender) in senders
+            .iter_mut()
+            .enumerate()
+            .take(crate::constants::ASSET_FETCH_CONCURRENCY)
+            .skip(1)
+        {
+            sender
+                .take()
+                .expect("sender")
+                .send(measured_asset(index))
+                .expect("finish later request");
+        }
+        assert!(matches!(sampler.as_mut().poll(&mut context), Poll::Pending));
+        assert!(
+            started.get() > crate::constants::ASSET_FETCH_CONCURRENCY,
+            "a slow first asset must not stall the queue"
+        );
+
+        for (index, sender) in senders.into_iter().enumerate() {
+            if let Some(sender) = sender {
+                sender
+                    .send(measured_asset(index))
+                    .expect("finish remaining request");
+            }
+        }
+        let Poll::Ready(measured) = sampler.as_mut().poll(&mut context) else {
+            panic!("all asset requests completed");
+        };
+        let expected: Vec<_> = (0..crate::constants::ASSET_SAMPLE_LIMIT)
+            .map(|index| measured_asset(index).url)
+            .collect();
+        assert_eq!(
+            measured
+                .into_iter()
+                .map(|asset| asset.url)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
 
     /// The one adapter path with no network: a page that references no
     /// fetchable assets. Pins the wiring of AssetSamplerCheck end to end -

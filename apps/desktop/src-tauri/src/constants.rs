@@ -157,6 +157,9 @@ pub const MAX_STYLESHEET_CACHE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Maximum dependency manifest or lockfile size accepted by Updates and Code Scan.
 pub const MAX_DEPENDENCY_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Cumulative retained source and configuration text admitted by one Code Scan.
+pub const CODE_SCAN_MAX_TEXT_BYTES: u64 = 64_000_000;
 /// Maximum `.sitecmd/config.json` size accepted by CLI and deep-link imports.
 pub const MAX_CLI_CONFIG_BYTES: u64 = 64 * 1024;
 /// Maximum `.sitecmd/last-scan.json` size accepted by CLI and deep-link imports.

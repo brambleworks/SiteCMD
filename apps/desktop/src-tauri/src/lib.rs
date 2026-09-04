@@ -469,6 +469,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            commands::get_app_setting,
+            commands::set_app_setting,
             commands::add_project,
             commands::add_project_by_url,
             commands::rename_project,

@@ -976,18 +976,35 @@ describe.concurrent(
       expectGuardrailFailure(
         codeScanInventoryFailures,
         (fixtureRoot) => {
-          const inventoryPath = "apps/desktop/src-tauri/src/core/code_scan/project_inventory.rs";
+          const inventoryPath = "apps/desktop/src-tauri/src/core/code_scan/text_budget.rs";
           const source = readFixtureFile(fixtureRoot, inventoryPath);
           writeFixtureFile(
             fixtureRoot,
             inventoryPath,
-            source.replace(
-              "read_project_file(file, 250_000)",
+            mustMutate(
+              source,
+              "filesystem::read_project_file(file, max_bytes)",
               "fs::read(&file.absolute_path).ok()",
             ),
           );
         },
         "Code Scan inventory readers must use the bounded no-follow helper and reject files replaced by symlinks.",
+      );
+    });
+
+    it("requires configuration collectors to share the source text budget", () => {
+      expectGuardrailFailure(
+        codeScanInventoryFailures,
+        (fixtureRoot) => {
+          const scanPath = "apps/desktop/src-tauri/src/core/code_scan/mod.rs";
+          const source = readFixtureFile(fixtureRoot, scanPath);
+          writeFixtureFile(
+            fixtureRoot,
+            scanPath,
+            mustMutate(source, "text_budget.account_sources(&files)?;", ""),
+          );
+        },
+        "Code Scan source and retained configuration collectors must share a cumulative byte budget and propagate cancellation or limit errors.",
       );
     });
 

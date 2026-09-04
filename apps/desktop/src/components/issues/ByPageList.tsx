@@ -1,10 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Globe2 } from "lucide-react";
 import type { PageSummary } from "@/lib/types";
 import { getIssuePages } from "@/lib/issues";
 import { Button } from "@/components/ui/button";
 import { SurfaceState } from "@/components/ui/surface-state";
+import { Pager } from "@/components/ui/pager";
+import { useResetOnChange } from "@/hooks/useResetOnChange";
+import { pageWindow } from "@/lib/pagination";
 import { formatSeverityLabel, severityToneClass } from "@/lib/severity";
 import { formatUrlHost, formatUrlPathOrHost, getUrlPathname } from "@/lib/utils";
 import { queryKeys } from "@/lib/query/query-keys";
@@ -16,12 +19,23 @@ interface Props {
   onSelectPage: (pageUrl: string) => void;
 }
 
+const PAGE_SIZE = 50;
+
 export function ByPageList({ projectId, envUrl, onSelectPage }: Props) {
+  const [page, setPage] = useState(1);
+  useResetOnChange(`${projectId}:${envUrl}`, () => setPage(1));
   const pagesQuery = useQuery<PageSummary[]>({
     queryKey: queryKeys.issuePages.forEnv(projectId, envUrl),
     queryFn: () => getIssuePages(projectId, envUrl),
   });
-  const pages = useMemo(() => pagesQuery.data ?? [], [pagesQuery.data]);
+  const visiblePages = useMemo(
+    () =>
+      (pagesQuery.data ?? []).filter(
+        (row) => row.pageUrl !== "__project_wide__" && row.pageUrl.trim().length > 0,
+      ),
+    [pagesQuery.data],
+  );
+  const bounded = pageWindow(visiblePages, page, PAGE_SIZE);
 
   if (pagesQuery.isPending) {
     return <IssuePanelSkeleton label="Loading affected pages" />;
@@ -37,11 +51,6 @@ export function ByPageList({ projectId, envUrl, onSelectPage }: Props) {
       />
     );
   }
-  // Exclude stale synthetic project-wide rows from the page index.
-  const visiblePages = pages.filter(
-    (page) => page.pageUrl !== "__project_wide__" && page.pageUrl.trim().length > 0,
-  );
-
   if (visiblePages.length === 0) {
     return (
       <SurfaceState
@@ -70,7 +79,7 @@ export function ByPageList({ projectId, envUrl, onSelectPage }: Props) {
       </div>
 
       <div className="by-page-list">
-        {visiblePages.map((page) => {
+        {bounded.rows.map((page) => {
           const pathLabel = getUrlPathname(
             page.pageUrl,
             formatUrlPathOrHost(page.pageUrl, page.label),
@@ -105,6 +114,22 @@ export function ByPageList({ projectId, envUrl, onSelectPage }: Props) {
           );
         })}
       </div>
+      {bounded.totalPages > 1 ? (
+        <div className="panel-inset stack-base">
+          <p className="text-meta" role="status">
+            Showing {(bounded.page - 1) * PAGE_SIZE + 1}-
+            {Math.min(bounded.page * PAGE_SIZE, visiblePages.length)} of {visiblePages.length}{" "}
+            affected pages
+          </p>
+          <Pager
+            page={bounded.page}
+            totalPages={bounded.totalPages}
+            onChange={setPage}
+            label="Affected page results"
+            itemLabel="results"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

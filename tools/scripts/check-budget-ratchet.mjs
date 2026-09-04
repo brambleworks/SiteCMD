@@ -59,12 +59,18 @@ function extractThresholds(source) {
     // annotation sits between the name and the `=`. The threshold-suffix
     // test lives in plain code because folding it into the name pattern
     // makes the regex superlinear (safe-regex flags it).
-    for (const match of line.matchAll(/const\s+([A-Z][A-Z0-9_]*)/g)) {
+    // Only declarations define budgets; quoted source assertions do not.
+    const declaration = line
+      .trimStart()
+      .replace(/^export\s+/, "")
+      .replace(/^pub\s+/, "")
+      .replace(/^pub\([a-z:]+\)\s+/, "");
+    for (const match of declaration.matchAll(/^const\s+([A-Z][A-Z0-9_]*)/g)) {
       const name = match[1];
       if (!/_(?:LIMIT|BUDGET|CAP|MAXLINES)$/.test(name) && !/_MAX_[A-Z_]+$/.test(name)) {
         continue;
       }
-      const rest = line.slice(match.index + match[0].length);
+      const rest = declaration.slice(match.index + match[0].length);
       const eq = rest.indexOf("=");
       if (eq === -1) {
         continue;

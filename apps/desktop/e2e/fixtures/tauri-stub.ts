@@ -137,6 +137,7 @@ export async function installTauriStub(
       const callbacks = new Map<number, (...args: unknown[]) => void>();
       const listenersByEvent = new Map<string, Set<number>>();
       const deferredResolvers = new Map<string, Array<(value: unknown) => void>>();
+      const appSettings = new Map<string, unknown>();
 
       // Shared by the test API and privileged-bridge emulation.
       const deliverEvent = (event: string, payload: unknown): number => {
@@ -277,6 +278,13 @@ export async function installTauriStub(
                 });
               }
               return Promise.resolve(value);
+            }
+            if (cmd === "get_app_setting") {
+              return Promise.resolve(appSettings.get(String(args?.key)) ?? null);
+            }
+            if (cmd === "set_app_setting") {
+              appSettings.set(String(args?.key), args?.value);
+              return Promise.resolve(null);
             }
             if (SILENT_NULL.has(cmd)) return Promise.resolve(null);
             console.error(`[tauri-stub] unstubbed invoke: ${cmd}`);

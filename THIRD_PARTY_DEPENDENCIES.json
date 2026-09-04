@@ -14998,23 +14998,6 @@
     },
     {
       "ecosystem": "npm",
-      "name": "@tauri-apps/plugin-store",
-      "version": "2.4.4",
-      "license": "MIT OR Apache-2.0",
-      "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "source": "npm",
-      "scopes": [
-        "desktop-javascript"
-      ],
-      "licenseFiles": [
-        {
-          "name": "LICENSE.spdx",
-          "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
-        }
-      ]
-    },
-    {
-      "ecosystem": "npm",
       "name": "@types/debug",
       "version": "4.1.13",
       "license": "MIT",

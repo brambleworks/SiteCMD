@@ -63,13 +63,14 @@ pub(super) fn analyze_operations(
     project_files: &[ProjectFile],
     manifests: &[PackageManifest],
     options: CodeScanOptions,
-) -> Result<Vec<CodeIssue>, String> {
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<CodeIssue>, CodeScanError> {
     let project_paths = collect_project_paths(project_files);
     // Example templates are ordinary source/configuration. Actual dotenv
     // files can contain live credentials, so their values are read only for
     // an explicitly opted-in local-database inspection run.
-    let env_files = collect_env_files(project_files, options.inspect_local_databases);
-    let database_artifacts = collect_database_artifacts(project_files);
+    let env_files = collect_env_files(project_files, options.inspect_local_databases, text_budget)?;
+    let database_artifacts = collect_database_artifacts(project_files, text_budget)?;
     let local_sqlite_snapshots = if options.inspect_local_databases {
         collect_local_sqlite_snapshots(root, &env_files)
     } else {
@@ -80,7 +81,7 @@ pub(super) fn analyze_operations(
     } else {
         Vec::new()
     };
-    let deploy_configs = collect_deploy_config_files(project_files);
+    let deploy_configs = collect_deploy_config_files(project_files, text_budget)?;
     let source_env_keys = collect_source_env_keys(files);
     let project_paths_lower = project_paths
         .iter()

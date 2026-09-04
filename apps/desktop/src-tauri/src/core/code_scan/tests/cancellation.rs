@@ -1,7 +1,7 @@
 //! Cancellation must stop the audit inside the analyze pass, not after it.
 
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// Analyze workers stride the file list, so the number of files has to stay
@@ -62,14 +62,23 @@ fn cancelling_mid_pass_stops_before_every_file_is_analyzed() {
     let workers = analyze_worker_count();
     let file_count = (workers * 4).max(200);
     let temp = project_with_source_files(file_count);
+    let analyzing = AtomicBool::new(false);
     let polls = AtomicUsize::new(0);
     let stages: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
     let result = audit_project_with_control(
         temp.path(),
         CodeScanOptions::default(),
-        |progress| stages.lock().unwrap().push(progress.check_id),
-        || polls.fetch_add(1, Ordering::SeqCst) >= POLLS_BEFORE_CANCEL,
+        |progress| {
+            if progress.check_id == "code-scan.analyze-source" {
+                analyzing.store(true, Ordering::SeqCst);
+            }
+            stages.lock().unwrap().push(progress.check_id);
+        },
+        || {
+            analyzing.load(Ordering::SeqCst)
+                && polls.fetch_add(1, Ordering::SeqCst) >= POLLS_BEFORE_CANCEL
+        },
     );
 
     assert!(
@@ -82,6 +91,7 @@ fn cancelling_mid_pass_stops_before_every_file_is_analyzed() {
         "the analyze pass must stop early; it polled {observed} times over {file_count} files"
     );
     let stages = stages.lock().unwrap();
+    assert!(stages.contains(&"code-scan.analyze-source"));
     assert!(
         !stages.contains(&"code-scan.finalize"),
         "a cancelled audit must not reach the finalize stage: {stages:?}"

@@ -1,6 +1,8 @@
 export function codeScanInventoryFailures(read) {
   const codeScan = read("apps/desktop/src-tauri/src/core/code_scan/mod.rs");
   const safeFs = read("apps/desktop/src-tauri/src/core/safe_fs.rs");
+  const textBudget = read("apps/desktop/src-tauri/src/core/code_scan/text_budget.rs");
+  const projectInventory = read("apps/desktop/src-tauri/src/core/code_scan/project_inventory.rs");
   // The inventory contract spans production code and its sibling test module.
   const filesystem =
     read("apps/desktop/src-tauri/src/core/code_scan/filesystem.rs") +
@@ -11,7 +13,6 @@ export function codeScanInventoryFailures(read) {
     read("apps/desktop/src-tauri/src/core/code_scan/supply_chain.rs") +
     read("apps/desktop/src-tauri/src/core/code_scan/supply_chain/config_secrets.rs");
   const inventoryReaders = [
-    "apps/desktop/src-tauri/src/core/code_scan/project_inventory.rs",
     "apps/desktop/src-tauri/src/core/code_scan/database_analysis/artifacts.rs",
     "apps/desktop/src-tauri/src/core/code_scan/database_analysis/env_files.rs",
     "apps/desktop/src-tauri/src/core/code_scan/package_inventory/manifests.rs",
@@ -19,9 +20,11 @@ export function codeScanInventoryFailures(read) {
   ].map(read);
   const reusesInventory =
     codeScan.includes("let inventory = collect_project_inventory(root)?;") &&
-    codeScan.includes("let manifests = collect_package_manifests(&project_files);") &&
+    codeScan.includes(
+      "let manifests = collect_package_manifests(&project_files, &mut text_budget)?;",
+    ) &&
     operations.includes("collect_project_paths(project_files)") &&
-    supplyChain.includes("collect_ai_config_files(project_files)") &&
+    supplyChain.includes("collect_ai_config_files(project_files, text_budget)?") &&
     !operations.includes("collect_package_manifests(root)") &&
     !supplyChain.includes("collect_package_manifests(root)");
   const usesBoundedInventoryReads =
@@ -29,12 +32,30 @@ export function codeScanInventoryFailures(read) {
     safeFs.includes("libc::O_NOFOLLOW") &&
     safeFs.includes("initial_metadata.ino() != opened_metadata.ino()") &&
     filesystem.includes("security_regression_inventory_read_rejects_file_replaced_by_symlink") &&
+    textBudget.includes("filesystem::read_project_file(file, max_bytes)") &&
+    projectInventory.includes(
+      "collect_text_artifacts(project_files, looks_like_ai_config, text_budget)",
+    ) &&
+    !projectInventory.includes("fs::read") &&
     inventoryReaders.every(
       (source) =>
         source.includes("read_project_file(") &&
         !source.includes("fs::read(&file.absolute_path)") &&
         !source.includes("fs::read_to_string(&file.absolute_path)"),
     );
+  const sharesTextBudget =
+    codeScan.includes("text_budget.account_sources(&files)?;") &&
+    textBudget.includes("content.capacity() as u64") &&
+    textBudget.includes("self.max_bytes.saturating_sub(self.retained_bytes)") &&
+    textBudget.includes("self.retain(content)?;") &&
+    textBudget.includes("self.check_cancelled()?;") &&
+    operations.includes("collect_database_artifacts(project_files, text_budget)?") &&
+    operations.includes("collect_deploy_config_files(project_files, text_budget)?") &&
+    operations.includes("options.inspect_local_databases, text_budget)?") &&
+    codeScan.includes("analyze_ai_scaffolding(root, &mut text_budget)?") &&
+    inventoryReaders
+      .slice(0, 3)
+      .every((source) => source.includes("text_budget.read_project_file(file,"));
 
   const fixedPathReaders = [
     "apps/desktop/src-tauri/src/core/code_scan/ai_scaffolding.rs",
@@ -44,6 +65,7 @@ export function codeScanInventoryFailures(read) {
     filesystem.includes("pub(super) fn read_text_under_root") &&
     filesystem.includes("pub(super) fn read_under_root") &&
     filesystem.includes("security_regression_read_text_under_root_rejects_symlink_escape") &&
+    textBudget.includes("filesystem::read_text_under_root(root, path)") &&
     fixedPathReaders.every(
       (source) =>
         source.includes("read_text_under_root(") &&
@@ -79,6 +101,11 @@ export function codeScanInventoryFailures(read) {
   if (!usesBoundedInventoryReads) {
     failures.push(
       "Code Scan inventory readers must use the bounded no-follow helper and reject files replaced by symlinks.",
+    );
+  }
+  if (!sharesTextBudget) {
+    failures.push(
+      "Code Scan source and retained configuration collectors must share a cumulative byte budget and propagate cancellation or limit errors.",
     );
   }
   if (!usesGuardedFixedPathReads) {

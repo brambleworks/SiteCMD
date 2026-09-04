@@ -34,7 +34,7 @@ const DEFAULT_COLLECTION_LIMITS: CollectionLimits = CollectionLimits {
     max_files: 5_000,
     // Bound traversal separately from source files selected for analysis.
     max_total_files: 100_000,
-    max_total_bytes: 64_000_000,
+    max_total_bytes: crate::constants::CODE_SCAN_MAX_TEXT_BYTES,
     max_depth: 48,
 };
 
@@ -374,7 +374,6 @@ fn collect_project_inventory_with_limits(
             Ok(content) => content,
             Err(_) => continue,
         };
-        state.total_bytes = state.total_bytes.saturating_add(metadata.len());
         let content = sanitize_source_content(&path, content);
 
         // A Rust file that is entirely `#![cfg(test)]` (the #[path] sibling
@@ -388,6 +387,14 @@ fn collect_project_inventory_with_limits(
         // analysis, including unminified bundles and minified files without `.min.`.
         if super::vendored::looks_like_vendored_library(&content) {
             continue;
+        }
+
+        state.total_bytes = state.total_bytes.saturating_add(content.capacity() as u64);
+        if state.total_bytes > limits.max_total_bytes {
+            return Err(format!(
+                "Code Scan stopped after reaching the {} byte source budget. Choose a smaller project root or exclude generated folders.",
+                limits.max_total_bytes
+            ));
         }
 
         source_files.push(SourceFile {

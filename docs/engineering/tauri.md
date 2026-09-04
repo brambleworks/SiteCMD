@@ -70,6 +70,8 @@ The shared wrapper routes elevated commands through the privileged bridge and ke
 
 Do not call plugin APIs directly from the renderer for keyring, updater install/download, filesystem writes, or secret-bearing work. Use Rust commands.
 
+Application preferences use `get_app_setting` and `set_app_setting`. Rust fixes the store path to the existing app-data `settings.json`; renderer arguments select only a key within that file. Keep store plugin permissions out of renderer capabilities, including load, get, set, and save.
+
 ## Code Scan Payloads
 
 Code Scan is a Rust-owned local-project audit engine. It produces `CodeScanReport` and `CodeIssue` data.

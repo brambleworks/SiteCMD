@@ -4,6 +4,8 @@
 description = "Grants SiteCMD's ordinary read and workflow commands. Elevated filesystem, destructive, connector, and project execution commands are granted separately."
 permissions = [
     "allow-ping",
+    "allow-get-app-setting",
+    "allow-set-app-setting",
     "allow-add-project",
     "allow-add-project-by-url",
     "allow-rename-project",

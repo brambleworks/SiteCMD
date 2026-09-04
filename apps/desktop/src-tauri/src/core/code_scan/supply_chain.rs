@@ -30,7 +30,8 @@ pub(super) fn analyze_supply_chain(
     files: &[SourceFile],
     project_files: &[ProjectFile],
     manifests: &[PackageManifest],
-) -> Vec<CodeIssue> {
+    text_budget: &mut ScanTextBudget<'_>,
+) -> Result<Vec<CodeIssue>, CodeScanError> {
     let registry_config = collect_registry_config(root, manifests);
     let declared_dependencies = manifests
         .iter()
@@ -482,7 +483,7 @@ pub(super) fn analyze_supply_chain(
         }
     }
 
-    collect_config_secret_issues(&mut issues, &mut seen_ids, project_files);
+    collect_config_secret_issues(&mut issues, &mut seen_ids, project_files, text_budget)?;
 
     // Evaluate alternatives per manifest; different workspace members may
     // legitimately choose different libraries.
@@ -533,5 +534,5 @@ pub(super) fn analyze_supply_chain(
     collect_release_age_issues(&mut issues, project_files, manifests);
     collect_lockfile_integrity_issues(&mut issues, project_files);
 
-    issues
+    Ok(issues)
 }

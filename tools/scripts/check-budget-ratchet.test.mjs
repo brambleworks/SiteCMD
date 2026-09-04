@@ -101,6 +101,19 @@ describe("check-budget-ratchet", () => {
     expect(result.status).toBe(0);
   });
 
+  it("does not treat quoted source assertions as budget declarations", () => {
+    const rulePath = "tools/scripts/lib/guardrail-code-scan-security-rules.mjs";
+    write(
+      repo,
+      rulePath,
+      'constants.includes("pub const CODE_SCAN_MAX_TEXT_BYTES: u64 = 64_000_000;");\n',
+    );
+    stageOnly(repo, rulePath);
+    const result = runScript(repo);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+  });
+
   it("FAILS when a threshold value is raised", () => {
     write(
       repo,
@@ -252,8 +265,8 @@ describe("check-budget-ratchet", () => {
     expect(result.stderr).toMatch(/foo\.tsx.*800 -> 1500/);
   });
 
-  it("detects raises in top-level *_LIMIT constants", () => {
-    const constFile = `const RUST_FILE_LINE_LIMIT = 800;
+  it.each(["", "export "])("detects raises in %sconst *_LIMIT declarations", (prefix) => {
+    const constFile = `${prefix}const RUST_FILE_LINE_LIMIT = 800;
 export function rustLineBudgetFailures() {}
 `;
     write(repo, "tools/scripts/lib/guardrail-rust-loc-rules.mjs", constFile);
@@ -270,9 +283,9 @@ export function rustLineBudgetFailures() {}
     expect(result.stderr).toMatch(/const:RUST_FILE_LINE_LIMIT.*800 -> 1200/);
   });
 
-  it("covers Rust budget constants in lib_tests.rs: refused without the token, passes with it", () => {
+  it.each(["", "pub ", "pub(crate) "])("enforces Rust %sconst budget declarations", (prefix) => {
     const rustPath = "apps/desktop/src-tauri/src/lib_tests.rs";
-    const rustFile = `const STRING_RESULT_COMMAND_BUDGET: usize = 100;\n`;
+    const rustFile = `${prefix}const STRING_RESULT_COMMAND_BUDGET: usize = 100;\n`;
     write(repo, rustPath, rustFile);
     commit(repo, "initial rust ratchet");
 

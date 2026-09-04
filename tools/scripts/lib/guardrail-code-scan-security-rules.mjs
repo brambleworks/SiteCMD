@@ -38,7 +38,8 @@ export function codeScanSecurityFailures(read) {
   if (!(
     filesystem.includes("DEFAULT_COLLECTION_LIMITS") &&
     filesystem.includes("max_files: 5_000") &&
-    filesystem.includes("max_total_bytes: 64_000_000") &&
+    filesystem.includes("max_total_bytes: crate::constants::CODE_SCAN_MAX_TEXT_BYTES") &&
+    constants.includes("pub const CODE_SCAN_MAX_TEXT_BYTES: u64 = 64_000_000;") &&
     filesystem.includes("collect_project_inventory") &&
     filesystem.includes("security_regression_source_file_collection_enforces_file_count_budget")
   )) {

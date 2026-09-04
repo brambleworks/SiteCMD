@@ -1136,6 +1136,10 @@ fn sensitive_capability_groups_elevated_acl_surfaces() {
         !default_capability.contains("opener:"),
         "The main renderer must not have a generic URL opener; external links cross the native-confirmed broker."
     );
+    assert!(
+        !default_capability.contains("store:"),
+        "The main renderer must use fixed-file app settings commands, never arbitrary-path store plugin commands."
+    );
 
     let sensitive_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("capabilities")

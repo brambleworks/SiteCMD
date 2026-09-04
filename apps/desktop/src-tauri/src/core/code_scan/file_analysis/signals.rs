@@ -316,7 +316,7 @@ impl FileAnalysisSignals {
         // revalidation is the whole body, even though the action's path sits
         // under `settings/` or `admin/`.
         let sensitive_handler =
-            is_sensitive_handler(file, &lower) && !(server_action_like && !server_action_does_work);
+            is_sensitive_handler(file, &lower) && (!server_action_like || server_action_does_work);
         let likely_public_endpoint = route_like
             && !is_wp_gated_surface(&lower)
             && !middleware_auth_protected
