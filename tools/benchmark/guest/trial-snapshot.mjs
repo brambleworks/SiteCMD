@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
 import {
+  closeSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   readlinkSync,
@@ -33,10 +36,18 @@ export function readCandidate(directory) {
         violations.push(`Non-regular or hard-linked file: ${key}`);
         continue;
       }
-      bytes += stat.size;
-      if (stat.size > 4 * 1024 * 1024 || bytes > 16 * 1024 * 1024)
-        throw new Error("Candidate exceeds snapshot byte limits");
-      files[key] = readFileSync(file);
+      // Read through the descriptor the size came from, so a swap between the
+      // limit check and the read cannot smuggle in different bytes.
+      const handle = openSync(file, "r");
+      try {
+        const opened = fstatSync(handle);
+        bytes += opened.size;
+        if (opened.size > 4 * 1024 * 1024 || bytes > 16 * 1024 * 1024)
+          throw new Error("Candidate exceeds snapshot byte limits");
+        files[key] = readFileSync(handle);
+      } finally {
+        closeSync(handle);
+      }
     }
   };
   walk("");

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { digest } from "./lib/workflow-plan.mjs";
 import { evaluateQuota } from "./lib/workflow-quota.mjs";
@@ -25,8 +25,12 @@ const current = JSON.parse(readFileSync(currentPath));
 const quota = evaluateQuota(baseline, current, plan.study.billing);
 if (!quota.quotaAllowed) throw new Error(quota.blockers.join("; "));
 const baselineHashFile = path.join(run, "quota-baseline.sha256");
-if (!existsSync(baselineHashFile))
+// "wx" refuses an existing receipt, so the compare below is the real check.
+try {
   writeFileSync(baselineHashFile, digest(baseline), { flag: "wx", mode: 0o600 });
+} catch (error) {
+  if (error.code !== "EEXIST") throw error;
+}
 if (readFileSync(baselineHashFile, "utf8") !== digest(baseline))
   throw new Error("The original quota baseline changed; do not rebase the approved allowance");
 const harness = deployHarness();
