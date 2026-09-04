@@ -71,10 +71,42 @@ function addedLines() {
   return ranges;
 }
 
-function touched(ranges, file, line) {
+function touched(ranges, file, start, end) {
   const spans = ranges.get(file);
   if (!spans) return false;
-  return spans.some(([from, to]) => line >= from && line <= to);
+  return spans.some(([from, to]) => start <= to && end >= from);
+}
+
+/** SARIF artifact URIs are escaped and may be absolute; diff paths are neither. */
+function normalizeUri(uri) {
+  if (typeof uri !== "string") return null;
+  let value = uri;
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    // A malformed escape keeps its raw form rather than losing the location.
+  }
+  value = value.replace(/^file:\/\//, "");
+  if (value.startsWith(`${ROOT}/`)) value = value.slice(ROOT.length + 1);
+  return value.replace(/^\.\//, "");
+}
+
+/**
+ * Every physical location a result points at, primary and related. A taint
+ * finding often reports the sink on an untouched line while the source the
+ * branch introduced sits in relatedLocations, so both have to be considered.
+ */
+function physicalLocations(result) {
+  const found = [];
+  for (const entry of [...(result.locations ?? []), ...(result.relatedLocations ?? [])]) {
+    const physical = entry?.physicalLocation;
+    const file = normalizeUri(physical?.artifactLocation?.uri);
+    const start = physical?.region?.startLine;
+    if (!file || typeof start !== "number") continue;
+    const end = typeof physical.region.endLine === "number" ? physical.region.endLine : start;
+    found.push({ file, start, end });
+  }
+  return found;
 }
 
 /**
@@ -101,7 +133,12 @@ function allowed(sources, file, line, rule) {
 }
 
 function main() {
-  if (run("codeql", ["version", "--format=terse"], { capture: true }).status !== 0)
+  // The pack is deliberately not pinned. CI analyzes with the bundle shipped
+  // inside github/codeql-action, which Renovate advances, so a version frozen
+  // here would drift away from the run this gate exists to predict. The
+  // version is reported instead, which is what makes a mismatch visible.
+  const cli = run("codeql", ["version", "--format=terse"], { capture: true });
+  if (cli.status !== 0)
     die(
       "check-codeql: the CodeQL CLI is not installed.\n" +
         "  Install it with:  brew install --cask codeql\n" +
@@ -153,27 +190,35 @@ function main() {
     const findings = [];
     for (const run_ of report.runs ?? [])
       for (const result of run_.results ?? []) {
-        const location = result.locations?.[0]?.physicalLocation;
-        const file = location?.artifactLocation?.uri;
-        const line = location?.region?.startLine;
-        if (!file || !line || !touched(ranges, file, line)) continue;
-        if (allowed(sources, file, line, result.ruleId)) continue;
+        const locations = physicalLocations(result);
+        const hit = locations.find((where) => touched(ranges, where.file, where.start, where.end));
+        if (!hit) continue;
+        // A marker beside any location of the alert counts, because the author
+        // may reasonably annotate the sink or the source.
+        if (locations.some((where) => allowed(sources, where.file, where.start, result.ruleId)))
+          continue;
         findings.push({
           rule: result.ruleId,
           severity: rules.get(result.ruleId),
-          file,
-          line,
+          file: hit.file,
+          line: hit.start,
           message: result.message?.text ?? "",
         });
       }
 
     if (findings.length === 0) {
-      console.log(`check-codeql: no new alerts across ${ranges.size} changed file(s).`);
+      console.log(
+        `check-codeql: no new alerts across ${ranges.size} changed file(s) ` +
+          `(CodeQL ${cli.stdout.trim()}).`,
+      );
       return;
     }
 
     findings.sort((a, b) => Number(b.severity ?? 0) - Number(a.severity ?? 0));
-    process.stderr.write(`check-codeql: ${findings.length} new alert(s) on added lines.\n\n`);
+    process.stderr.write(
+      `check-codeql: ${findings.length} new alert(s) on added lines ` +
+        `(CodeQL ${cli.stdout.trim()}).\n\n`,
+    );
     for (const finding of findings)
       process.stderr.write(
         `  ${finding.file}:${finding.line}\n` +
