@@ -70,6 +70,7 @@
     "audit:deps:rust": "node ./tools/scripts/audit-rust-deps.mjs",
     "audit:deps:rust-policy": "cargo deny --manifest-path apps/desktop/src-tauri/Cargo.toml check advisories bans licenses sources",
     "audit:deps": "pnpm run audit:deps:js && pnpm run audit:licenses:js && pnpm run audit:deps:signer && pnpm run audit:deps:rust && pnpm run audit:deps:rust-policy",
+    "audit:codeql": "node ./tools/scripts/audit/check-codeql.mjs",
     "audit:regex": "node ./tools/scripts/audit-regex.mjs",
     "installer:check": "sh -n install.sh && bash -n .github/actions/setup-sitecmd/install.sh && vitest run tools/scripts/installers.test.mjs",
     "workflows:check": "node ./tools/scripts/check-workflows.mjs",

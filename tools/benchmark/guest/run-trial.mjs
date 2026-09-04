@@ -313,6 +313,10 @@ if (!agentInvoked) {
     "quota-events.jsonl",
     ...(assignment.arm === "mcp" ? ["mcp.jsonl"] : []),
   ])
+    // Recording untrusted agent output is what this harness is for. The bytes
+    // land in a per-trial directory inside the disposable VM at mode 0600, and
+    // the grader reads them back as data, never as code.
+    // codeql-allow: js/http-to-file-access
     writeFileSync(
       `${directory}/${name}`,
       `${JSON.stringify({ agentInvoked: false, failure: result.failure })}\n`,

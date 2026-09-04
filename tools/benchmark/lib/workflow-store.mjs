@@ -11,6 +11,9 @@ import { requireCondition } from "./workflow-contract.mjs";
 import { validateResult } from "./workflow-results.mjs";
 
 export function writeNewJson(file, value) {
+  // Evidence is written as JSON at mode 0600, and "wx" refuses to overwrite an
+  // existing record. Report tooling reads these files back as data.
+  // codeql-allow: js/http-to-file-access
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx", mode: 0o600 });
 }
 
