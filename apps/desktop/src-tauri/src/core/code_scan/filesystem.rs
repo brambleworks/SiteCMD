@@ -355,13 +355,6 @@ fn collect_project_inventory_with_limits(
         if metadata.len() > MAX_FILE_BYTES {
             continue;
         }
-        if state.total_bytes.saturating_add(metadata.len()) > limits.max_total_bytes {
-            return Err(format!(
-                "Code Scan stopped after reaching the {} byte source budget. Choose a smaller project root or exclude generated folders.",
-                limits.max_total_bytes
-            ));
-        }
-
         let bytes = match read_project_file(&project_file, MAX_FILE_BYTES) {
             Some(bytes) => bytes,
             None => continue,

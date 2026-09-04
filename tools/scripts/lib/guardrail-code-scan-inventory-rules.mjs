@@ -12,12 +12,12 @@ export function codeScanInventoryFailures(read) {
   const supplyChain =
     read("apps/desktop/src-tauri/src/core/code_scan/supply_chain.rs") +
     read("apps/desktop/src-tauri/src/core/code_scan/supply_chain/config_secrets.rs");
-  const inventoryReaders = [
+  const budgetedReaders = [
     "apps/desktop/src-tauri/src/core/code_scan/database_analysis/artifacts.rs",
     "apps/desktop/src-tauri/src/core/code_scan/database_analysis/env_files.rs",
     "apps/desktop/src-tauri/src/core/code_scan/package_inventory/manifests.rs",
-    "apps/desktop/src-tauri/src/core/code_scan/operations.rs",
   ].map(read);
+  const inventoryReaders = [...budgetedReaders, operations];
   const reusesInventory =
     codeScan.includes("let inventory = collect_project_inventory(root)?;") &&
     codeScan.includes(
@@ -53,9 +53,7 @@ export function codeScanInventoryFailures(read) {
     operations.includes("collect_deploy_config_files(project_files, text_budget)?") &&
     operations.includes("options.inspect_local_databases, text_budget)?") &&
     codeScan.includes("analyze_ai_scaffolding(root, &mut text_budget)?") &&
-    inventoryReaders
-      .slice(0, 3)
-      .every((source) => source.includes("text_budget.read_project_file(file,"));
+    budgetedReaders.every((source) => source.includes("text_budget.read_project_file(file,"));
 
   const fixedPathReaders = [
     "apps/desktop/src-tauri/src/core/code_scan/ai_scaffolding.rs",
