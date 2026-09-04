@@ -200,11 +200,16 @@ export function IntegrationSettings({
 
   return (
     <div className="stack-hero">
-      {activeServices.length > 0 ? (
-        <IntegrationSection title="Active">{activeServices.map(renderRow)}</IntegrationSection>
-      ) : null}
-
-      <AgentToolCards />
+      <AgentToolCards
+        renderActiveTools={(agentRows) =>
+          activeServices.length > 0 || agentRows.length > 0 ? (
+            <IntegrationSection title="Active">
+              {agentRows}
+              {activeServices.map(renderRow)}
+            </IntegrationSection>
+          ) : null
+        }
+      />
 
       {categoryGroups.map((group) => (
         <IntegrationSection

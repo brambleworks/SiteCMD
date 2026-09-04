@@ -195,8 +195,12 @@ async fn append_browser_verification_results(
     Ok(())
 }
 
+/// The webview is a real browser whose content rules stop at loopback, so it
+/// keeps the narrower boundary rather than following a scan target onto a
+/// private network. A private-network scan reports the browser layer as
+/// unavailable instead of navigating there.
 async fn validate_webview_analysis_url(url: &str) -> Result<(), String> {
-    validate_url_async(url).await
+    crate::network_policy::validate_url(url, crate::network_policy::UrlPolicy::Scan).await
 }
 
 /// Run Layer 2 webview analysis (axe-core accessibility + Core Web Vitals) on a URL.

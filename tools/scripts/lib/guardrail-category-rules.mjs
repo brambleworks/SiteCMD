@@ -42,9 +42,12 @@ export function desktopCategoryLabelFailures(read, sourceFiles) {
   check(
     tokensSource.includes('import { CATEGORY_META } from "./category-meta"') &&
       !tokensSource.includes('compliance: "Compliance"') &&
-      actionLanguageSource.includes("CATEGORY_LABELS.compliance") &&
+      // Either accessor is fine: both live in lib/tokens.ts and derive from
+      // CATEGORY_META. Dense surfaces take the short name; the rule is that
+      // the label comes from the shared module, never a literal or local map.
+      /CATEGORY_(?:SHORT_)?LABELS\.compliance/.test(actionLanguageSource) &&
       eventsModelSource.includes("CATEGORY_LABELS.compliance") &&
-      scanOverlayStagesSource.includes("label: CATEGORY_LABELS.compliance") &&
+      /label: CATEGORY_(?:SHORT_)?LABELS\.compliance/.test(scanOverlayStagesSource) &&
       // Prevent local style maps from shadowing CODE_SCAN_DOMAIN_META tokens.
       duplicateCategoryLabelFiles.length === 0 &&
       duplicateWebCategoryOrderFiles.length === 0 &&

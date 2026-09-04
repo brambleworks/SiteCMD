@@ -161,13 +161,15 @@ reported, not retried against unseen state.
   SQLite is refused and replaced with the keychain placeholder, so the
   integration reports reconnect instead of running on a secret the keychain
   never accepted.
-- Debug builds use the OS keychain by default, exactly like release builds.
-  Setting `SITECMD_DEV_PLAINTEXT_SECRETS=1` before launch opts a debug build
-  into the plaintext `dev-secrets.json` store instead. On the first debug run
-  after this default flipped, entries previously saved to that file are
-  invisible until they are re-entered or the variable is set, and an unsigned
-  dev build prompts for keychain access on each secret read. Tests always use
-  the in-memory debug store and never touch the keychain.
+- A debug build uses the OS keychain unless `SITECMD_DEV_PLAINTEXT_SECRETS=1`
+  opts it into the plaintext `dev-secrets.json` store. `tools/scripts/dev.sh`
+  sets that to `1` by default, because macOS ties keychain access to the
+  calling binary's signature and an ad-hoc dev build gets a new hash on every
+  rebuild: each background credential read prompts for a password and no
+  "Always Allow" survives the next build. Set the variable to `0` to exercise
+  the keychain path deliberately. The two stores are separate, so a secret
+  saved under one is invisible under the other until it is re-entered. Tests
+  always use the in-memory debug store and never touch the keychain.
 - Webhook HMAC uses `webhooks::compute_webhook_signature` and its OpenSSL
   reference vectors.
 - Code Scan commands canonicalize and bound project paths through

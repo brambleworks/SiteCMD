@@ -3,14 +3,19 @@ import {
   CheckCircle,
   Eye,
   FileCode,
+  Fingerprint,
   Gauge,
   Globe,
-  Scale,
   Search,
   Shield,
   Sparkles,
 } from "lucide-react";
-import { CATEGORY_CSS_VAR, CATEGORY_LABELS, CATEGORY_TEXT } from "@/lib/tokens";
+import {
+  CATEGORY_CSS_VAR,
+  CATEGORY_LABELS,
+  CATEGORY_SHORT_LABELS,
+  CATEGORY_TEXT,
+} from "@/lib/tokens";
 
 export interface ScanStage {
   key: string;
@@ -94,9 +99,11 @@ export const WEB_SCAN_STAGES: ScanStage[] = [
   },
   {
     key: "compliance",
-    label: CATEGORY_LABELS.compliance,
-    detail: "Checking policy, privacy, consent, and required public pages.",
-    icon: Scale,
+    // The strip fits seven stages side by side, so this one takes the short
+    // name while its neighbours are already short enough.
+    label: CATEGORY_SHORT_LABELS.compliance,
+    detail: "Checking privacy notices, consent signals, trackers, and policy pages.",
+    icon: Fingerprint,
     textClass: CATEGORY_TEXT.compliance,
     color: CATEGORY_CSS_VAR.compliance,
     ...COMPLIANCE_STAGE_TONE,

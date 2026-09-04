@@ -5,28 +5,32 @@ use serde_json::json;
 #[test]
 fn missing_token_is_rejected_before_any_work() {
     let tokens = PrivilegedCommandTokenState::default();
-    let result = tokens.consume(None, BROKER_COMMAND, "fetch_analytics", &json!({}));
-    let error = result.expect_err("missing token must be rejected");
-    assert!(
-        error.contains("Missing privileged command token"),
-        "unexpected error message: {error}"
-    );
+    for command in ["fetch_analytics", "open_external_url"] {
+        let result = tokens.consume(None, BROKER_COMMAND, command, &json!({}));
+        let error = result.expect_err("missing token must be rejected");
+        assert!(
+            error.contains("Missing privileged command token"),
+            "unexpected error message: {error}"
+        );
+    }
 }
 
 #[test]
 fn stale_token_is_rejected_before_any_work() {
     let tokens = PrivilegedCommandTokenState::default();
-    let result = tokens.consume(
-        Some("0000000000000000000000000000000000000000000000000000000000000000"),
-        BROKER_COMMAND,
-        "fetch_analytics",
-        &json!({}),
-    );
-    let error = result.expect_err("stale token must be rejected");
-    assert!(
-        error.contains("invalid or expired"),
-        "unexpected error message: {error}"
-    );
+    for command in ["fetch_analytics", "open_external_url"] {
+        let result = tokens.consume(
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+            BROKER_COMMAND,
+            command,
+            &json!({}),
+        );
+        let error = result.expect_err("stale token must be rejected");
+        assert!(
+            error.contains("invalid or expired"),
+            "unexpected error message: {error}"
+        );
+    }
 }
 
 #[test]

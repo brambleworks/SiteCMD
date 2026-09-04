@@ -318,6 +318,7 @@ impl ActivationPorts for DesktopActivationPorts {
         crate::commands::confirm_sensitive_action(
             self.app.clone(),
             "Replace Active License?",
+            crate::commands::SensitiveActionTone::Warning,
             format!(
                 "SiteCMD already has an active {current_tier} license. Activating this different key will unlink the previous activation and replace the local license."
             ),

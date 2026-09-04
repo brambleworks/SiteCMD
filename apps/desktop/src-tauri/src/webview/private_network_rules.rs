@@ -181,7 +181,15 @@ impl PrivateNetworkRules {
             }
             _ => return false,
         }
-        crate::network_policy::validate_page_subresource_target(&url, self.allow_local_dev).is_err()
+        // The webview is a real browser, so its content rules stay at the
+        // loopback boundary rather than following a scan target onto the LAN.
+        crate::network_policy::validate_page_subresource_target(
+            &url,
+            crate::network_policy::UrlPolicy::Redirect {
+                allow_local_dev: self.allow_local_dev,
+            },
+        )
+        .is_err()
     }
 }
 

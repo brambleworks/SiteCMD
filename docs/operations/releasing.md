@@ -103,17 +103,24 @@ done
 
 Configure these GitHub environments:
 
-| Environment               | Protection                                                                                 | Values                                                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `release-tag-trust`       | Deployment tags limited to `v*`; protected from workflow-authenticated writes              | `RELEASE_ALLOWED_SIGNERS`, matching `.github/allowed-signers`                                 |
-| `release-signing`         | One required reviewer, admin bypass disabled, deployment tags limited to `v*`              | License configuration, desktop OAuth client IDs, Sentry DSN, Apple credentials, Azure secrets |
-| `release-updater-signing` | Deployment tags limited to `v*`; reachable only after the approved platform builds succeed | `TAURI_SIGNING_PRIVATE_KEY` and its optional password                                         |
-| `release-publish`         | Deployment tags limited to `v*`; no reviewer or timer                                      | R2 credentials and `RELEASE_ADMIN_KEY` only                                                   |
+| Environment               | Protection                                                                                 | Values                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `release-tag-trust`       | Deployment tags limited to `v*`; protected from workflow-authenticated writes              | `RELEASE_ALLOWED_SIGNERS`, matching `.github/allowed-signers`                                  |
+| `release-signing`         | One required reviewer, admin bypass disabled, deployment tags limited to `v*`              | License configuration, desktop OAuth credentials, Sentry DSN, Apple credentials, Azure secrets |
+| `release-updater-signing` | Deployment tags limited to `v*`; reachable only after the approved platform builds succeed | `TAURI_SIGNING_PRIVATE_KEY` and its optional password                                          |
+| `release-publish`         | Deployment tags limited to `v*`; no reviewer or timer                                      | R2 credentials and `RELEASE_ADMIN_KEY` only                                                    |
 
 Put `AZURE_SIGN_ENDPOINT`, `AZURE_SIGN_ACCOUNT`, and `AZURE_SIGN_PROFILE` in the
 `release-signing` environment as variables. Move the listed secrets out of
 repository scope after the environments work. Duplicate repository secrets
 defeat the intended boundary.
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as `release-signing` environment
+secrets from the same Google **Desktop app** OAuth client. The build preflight
+rejects missing values. Both are embedded in the desktop binary, as Google's
+installed-app flow requires; the client secret is not a confidentiality boundary.
+PKCE and callback-state validation remain required. After OAuth changes, test a
+new connection and an expired-token refresh in a release candidate.
 
 While there is one maintainer, leave "prevent self-review" disabled on
 `release-signing`; otherwise the person who starts the release cannot approve

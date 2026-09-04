@@ -13,6 +13,7 @@ const LOWER_OR_KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const PASCAL_RE = /^[A-Z][A-Za-z0-9]*$/;
 const HOOK_RE = /^use[A-Z][A-Za-z0-9]*$/;
 const TEST_SUFFIXES = [
+  ".agents.test",
   ".behavior.test",
   ".render.test",
   ".performance.test",

@@ -38,6 +38,7 @@ export function InlineIntegrationSetup({
     apiKey,
     configs,
     configsLoading,
+    closeGooglePicker,
     expandedService,
     ghConnecting,
     ghDeviceCode,
@@ -45,6 +46,7 @@ export function InlineIntegrationSetup({
     googleConnecting,
     googleError,
     googlePickerData,
+    googlePickerTarget,
     handleGitHubConnect,
     handleGoogleConnect,
     handlePickGitHubRepo,
@@ -54,7 +56,6 @@ export function InlineIntegrationSetup({
     setApiKey,
     setExpandedService,
     setGhRepos,
-    setGooglePickerData,
     setSiteId,
     siteId,
     toggleApiService,
@@ -134,9 +135,9 @@ export function InlineIntegrationSetup({
           data={googlePickerData}
           connectedTypes={connectedTypes}
           projectHost={url ? getHostname(url) : ""}
-          targetType={null}
+          targetType={googlePickerTarget}
           onPick={handlePickGoogleProperty}
-          onClose={() => setGooglePickerData(null)}
+          onClose={closeGooglePicker}
         />
       )}
 

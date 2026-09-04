@@ -224,6 +224,7 @@ async function main() {
       targets: targetResults,
       config,
       stamp: when,
+      dryRun: opts.dryRun,
     });
     writeFileSync(path.join(outDir, "report.md"), md);
 
@@ -236,6 +237,9 @@ async function main() {
 }
 
 function fixSummary(fix) {
+  if (![fix.numTurns, fix.totalTokens, fix.costUsd, fix.durationMs].every(Number.isFinite)) {
+    return "usage unavailable; see the recorded failure";
+  }
   return `turns ${fix.numTurns} | ${fix.totalTokens.toLocaleString("en-US")} tok | $${fix.costUsd.toFixed(3)} | ${(fix.durationMs / 1000).toFixed(0)}s`;
 }
 

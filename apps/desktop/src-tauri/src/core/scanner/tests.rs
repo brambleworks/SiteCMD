@@ -742,6 +742,7 @@ async fn run_polish_phase_moves_body_instead_of_cloning() {
     let mut results = Vec::new();
     super::run_polish_phase(
         &mut ctx,
+        crate::network_policy::LocalOrigin::Public,
         None,
         &mut results,
         None::<&dyn Fn() -> bool>,

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aggregate } from "./report.mjs";
+import { aggregate, renderMarkdown } from "./report.mjs";
 import { decideConvergence } from "./converge.mjs";
 
 const cfg = { baselineCount: 11, stallRounds: 2, maxRounds: 6 };
@@ -123,4 +123,31 @@ test("per-issue cost pools across runs (total cost / total resolved)", () => {
   const perArm = aggregate(targets, ["brief"]);
   assert.equal(perArm.brief.costPerResolved, 0.6);
   assert.equal(perArm.brief.tokensPerResolved, 600);
+});
+
+test("legacy dry runs never render efficiency or break-even claims", () => {
+  const report = renderMarkdown({ targets: [], dryRun: true });
+  assert.match(report, /No agent calls or repair outcomes were measured/);
+  assert.doesNotMatch(report, /never breaks even|actually fixed|Per-arm results/);
+});
+
+test("legacy measured results explicitly limit scanner-clearance interpretations", () => {
+  const targets = [
+    {
+      name: "fixture",
+      sha: "a".repeat(40),
+      baselineCount: 11,
+      runs: [run("brief", { resolved: 0, regressions: 0, baseline: 11, fix: measured({}) })],
+    },
+  ];
+  const report = renderMarkdown({
+    perArm: aggregate(targets, ["brief"]),
+    arms: ["brief"],
+    targets,
+    config: { model: "fixture", repeats: 1, maxTurns: 1 },
+    stamp: "fixture",
+  });
+  assert.match(report, /not independently verified repairs/);
+  assert.match(report, /model consumes tokens when reading it/);
+  assert.doesNotMatch(report, /never breaks even|actually fixed|to fix the same issue/);
 });

@@ -5,6 +5,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
+mod token_error;
+
+use token_error::{token_error_message, TokenOperation};
+
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 
@@ -22,6 +26,17 @@ pub fn client_id() -> &'static str {
             })
     });
     &ID
+}
+
+fn client_secret() -> Option<&'static str> {
+    static SECRET: std::sync::LazyLock<Option<String>> = std::sync::LazyLock::new(|| {
+        std::env::var("GOOGLE_CLIENT_SECRET")
+            .ok()
+            .or_else(|| option_env!("GOOGLE_CLIENT_SECRET").map(str::to_string))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    });
+    SECRET.as_deref()
 }
 
 /// Stored in integration_configs.extra as JSON
@@ -201,28 +216,44 @@ pub fn generate_pkce_pair() -> Result<PkcePair, String> {
 
 fn build_token_exchange_form<'a>(
     client_id: &'a str,
+    client_secret: Option<&'a str>,
     code_verifier: &'a str,
     code: &'a str,
     redirect_uri: &'a str,
 ) -> Vec<(&'static str, &'a str)> {
-    vec![
+    let mut form = vec![
         ("code", code),
         ("client_id", client_id),
         ("code_verifier", code_verifier),
         ("redirect_uri", redirect_uri),
         ("grant_type", "authorization_code"),
-    ]
+    ];
+    if let Some(secret) = client_secret
+        .map(str::trim)
+        .filter(|secret| !secret.is_empty())
+    {
+        form.push(("client_secret", secret));
+    }
+    form
 }
 
 fn build_token_refresh_form<'a>(
     client_id: &'a str,
+    client_secret: Option<&'a str>,
     refresh_token: &'a str,
 ) -> Vec<(&'static str, &'a str)> {
-    vec![
+    let mut form = vec![
         ("refresh_token", refresh_token),
         ("client_id", client_id),
         ("grant_type", "refresh_token"),
-    ]
+    ];
+    if let Some(secret) = client_secret
+        .map(str::trim)
+        .filter(|secret| !secret.is_empty())
+    {
+        form.push(("client_secret", secret));
+    }
+    form
 }
 
 #[tracing::instrument(skip(redirect_port, code, code_verifier), fields(client_id = %client_id))]
@@ -234,7 +265,13 @@ pub async fn exchange_code(
 ) -> Result<GoogleTokens, String> {
     let redirect_uri = format!("http://localhost:{}/callback", redirect_port);
     let client = crate::http_client::credentialed_service_client();
-    let form = build_token_exchange_form(client_id, code_verifier, code, redirect_uri.as_str());
+    let form = build_token_exchange_form(
+        client_id,
+        client_secret(),
+        code_verifier,
+        code,
+        redirect_uri.as_str(),
+    );
 
     let resp = client
         .post(TOKEN_URL)
@@ -246,13 +283,14 @@ pub async fn exchange_code(
 
     let status = resp.status();
     if !status.is_success() {
-        let _ = crate::http_client::read_text_limited(
+        let body = crate::http_client::read_text_limited(
             resp,
             crate::constants::OAUTH_RESPONSE_MAX_BYTES,
             crate::constants::API_TIMEOUT_SHORT,
         )
-        .await;
-        return Err(format!("Google token exchange returned {status}"));
+        .await
+        .unwrap_or_default();
+        return Err(token_error_message(TokenOperation::Exchange, status, &body));
     }
 
     let json: serde_json::Value = crate::http_client::read_json_limited(
@@ -285,7 +323,7 @@ pub async fn refresh_access_token(
     refresh_token: &str,
 ) -> Result<GoogleTokens, String> {
     let client = crate::http_client::credentialed_service_client();
-    let form = build_token_refresh_form(client_id, refresh_token);
+    let form = build_token_refresh_form(client_id, client_secret(), refresh_token);
 
     let resp = client
         .post(TOKEN_URL)
@@ -304,18 +342,7 @@ pub async fn refresh_access_token(
         )
         .await
         .unwrap_or_default();
-        // Log only the public client ID and invalid-grant classification. The auth
-        // response body may contain credentials or other sensitive diagnostics.
-        tracing::warn!(
-            client_id = %client_id,
-            invalid_grant = body.contains("invalid_grant"),
-            "Google token refresh rejected"
-        );
-        return if body.contains("invalid_grant") {
-            Err("Google authorization expired. Reconnect Google and try again.".to_string())
-        } else {
-            Err(format!("Google token refresh returned {status}"))
-        };
+        return Err(token_error_message(TokenOperation::Refresh, status, &body));
     }
 
     let json: serde_json::Value = crate::http_client::read_json_limited(
@@ -417,88 +444,4 @@ pub(crate) async fn resolve_valid_google_token(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        build_token_exchange_form, build_token_refresh_form, parse_callback_request,
-        start_callback_server,
-    };
-
-    #[test]
-    fn token_exchange_form_uses_pkce_without_a_client_secret() {
-        let form = build_token_exchange_form(
-            "client-id",
-            "verifier",
-            "code",
-            "http://localhost:1234/callback",
-        );
-
-        assert!(form.contains(&("code_verifier", "verifier")));
-        assert!(!form.iter().any(|(key, _)| *key == "client_secret"));
-    }
-
-    #[test]
-    fn token_refresh_form_never_embeds_a_client_secret() {
-        let form = build_token_refresh_form("client-id", "refresh-token");
-
-        assert!(!form.iter().any(|(key, _)| *key == "client_secret"));
-    }
-
-    #[test]
-    fn callback_parser_requires_get_callback_code_and_state() {
-        assert_eq!(
-            parse_callback_request("GET /callback?code=abc&state=xyz HTTP/1.1\r\n\r\n"),
-            Some(("abc".to_string(), "xyz".to_string()))
-        );
-        assert!(
-            parse_callback_request("POST /callback?code=abc&state=xyz HTTP/1.1\r\n\r\n").is_none()
-        );
-        assert!(parse_callback_request("GET /other?code=abc&state=xyz HTTP/1.1\r\n\r\n").is_none());
-        assert!(parse_callback_request("GET /callback?code=abc HTTP/1.1\r\n\r\n").is_none());
-    }
-
-    #[tokio::test]
-    async fn invalid_local_request_does_not_consume_callback_listener() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpStream;
-
-        let (port, receiver) = start_callback_server("expected-state".to_string())
-            .await
-            .expect("start callback server");
-
-        let mut invalid = TcpStream::connect(("127.0.0.1", port))
-            .await
-            .expect("connect invalid callback");
-        invalid
-            .write_all(b"GET /callback?code=bad&state=wrong HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            .await
-            .expect("write invalid callback");
-        let mut invalid_response = Vec::new();
-        invalid
-            .read_to_end(&mut invalid_response)
-            .await
-            .expect("read invalid response");
-        assert!(String::from_utf8_lossy(&invalid_response).contains("400 Bad Request"));
-
-        let mut valid = TcpStream::connect(("127.0.0.1", port))
-            .await
-            .expect("connect valid callback");
-        valid
-            .write_all(
-                b"GET /callback?code=good-code&state=expected-state HTTP/1.1\r\nHost: localhost\r\n\r\n",
-            )
-            .await
-            .expect("write valid callback");
-        let mut valid_response = Vec::new();
-        valid
-            .read_to_end(&mut valid_response)
-            .await
-            .expect("read valid response");
-        assert!(String::from_utf8_lossy(&valid_response).contains("200 OK"));
-
-        let code = tokio::time::timeout(std::time::Duration::from_secs(2), receiver)
-            .await
-            .expect("callback should complete")
-            .expect("callback channel");
-        assert_eq!(code, "good-code");
-    }
-}
+mod tests;

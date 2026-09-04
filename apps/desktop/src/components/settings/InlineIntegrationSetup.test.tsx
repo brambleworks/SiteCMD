@@ -201,8 +201,138 @@ describe("InlineIntegrationSetup", () => {
       expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
     expect(screen.getByText("Choose what to connect")).toBeInTheDocument();
-    expect(screen.getByLabelText("Google Analytics property")).toBeInTheDocument();
-    expect(screen.getByLabelText("Search Console site")).toBeInTheDocument();
+    expect(screen.getByLabelText("Google Analytics property")).toHaveValue("");
+    expect(screen.getByLabelText("Search Console site")).toHaveValue("https://mysite.com/");
+
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.filter(([command]) => command === "save_google_integration"),
+      ).toEqual([
+        [
+          "save_google_integration",
+          {
+            projectId: 42,
+            flowId: "inline-dual-flow",
+            integrationType: "googlesearchconsole",
+            siteId: "https://mysite.com/",
+          },
+        ],
+      ]);
+    });
+  });
+
+  it.each([
+    {
+      type: "googlesearchconsole",
+      label: "Search Console site",
+      otherLabel: "Google Analytics property",
+      choice: "https://mysite.com/",
+    },
+    {
+      type: "googleanalytics",
+      label: "Google Analytics property",
+      otherLabel: "Search Console site",
+      choice: "properties/222",
+    },
+  ])("keeps $type setup scoped to the requested service", async (target) => {
+    invokeMock.mockImplementation(async (command: string) => {
+      switch (command) {
+        case "get_integrations":
+          return [];
+        case "connect_google":
+          return { flow_id: "targeted-flow" };
+        case "complete_google_oauth":
+          return {
+            ga4_properties: [
+              {
+                property_id: "properties/222",
+                display_name: "Unrelated site",
+                account_name: "Account",
+              },
+            ],
+            gsc_sites: [
+              { site_url: "https://mysite.com/", permission: "siteOwner" },
+              { site_url: "sc-domain:mysite.com", permission: "siteOwner" },
+            ],
+          };
+        default:
+          return null;
+      }
+    });
+
+    renderInline(
+      <InlineIntegrationSetup
+        serviceTypes={[target.type]}
+        projectId={42}
+        url="https://mysite.com"
+        includeGoogle
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in with Google" }));
+    const select = await screen.findByLabelText(target.label);
+    expect(screen.queryByLabelText(target.otherLabel)).not.toBeInTheDocument();
+    expect(select).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
+    expect(invokeMock).not.toHaveBeenCalledWith("save_google_integration", expect.anything());
+
+    fireEvent.change(select, { target: { value: target.choice } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.filter(([command]) => command === "save_google_integration"),
+      ).toEqual([
+        [
+          "save_google_integration",
+          {
+            projectId: 42,
+            flowId: "targeted-flow",
+            integrationType: target.type,
+            siteId: target.choice,
+          },
+        ],
+      ]);
+    });
+  });
+
+  it("does not offer Analytics when the requested Search Console account has no sites", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      switch (command) {
+        case "get_integrations":
+          return [];
+        case "connect_google":
+          return { flow_id: "missing-gsc-flow" };
+        case "complete_google_oauth":
+          return {
+            ga4_properties: [
+              {
+                property_id: "properties/222",
+                display_name: "Unrelated site",
+                account_name: "Account",
+              },
+            ],
+            gsc_sites: [],
+          };
+        default:
+          return null;
+      }
+    });
+
+    renderInline(
+      <InlineIntegrationSetup
+        serviceTypes={["googlesearchconsole"]}
+        projectId={42}
+        url="https://mysite.com"
+        includeGoogle
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in with Google" }));
+    expect(
+      await screen.findByText("No Search Console sites found for this Google account."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Google Analytics property")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith("save_google_integration", expect.anything());
   });
 
   it("auto-reconnects without a picker when the backend already re-saved the tokens", async () => {

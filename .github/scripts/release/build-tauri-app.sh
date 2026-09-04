@@ -1,4 +1,5 @@
 set -euo pipefail
+node tools/scripts/check-google-oauth-config.mjs
 EPHEMERAL_KEY="$RUNNER_TEMP/sitecmd-updater-ephemeral"
 pnpm --filter @sitecmd/desktop exec tauri signer generate \
   --ci --write-keys "$EPHEMERAL_KEY" --password ""

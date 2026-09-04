@@ -19,6 +19,7 @@ import { userFacingError } from "@/lib/user-facing-error";
 
 import { getServiceName } from "./inline-integration-setup-model";
 import {
+  filterGooglePickerData,
   googleChoiceCount,
   googleIntegrationLabel,
   isGoogleIntegrationType,
@@ -56,6 +57,7 @@ export function useInlineIntegrationSetupState({
 
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [googlePickerData, setGooglePickerData] = useState<GooglePickerData | null>(null);
+  const [googlePickerTarget, setGooglePickerTarget] = useState<GoogleIntegrationType | null>(null);
   const [googleFlowId, setGoogleFlowId] = useState<string | null>(null);
   const [googleError, setGoogleError] = useState<string | null>(null);
 
@@ -123,6 +125,7 @@ export function useInlineIntegrationSetupState({
     });
     invalidateProjectMonitoringSignals(queryClient, projectId, url ?? null);
     setGooglePickerData(null);
+    setGooglePickerTarget(null);
     setGoogleFlowId(null);
     await loadConfigs();
     toast.success("Connected", `${googleIntegrationLabel(type)} is now active.`);
@@ -133,6 +136,8 @@ export function useInlineIntegrationSetupState({
     const target = isGoogleIntegrationType(requestedType) ? requestedType : null;
     setGoogleConnecting(true);
     setGooglePickerData(null);
+    setGooglePickerTarget(target);
+    setGoogleFlowId(null);
     setGoogleError(null);
     try {
       const started = await connectGoogle<{ flow_id: string }>({ projectId });
@@ -149,37 +154,26 @@ export function useInlineIntegrationSetupState({
         autoSaved.forEach((savedType) => onConnected?.(savedType));
         if (!target || autoSaved.includes(target)) {
           setGooglePickerData(null);
+          setGooglePickerTarget(null);
+          setGoogleFlowId(null);
           return;
         }
       }
 
-      // One grant can populate both unconfigured Google services.
-      const connectedSet = new Set(configs.map((c) => c.integrationType));
-      const gaHasChoices = googleChoiceCount(data, "googleanalytics") > 0;
-      const gscHasChoices = googleChoiceCount(data, "googlesearchconsole") > 0;
-      const gaUnconnected = !connectedSet.has("googleanalytics");
-      const gscUnconnected = !connectedSet.has("googlesearchconsole");
-      const bothConnectable = gaHasChoices && gscHasChoices && gaUnconnected && gscUnconnected;
-
-      if (!bothConnectable) {
-        // Single-service path: fast-connect if there is exactly one preferred choice.
-        const projectHost = url ? getHostname(url) : "";
-        const preferredChoice = target
-          ? pickPreferredGoogleChoice(data, target, projectHost)
-          : null;
-        if (target && preferredChoice) {
-          await saveGoogleConnection(started.flow_id, target, preferredChoice);
-          return;
-        }
-        if (target && googleChoiceCount(data, target) === 0) {
-          toast.error(
-            `${googleIntegrationLabel(target)} was not found`,
-            "Make sure this Google account has access, then reconnect.",
-          );
-        }
+      const projectHost = url ? getHostname(url) : "";
+      const preferredChoice = target ? pickPreferredGoogleChoice(data, target, projectHost) : null;
+      if (target && preferredChoice) {
+        await saveGoogleConnection(started.flow_id, target, preferredChoice);
+        return;
+      }
+      if (target && googleChoiceCount(data, target) === 0) {
+        toast.error(
+          `${googleIntegrationLabel(target)} was not found`,
+          "Make sure this Google account has access, then reconnect.",
+        );
       }
 
-      setGooglePickerData(data);
+      setGooglePickerData(filterGooglePickerData(data, target));
     } catch (e) {
       setGoogleError(userFacingError(e, "Your change was not saved. Try again."));
     } finally {
@@ -188,7 +182,11 @@ export function useInlineIntegrationSetupState({
   };
 
   const handlePickGoogleProperty = async (type: string, selectedSiteId: string) => {
-    if (!googleFlowId || !isGoogleIntegrationType(type)) {
+    if (
+      !googleFlowId ||
+      !isGoogleIntegrationType(type) ||
+      (googlePickerTarget !== null && type !== googlePickerTarget)
+    ) {
       toast.error("Connection expired", "Reconnect Google and try again.");
       return;
     }
@@ -197,6 +195,12 @@ export function useInlineIntegrationSetupState({
     } catch (e) {
       toast.error("Failed to save", userFacingError(e, "Your change was not saved. Try again."));
     }
+  };
+
+  const closeGooglePicker = () => {
+    setGooglePickerData(null);
+    setGooglePickerTarget(null);
+    setGoogleFlowId(null);
   };
 
   const handleGitHubConnect = async () => {
@@ -249,6 +253,7 @@ export function useInlineIntegrationSetupState({
     apiKey,
     configs,
     configsLoading,
+    closeGooglePicker,
     expandedService,
     ghConnecting,
     ghDeviceCode,
@@ -256,6 +261,7 @@ export function useInlineIntegrationSetupState({
     googleConnecting,
     googleError,
     googlePickerData,
+    googlePickerTarget,
     handleGitHubConnect,
     handleGoogleConnect,
     handlePickGitHubRepo,
@@ -265,7 +271,6 @@ export function useInlineIntegrationSetupState({
     setApiKey,
     setExpandedService,
     setGhRepos,
-    setGooglePickerData,
     setSiteId,
     siteId,
     toggleApiService,

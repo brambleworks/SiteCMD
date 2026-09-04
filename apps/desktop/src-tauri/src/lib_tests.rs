@@ -1942,21 +1942,20 @@ fn blocking_database_call_sites_only_decrease() {
     );
 }
 
-/// Calls to the four legacy local-origin predicates outside their definitions.
+/// Calls to the three legacy local-origin predicates outside their definitions.
 /// Lower as callers move to `LocalOrigin::classify`; delete the predicates at 0.
-const LEGACY_LOCAL_PREDICATE_BUDGET: usize = 23;
+/// `scan_origin_allows_local_dev` is gone: `LocalOrigin` carries the reach now.
+const LEGACY_LOCAL_PREDICATE_BUDGET: usize = 15;
 
 #[test]
 fn legacy_local_origin_predicates_only_decrease() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let pattern = regex::Regex::new(
-        r"\b(?:is_strict_localhost|is_localhost|scan_origin_allows_local_dev|is_local_dev_domain)\(",
-    )
-    .expect("predicate pattern");
-    let definitions = regex::Regex::new(
-        r"fn (?:is_strict_localhost|is_localhost|scan_origin_allows_local_dev|is_local_dev_domain)\(",
-    )
-    .expect("definition pattern");
+    let pattern =
+        regex::Regex::new(r"\b(?:is_strict_localhost|is_localhost|is_local_dev_domain)\(")
+            .expect("predicate pattern");
+    let definitions =
+        regex::Regex::new(r"fn (?:is_strict_localhost|is_localhost|is_local_dev_domain)\(")
+            .expect("definition pattern");
     let mut files = Vec::new();
     rust_source_files(&root, &mut files);
     let total: usize = files

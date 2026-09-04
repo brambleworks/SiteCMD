@@ -21,6 +21,20 @@ export const CATEGORY_LABELS: Record<ScanCategory, string> = {
   polish: CATEGORY_META.polish.label,
 };
 
+/**
+ * Compact category names for dense surfaces (stage strips, action buttons)
+ * where the full label would crowd its neighbours.
+ */
+export const CATEGORY_SHORT_LABELS: Record<ScanCategory, string> = {
+  security: CATEGORY_META.security.shortLabel,
+  performance: CATEGORY_META.performance.shortLabel,
+  seo: CATEGORY_META.seo.shortLabel,
+  accessibility: CATEGORY_META.accessibility.shortLabel,
+  compliance: CATEGORY_META.compliance.shortLabel,
+  config: CATEGORY_META.config.shortLabel,
+  polish: CATEGORY_META.polish.shortLabel,
+};
+
 /** Category text-token classes. */
 export const CATEGORY_TEXT: Partial<Record<ScanCategory, string>> = {
   security: "text-cat-security",

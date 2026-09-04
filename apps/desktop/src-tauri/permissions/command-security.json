@@ -216,11 +216,6 @@
   ],
   "nativeConfirmedCommands": [
     {
-      "command": "open_external_url",
-      "source": "apps/desktop/src-tauri/src/commands/desktop.rs",
-      "requires": "confirm_sensitive_action("
-    },
-    {
       "command": "export_database",
       "source": "apps/desktop/src-tauri/src/commands/data/backup.rs",
       "requires": "confirm_sensitive_action("

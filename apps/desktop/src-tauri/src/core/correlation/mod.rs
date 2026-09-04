@@ -21,6 +21,6 @@ pub use integration_hints::{
 };
 pub use resolver::enrich_issue_groups;
 pub use signal_mapping::{
-    live_source_signals_for_check_id, resolve_check_id, source_signals_for_check_id, SignalMapping,
-    SIGNAL_MAPPINGS,
+    live_source_signals_for_check_id, resolve_check_id, source_signals_for_check_id,
+    web_scan_check_id, SignalMapping, SIGNAL_MAPPINGS,
 };

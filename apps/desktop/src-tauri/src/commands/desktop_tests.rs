@@ -4,22 +4,40 @@ use serde_json::json;
 use tempfile::tempdir;
 
 use super::{
-    inspect_watch_files, is_trusted_external_host, matches_watch_pattern, parse_project_command,
-    resolve_existing_path, resolve_existing_watch_paths, resolve_registered_project_target,
-    validate_external_browser_url, validate_project_command_policy,
-    ActionableDesktopNotificationRequest, DesktopWatchRequest,
+    inspect_watch_files, matches_watch_pattern, parse_project_command, resolve_existing_path,
+    resolve_existing_watch_paths, resolve_registered_project_target, validate_external_browser_url,
+    validate_project_command_policy, ActionableDesktopNotificationRequest, DesktopWatchRequest,
+    MAX_EXTERNAL_BROWSER_URL_CHARS,
 };
 
 #[test]
-fn external_browser_urls_require_http_without_embedded_credentials() {
-    assert!(validate_external_browser_url("https://sitecmd.com/docs").is_ok());
-    assert!(validate_external_browser_url("http://localhost:4321/").is_ok());
+fn external_browser_urls_accept_product_and_third_party_sites() {
+    for value in [
+        "https://sitecmd.com/docs",
+        "https://www.bing.com/webmasters/",
+        "https://github.com/brambleworks/SiteCMD",
+        "http://localhost:4321/",
+    ] {
+        let parsed = validate_external_browser_url(&format!(" {value} "))
+            .expect("ordinary web links should be allowed");
+        assert_eq!(parsed.as_str(), value);
+    }
+}
 
+#[test]
+fn external_browser_urls_require_http_without_embedded_credentials() {
     for unsafe_url in [
+        "",
+        "not a URL",
+        "https://",
         "file:///Users/dev/private.txt",
         "javascript:alert(1)",
+        "data:text/html,hello",
+        "mailto:hello@example.com",
+        "https://user@example.com/private",
         "https://user:token@example.com/private",
         "https://example.com/\nsecond-line",
+        "https://example.com/\u{0}control",
     ] {
         assert!(
             validate_external_browser_url(unsafe_url).is_err(),
@@ -29,49 +47,14 @@ fn external_browser_urls_require_http_without_embedded_credentials() {
 }
 
 #[test]
-fn product_destinations_skip_the_confirmation_dialog() {
-    // The product's own buttons: pricing pages, checkout, the billing portal.
-    // A prompt on "Manage Billing" is the app second-guessing its own UI.
-    for host in [
-        "sitecmd.com",
-        "www.sitecmd.com",
-        "SITECMD.COM",
-        "shop.sitecmd.com",
-    ] {
-        assert!(is_trusted_external_host(host), "{host} should be trusted");
-    }
-}
-
-#[test]
-fn other_merchants_on_the_billing_partner_are_not_trusted() {
-    for host in [
-        "lemonsqueezy.com",
-        "attacker-store.lemonsqueezy.com",
-        "sitecmd.lemonsqueezy.com",
-        "my.lemonsqueezy.com",
-    ] {
-        assert!(
-            !is_trusted_external_host(host),
-            "{host} must still get the confirmation dialog"
-        );
-    }
-}
-
-#[test]
-fn lookalike_hosts_still_get_the_confirmation_dialog() {
-    for host in [
-        "sitecmd.com.evil.example",
-        "evilsitecmd.com",
-        "lemonsqueezy.com.attacker.io",
-        "notlemonsqueezy.com",
-        "sitecmd.co",
-        "",
-    ] {
-        assert!(
-            !is_trusted_external_host(host),
-            "{host} must not be trusted"
-        );
-    }
+fn external_browser_urls_enforce_the_length_limit() {
+    let prefix = "https://example.com/";
+    let at_limit = format!(
+        "{prefix}{}",
+        "a".repeat(MAX_EXTERNAL_BROWSER_URL_CHARS - prefix.len())
+    );
+    assert!(validate_external_browser_url(&at_limit).is_ok());
+    assert!(validate_external_browser_url(&format!("{at_limit}a")).is_err());
 }
 
 #[test]

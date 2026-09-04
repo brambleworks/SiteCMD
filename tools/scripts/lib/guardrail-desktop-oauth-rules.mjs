@@ -5,16 +5,25 @@ export function desktopOAuthSafetyFailures(read) {
   const githubOAuth = read("apps/desktop/src-tauri/src/integrations/github_oauth.rs");
   const googleOAuthProduction = googleOAuth.split("#[cfg(test)]")[0];
   const githubOAuthProduction = githubOAuth.split("#[cfg(test)]")[0];
-  const productionSources = [buildScript, oauthCommands, googleOAuthProduction];
+  const tokenForms = [
+    googleOAuthProduction
+      .split("fn build_token_exchange_form")[1]
+      ?.split("fn build_token_refresh_form")[0],
+    googleOAuthProduction
+      .split("fn build_token_refresh_form")[1]
+      ?.split("#[tracing::instrument")[0],
+  ];
   const failures = [];
 
   if (
-    productionSources.some(
-      (source) => source.includes("GOOGLE_CLIENT_SECRET") || source.includes("client_secret"),
-    )
+    !buildScript.includes('"GOOGLE_CLIENT_SECRET"') ||
+    !googleOAuthProduction.includes('option_env!("GOOGLE_CLIENT_SECRET")') ||
+    tokenForms.some((source) => !source?.includes('form.push(("client_secret", secret));')) ||
+    !/build_token_exchange_form\(\s*client_id,\s*client_secret\(\),/.test(googleOAuthProduction) ||
+    !/build_token_refresh_form\(\s*client_id,\s*client_secret\(\),/.test(googleOAuthProduction)
   ) {
     failures.push(
-      "Desktop Google OAuth must use a native public client with PKCE and must never bake in or transmit GOOGLE_CLIENT_SECRET.",
+      "Desktop Google OAuth must embed the configured GOOGLE_CLIENT_SECRET and include it in both token exchange and refresh requests.",
     );
   }
 

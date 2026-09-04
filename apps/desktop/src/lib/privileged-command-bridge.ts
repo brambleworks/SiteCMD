@@ -82,7 +82,6 @@ const PRIVILEGED_BRIDGE_COMMAND_TIMEOUTS_MS: Record<string, number> = {
   delete_webhook_config: HUMAN_CONFIRMATION_TIMEOUT_MS,
   export_database: HUMAN_CONFIRMATION_TIMEOUT_MS,
   import_database: HUMAN_CONFIRMATION_TIMEOUT_MS,
-  open_external_url: HUMAN_CONFIRMATION_TIMEOUT_MS,
   run_project_command: HUMAN_CONFIRMATION_TIMEOUT_MS,
   write_export_bytes: HUMAN_CONFIRMATION_TIMEOUT_MS,
   write_export_file: HUMAN_CONFIRMATION_TIMEOUT_MS,

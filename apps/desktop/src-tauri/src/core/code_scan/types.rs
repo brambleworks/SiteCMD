@@ -315,6 +315,7 @@ pub fn score_report(report: &CodeScanReport) -> u32 {
                 cap_confidence: issue.confidence.can_trigger_score_cap(),
                 weight,
                 full_weight_critical: issue.severity == Severity::Critical && weight >= 1.0,
+                identity: None,
             }
         },
     ));

@@ -1,7 +1,7 @@
 import type { AppTarget } from "@/lib/app-targets";
 import { isCodeScanFocus } from "@/lib/app-targets";
 import type { ProjectWorkItem } from "@/lib/project-summary-signals";
-import { CATEGORY_LABELS } from "@/lib/tokens";
+import { CATEGORY_SHORT_LABELS } from "@/lib/tokens";
 import { getPageTargetLabel, getReasonTargetLabel } from "@/lib/target-action-labels";
 
 type IssueLifecycleAction = "working" | "ignored" | "blocked" | "reopened";
@@ -115,7 +115,7 @@ export function getWebCategoryOpenLabel(category?: string | null): string {
       return "Open Polish Results";
     case "compliance":
     case "legal":
-      return `Open ${CATEGORY_LABELS.compliance} Results`;
+      return `Open ${CATEGORY_SHORT_LABELS.compliance} Results`;
     default:
       return getPageTargetLabel("issues") ?? "Open Issues";
   }

@@ -16,6 +16,76 @@ fn falls_back_for_unknown_signal() {
     );
 }
 
+/// The polish signals that re-grade a defect a Web Scan check already reports.
+/// Each fires only in conditions its authority also fires in, so they share an
+/// identity and the score charges the defect once.
+const POLISH_REGRADES: &[(&str, &str)] = &[
+    ("polish.missing-og-tags", "seo.open_graph"),
+    ("polish.form-accessibility", "accessibility.form_labels"),
+    ("polish.missing-lang", "accessibility.lang"),
+    ("polish.heading-hierarchy", "accessibility.headings"),
+    ("polish.no-sitemap-robots", "seo.canonical"),
+];
+
+#[test]
+fn a_polish_signal_that_regrades_a_web_check_shares_its_identity() {
+    for (signal, authority) in POLISH_REGRADES {
+        assert_eq!(&resolve_check_id("web_scan", signal), authority, "{signal}");
+        assert_eq!(web_scan_check_id(signal), Some(*authority), "{signal}");
+    }
+
+    // Negative control: a polish signal that grades its own defect keeps its
+    // own identity, so it still deducts on its own.
+    assert_eq!(
+        resolve_check_id("web_scan", "polish.div-soup-ratio"),
+        "polish.div-soup-ratio"
+    );
+    assert_eq!(web_scan_check_id("polish.div-soup-ratio"), None);
+}
+
+#[test]
+fn a_regrading_polish_signal_does_not_deduct_beside_its_authority() {
+    use crate::checks::{CheckResult, CheckStatus, IssueConfidence, ScanCategory, Severity};
+
+    let finding = |check_id: &str, category| CheckResult {
+        check_id: check_id.into(),
+        category,
+        title: "t".into(),
+        description: "d".into(),
+        status: CheckStatus::Fail,
+        severity: Severity::Medium,
+        fix_prompt: None,
+        manual_fix: None,
+        raw_data: None,
+        confidence: IssueConfidence::High,
+        confidence_reason: None,
+        why_it_matters: None,
+    };
+    let score = |results: &[CheckResult]| {
+        crate::scoring::calculator::calculate_scores_with_identity(results, |result| {
+            web_scan_check_id(&result.check_id).unwrap_or(result.check_id.as_str())
+        })
+        .0
+    };
+
+    for (signal, authority) in POLISH_REGRADES {
+        let alone = score(&[finding(authority, ScanCategory::Seo)]);
+        let both = score(&[
+            finding(authority, ScanCategory::Seo),
+            finding(signal, ScanCategory::Polish),
+        ]);
+        assert_eq!(both, alone, "{signal} deducted a second time");
+    }
+
+    // Negative control: two unrelated findings still cost two deductions.
+    let one = score(&[finding("seo.open_graph", ScanCategory::Seo)]);
+    let two = score(&[
+        finding("seo.open_graph", ScanCategory::Seo),
+        finding("polish.div-soup-ratio", ScanCategory::Polish),
+    ]);
+    assert!(two < one, "independent findings each deduct");
+}
+
 #[test]
 fn every_mapping_has_distinct_source_signal_pair() {
     let mut seen: std::collections::HashSet<(&str, &str)> = std::collections::HashSet::new();

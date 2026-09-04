@@ -9,7 +9,9 @@ export function codeScanSecurityFailures(read) {
   const filesystem =
     read("apps/desktop/src-tauri/src/core/code_scan/filesystem.rs") +
     read("apps/desktop/src-tauri/src/core/code_scan/filesystem_tests.rs");
-  const networkPolicy = read("apps/desktop/src-tauri/src/network_policy.rs");
+  const networkPolicy =
+    read("apps/desktop/src-tauri/src/network_policy.rs") +
+    read("apps/desktop/src-tauri/src/network_policy_tests.rs");
   const dnsCache = read("apps/desktop/src-tauri/src/dns_cache.rs");
   const constants = read("apps/desktop/src-tauri/src/constants.rs");
 

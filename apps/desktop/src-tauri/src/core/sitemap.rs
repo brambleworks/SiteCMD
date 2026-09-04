@@ -38,21 +38,20 @@ pub enum SitemapStatus {
 }
 
 /// Apply the original target's network policy to sitemap-derived URLs.
-async fn validate_sitemap_target(url: &str, allow_local_dev: bool) -> Result<(), String> {
-    crate::network_policy::validate_url(
-        url,
-        crate::network_policy::UrlPolicy::Redirect { allow_local_dev },
-    )
-    .await
+async fn validate_sitemap_target(
+    url: &str,
+    origin: crate::network_policy::LocalOrigin,
+) -> Result<(), String> {
+    crate::network_policy::validate_url(url, origin.subordinate_policy()).await
 }
 
 /// Discover sitemaps through common paths and robots.txt.
 /// Derived URLs inherit the originating scan's network policy.
-#[tracing::instrument(skip(client, base_url), fields(allow_local_dev))]
+#[tracing::instrument(skip(client, base_url), fields(origin = ?origin))]
 pub async fn discover_sitemap(
     client: &Client,
     base_url: &str,
-    allow_local_dev: bool,
+    origin: crate::network_policy::LocalOrigin,
 ) -> SitemapResult {
     let base = base_url.trim_end_matches('/');
 
@@ -60,7 +59,7 @@ pub async fn discover_sitemap(
     // A sitemap answering at a conventional path does not mean it is the only
     // one the site publishes, so robots.txt is still read for the declared set.
     for url in &sitemap_candidate_urls(base) {
-        if let Some(mut result) = try_fetch_sitemap(client, url, allow_local_dev).await {
+        if let Some(mut result) = try_fetch_sitemap(client, url, origin).await {
             let declared = robots_sitemap_urls(client, base).await;
             note_partial(&mut result, unread_sitemaps_reason(&declared, Some(url)));
             return result;
@@ -72,17 +71,14 @@ pub async fn discover_sitemap(
     for sitemap_url in &declared {
         // Reject sitemap URLs that point at private / metadata / loopback
         // addresses unless the original scan target was already strict-local.
-        if validate_sitemap_target(sitemap_url, allow_local_dev)
-            .await
-            .is_err()
-        {
+        if validate_sitemap_target(sitemap_url, origin).await.is_err() {
             tracing::warn!(
                 "Skipping unsafe Sitemap: directive in robots.txt at {}",
                 crate::log_sanitizer::log_safe_url_target(sitemap_url),
             );
             continue;
         }
-        if let Some(mut result) = try_fetch_sitemap(client, sitemap_url, allow_local_dev).await {
+        if let Some(mut result) = try_fetch_sitemap(client, sitemap_url, origin).await {
             note_partial(
                 &mut result,
                 unread_sitemaps_reason(&declared, Some(sitemap_url)),
@@ -215,15 +211,15 @@ fn note_partial(result: &mut SitemapResult, reason: Option<String>) {
 
 /// Fetch a user-provided sitemap URL.
 ///
-/// `allow_local_dev` mirrors the scan-target's strict-localhost flag so child
+/// `origin` mirrors the scan target's reach so child
 /// sitemaps inside a sitemap index get validated with the same network policy.
-#[tracing::instrument(skip(client, sitemap_url), fields(allow_local_dev))]
+#[tracing::instrument(skip(client, sitemap_url), fields(origin = ?origin))]
 pub async fn fetch_sitemap_url(
     client: &Client,
     sitemap_url: &str,
-    allow_local_dev: bool,
+    origin: crate::network_policy::LocalOrigin,
 ) -> SitemapResult {
-    match try_fetch_sitemap(client, sitemap_url, allow_local_dev).await {
+    match try_fetch_sitemap(client, sitemap_url, origin).await {
         Some(result) => result,
         None => SitemapResult {
             status: SitemapStatus::Error,
@@ -240,7 +236,7 @@ pub async fn fetch_sitemap_url(
 async fn try_fetch_sitemap(
     client: &Client,
     url: &str,
-    allow_local_dev: bool,
+    origin: crate::network_policy::LocalOrigin,
 ) -> Option<SitemapResult> {
     let resp = client
         .get(url)
@@ -307,10 +303,7 @@ async fn try_fetch_sitemap(
         .chunks(SITEMAP_CHILD_CONCURRENCY)
     {
         let fetches = batch.iter().map(|child_url| async move {
-            if validate_sitemap_target(child_url, allow_local_dev)
-                .await
-                .is_err()
-            {
+            if validate_sitemap_target(child_url, origin).await.is_err() {
                 tracing::warn!(
                     "Skipping unsafe sitemap child URL: {}",
                     crate::log_sanitizer::log_safe_url_target(child_url)
@@ -558,56 +551,93 @@ mod tests {
     async fn validate_sitemap_target_rejects_metadata_and_private_ips() {
         // Cloud metadata IP (the canonical SSRF target).
         assert!(
-            validate_sitemap_target("http://169.254.169.254/", false)
-                .await
-                .is_err(),
+            validate_sitemap_target(
+                "http://169.254.169.254/",
+                crate::network_policy::LocalOrigin::Public
+            )
+            .await
+            .is_err(),
             "169.254.169.254 must be refused as a sitemap URL when scan target is not loopback"
         );
 
         // RFC1918 ranges.
-        assert!(
-            validate_sitemap_target("http://10.0.0.1/sitemap.xml", false)
-                .await
-                .is_err()
-        );
-        assert!(
-            validate_sitemap_target("http://192.168.1.10/sitemap.xml", false)
-                .await
-                .is_err()
-        );
+        assert!(validate_sitemap_target(
+            "http://10.0.0.1/sitemap.xml",
+            crate::network_policy::LocalOrigin::Public
+        )
+        .await
+        .is_err());
+        assert!(validate_sitemap_target(
+            "http://192.168.1.10/sitemap.xml",
+            crate::network_policy::LocalOrigin::Public
+        )
+        .await
+        .is_err());
 
         // Loopback rejected when not allowed (i.e. the original target was public).
-        assert!(
-            validate_sitemap_target("http://127.0.0.1/sitemap.xml", false)
-                .await
-                .is_err()
-        );
+        assert!(validate_sitemap_target(
+            "http://127.0.0.1/sitemap.xml",
+            crate::network_policy::LocalOrigin::Public
+        )
+        .await
+        .is_err());
 
         // The metadata-host literal (must hit the network_policy domain check).
-        assert!(
-            validate_sitemap_target("http://metadata.google.internal/", false)
-                .await
-                .is_err()
-        );
+        assert!(validate_sitemap_target(
+            "http://metadata.google.internal/",
+            crate::network_policy::LocalOrigin::Public
+        )
+        .await
+        .is_err());
     }
 
-    /// When the scan target was localhost (allow_local_dev=true), sitemaps
+    /// When the scan target was on the person's own network, sitemaps
     /// pointing at loopback ARE allowed - that's the legitimate "scanning
     /// my own dev server" case.
     #[tokio::test]
     async fn validate_sitemap_target_allows_loopback_when_target_is_strict_local() {
-        assert!(
-            validate_sitemap_target("http://127.0.0.1:5173/sitemap.xml", true)
-                .await
-                .is_ok()
-        );
+        assert!(validate_sitemap_target(
+            "http://127.0.0.1:5173/sitemap.xml",
+            crate::network_policy::LocalOrigin::Loopback
+        )
+        .await
+        .is_ok());
         // But still rejects metadata and RFC1918 even under local-dev policy.
-        assert!(validate_sitemap_target("http://169.254.169.254/", true)
-            .await
-            .is_err());
-        assert!(validate_sitemap_target("http://10.0.0.1/", true)
-            .await
-            .is_err());
+        assert!(validate_sitemap_target(
+            "http://169.254.169.254/",
+            crate::network_policy::LocalOrigin::Loopback
+        )
+        .await
+        .is_err());
+        assert!(validate_sitemap_target(
+            "http://10.0.0.1/",
+            crate::network_policy::LocalOrigin::Loopback
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn a_sitemap_on_the_scanned_private_network_is_reachable() {
+        // A LAN target's own sitemap is on the LAN, so the scan that reached
+        // the page reaches its sitemap. A public origin's never does.
+        use crate::network_policy::LocalOrigin;
+        assert!(validate_sitemap_target(
+            "http://192.168.1.40/sitemap.xml",
+            LocalOrigin::PrivateNetwork
+        )
+        .await
+        .is_ok());
+        assert!(
+            validate_sitemap_target("http://169.254.169.254/", LocalOrigin::PrivateNetwork)
+                .await
+                .is_err()
+        );
+        assert!(
+            validate_sitemap_target("http://192.168.1.40/sitemap.xml", LocalOrigin::Public)
+                .await
+                .is_err()
+        );
     }
 
     /// Discovery reads locations through the shared parser, so these pin the

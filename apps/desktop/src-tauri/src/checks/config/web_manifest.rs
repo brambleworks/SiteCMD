@@ -26,7 +26,7 @@ impl AsyncCheck for WebManifestCheck {
 
         if crate::network_policy::validate_page_subresource_target(
             &manifest_url,
-            ctx.is_strict_localhost,
+            ctx.subordinate_policy(),
         )
         .is_err()
         {

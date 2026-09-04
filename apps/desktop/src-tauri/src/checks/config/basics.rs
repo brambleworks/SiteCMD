@@ -19,7 +19,7 @@ async fn run_favicon_probe(
     let Ok(parsed) = url::Url::parse(url) else {
         return Err(favicon::FaviconProbeSkip::Failed);
     };
-    if crate::network_policy::validate_page_subresource_target(&parsed, ctx.is_strict_localhost)
+    if crate::network_policy::validate_page_subresource_target(&parsed, ctx.subordinate_policy())
         .is_err()
     {
         return Err(favicon::FaviconProbeSkip::Disallowed);

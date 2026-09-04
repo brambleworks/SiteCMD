@@ -1,4 +1,13 @@
-import { Shield, Zap, Search, Eye, Scale, Sparkles, Settings, type LucideIcon } from "lucide-react";
+import {
+  Shield,
+  Zap,
+  Search,
+  Eye,
+  Fingerprint,
+  Sparkles,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 import type { ScanCategory } from "@/lib/types";
 
 interface ScanCategoryMeta {
@@ -40,10 +49,10 @@ export const CATEGORY_META: Record<ScanCategory, ScanCategoryMeta> = {
     accentVar: "--cat-accessibility",
   },
   compliance: {
-    label: "Legal",
-    shortLabel: "Legal",
-    description: "Privacy, consent, policy coverage, and launch-time legal/compliance signals.",
-    icon: Scale,
+    label: "Privacy & Policies",
+    shortLabel: "Privacy",
+    description: "Privacy notices, consent signals, tracking behavior, and policy-page coverage.",
+    icon: Fingerprint,
     accentVar: "--cat-compliance",
   },
   polish: {

@@ -27,7 +27,7 @@ use super::desktop_watch::resolve_existing_path;
 use super::desktop_watch::{matches_watch_pattern, resolve_existing_watch_paths};
 #[cfg(target_os = "macos")]
 use super::emit_event;
-use super::{confirm_sensitive_action, sanitize_error, SensitiveActionError};
+use super::{confirm_sensitive_action, sanitize_error, SensitiveActionError, SensitiveActionTone};
 
 const MAX_EXTERNAL_BROWSER_URL_CHARS: usize = 2_048;
 
@@ -341,6 +341,7 @@ pub async fn confirm_link_license_activation(app: AppHandle) -> Result<bool, Str
     match confirm_sensitive_action(
         app,
         "Activate this license?",
+        SensitiveActionTone::Warning,
         "A link asked SiteCMD to activate a license key on this computer.\n\nOnly continue if you just purchased SiteCMD or asked for this activation yourself."
             .to_string(),
         "Activate License",
@@ -551,39 +552,10 @@ pub(super) fn validate_external_browser_url(value: &str) -> Result<url::Url, Str
     Ok(parsed)
 }
 
-/// Product-owned browser destinations that do not require an egress prompt.
-/// Matching is exact or dot-suffix; third-party storefronts remain untrusted.
-pub(super) const TRUSTED_EXTERNAL_HOSTS: &[&str] = &["sitecmd.com"];
-
-pub(super) fn is_trusted_external_host(host: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    TRUSTED_EXTERNAL_HOSTS
-        .iter()
-        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
-}
-
-#[tracing::instrument(skip(app, url), fields(url_len = url.len()))]
-pub async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+#[tracing::instrument(skip(url), fields(url_len = url.len()))]
+pub fn open_external_url(url: String) -> Result<(), String> {
     let parsed = validate_external_browser_url(&url)?;
-    let host = parsed.host_str().unwrap_or_default().to_string();
-    let display = parsed.as_str().chars().take(480).collect::<String>();
-    let audit_detail = serde_json::json!({ "host": host });
-
-    if !is_trusted_external_host(&host) {
-        if let Err(error) = confirm_sensitive_action(
-            app,
-            "Open external link?",
-            format!(
-                "SiteCMD wants to open this link in your browser:\n\n{display}\n\nApprove only if you just requested it."
-            ),
-            "Open Link",
-        )
-        .await
-        {
-            crate::audit_log::record("external.open", audit_detail, "fail");
-            return Err(error.into());
-        }
-    }
+    let audit_detail = serde_json::json!({ "host": parsed.host_str() });
 
     match open::that(parsed.as_str()).map_err(sanitize_error) {
         Ok(()) => {

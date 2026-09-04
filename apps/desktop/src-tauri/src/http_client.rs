@@ -168,7 +168,11 @@ pub fn client() -> &'static Client {
         negotiate_bounded_compression(Client::builder())
             .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
             .user_agent(crate::constants::USER_AGENT.as_str())
-            .redirect(safe_redirect_policy(false))
+            .redirect(safe_redirect_policy(
+                crate::network_policy::UrlPolicy::Redirect {
+                    allow_local_dev: false,
+                },
+            ))
             .dns_resolver(crate::dns_cache::shared())
             .build()
             .expect("Failed to build HTTP client")
@@ -184,11 +188,34 @@ pub fn localhost_client() -> &'static Client {
         negotiate_bounded_compression(Client::builder())
             .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
             .user_agent(crate::constants::USER_AGENT.as_str())
-            .redirect(safe_redirect_policy(true))
+            .redirect(safe_redirect_policy(
+                crate::network_policy::UrlPolicy::Redirect {
+                    allow_local_dev: true,
+                },
+            ))
             .danger_accept_invalid_certs(true)
             .dns_resolver(crate::dns_cache::shared())
             .build()
             .expect("Failed to build localhost HTTP client")
+    });
+    &CLIENT
+}
+
+/// Shared HTTP client for a scan target inside the person's own networks.
+/// Certificate verification stays on: a LAN box is another machine, so only
+/// loopback earns the self-signed exception.
+pub fn private_network_client() -> &'static Client {
+    static CLIENT: LazyLock<Client> = LazyLock::new(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        negotiate_bounded_compression(Client::builder())
+            .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
+            .user_agent(crate::constants::USER_AGENT.as_str())
+            .redirect(safe_redirect_policy(
+                crate::network_policy::UrlPolicy::ScanTarget,
+            ))
+            .dns_resolver(crate::dns_cache::scan_target_resolver())
+            .build()
+            .expect("Failed to build private network HTTP client")
     });
     &CLIENT
 }
@@ -254,7 +281,11 @@ fn build_no_decompress_client(is_strict_local: bool) -> Client {
     Client::builder()
         .timeout(crate::constants::API_TIMEOUT_SHORT)
         .user_agent(crate::constants::USER_AGENT.as_str())
-        .redirect(safe_redirect_policy(is_strict_local))
+        .redirect(safe_redirect_policy(
+            crate::network_policy::UrlPolicy::Redirect {
+                allow_local_dev: is_strict_local,
+            },
+        ))
         .dns_resolver(crate::dns_cache::shared())
         .danger_accept_invalid_certs(is_strict_local)
         .no_gzip()
@@ -263,6 +294,22 @@ fn build_no_decompress_client(is_strict_local: bool) -> Client {
         .no_zstd()
         .build()
         .expect("Failed to build no-decompress HTTP client")
+}
+
+/// Pick the shared client for a scan origin. Loopback keeps the self-signed
+/// exception, a private network address gets a client that may reach it, and
+/// everything else gets the public client. The client carries its origin's
+/// reach into every redirect it follows, so a public page cannot steer the
+/// scan into a network the person never named.
+pub fn for_scan_origin(origin: crate::network_policy::LocalOrigin) -> &'static Client {
+    use crate::network_policy::LocalOrigin;
+    match origin {
+        LocalOrigin::Loopback => localhost_client(),
+        LocalOrigin::PrivateNetwork => private_network_client(),
+        LocalOrigin::LocalhostDomain | LocalOrigin::LocalNetworkName | LocalOrigin::Public => {
+            client()
+        }
+    }
 }
 
 /// Pick the appropriate shared client based on whether the URL is a strict
@@ -275,17 +322,19 @@ pub fn for_url(is_strict_local: bool) -> &'static Client {
     }
 }
 
-fn safe_redirect_policy(allow_local_dev: bool) -> reqwest::redirect::Policy {
+/// The policy a client applies to every URL a fetched page steers it to. It is
+/// the policy of the origin the client was chosen for, so a redirect reaches
+/// no further than the target the person named.
+fn safe_redirect_policy(policy: crate::network_policy::UrlPolicy) -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= REDIRECT_LIMIT {
             return attempt.error(std::io::Error::other("too many redirects"));
         }
 
         // Validate IP literals here; domain redirects are checked at DNS resolution.
-        if let Err(error) = crate::network_policy::validate_redirect_target_nonblocking(
-            attempt.url(),
-            crate::network_policy::UrlPolicy::Redirect { allow_local_dev },
-        ) {
+        if let Err(error) =
+            crate::network_policy::validate_redirect_target_nonblocking(attempt.url(), policy)
+        {
             return attempt.error(std::io::Error::other(error));
         }
 

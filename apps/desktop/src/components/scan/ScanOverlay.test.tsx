@@ -184,7 +184,7 @@ describe("ScanOverlay", () => {
       "SEO",
       "Performance",
       "Accessibility",
-      "Legal",
+      "Privacy",
       "Polish",
       "Browser",
     ]);

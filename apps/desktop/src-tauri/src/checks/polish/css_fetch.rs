@@ -78,8 +78,9 @@ fn decode_href_entities(href: &str) -> String {
 }
 
 /// Fetch bounded linked CSS with explicit discovery and success counts.
-/// `allow_local_dev` must match the scan client so public pages cannot steer
-/// subresource requests to private targets. `cache` is the current scan
+/// `origin` must be the scan target's, so a stylesheet reaches no further than
+/// the page the person asked for and a public page cannot steer a subresource
+/// request into a private network. `cache` is the current scan
 /// execution's stylesheet store; pass `None` for a single-page scan, which has
 /// no other page to share stylesheets with. Only settled answers are reused:
 /// see `StylesheetOutcome`.
@@ -87,10 +88,10 @@ pub async fn fetch_stylesheets(
     html: &str,
     base_url: &url::Url,
     client: &reqwest::Client,
-    allow_local_dev: bool,
+    origin: crate::network_policy::LocalOrigin,
     cache: Option<&StylesheetCache>,
 ) -> StylesheetFetchResult {
-    fetch_stylesheets_with(html, base_url, allow_local_dev, cache, |url| async move {
+    fetch_stylesheets_with(html, base_url, origin, cache, |url| async move {
         fetch_one_stylesheet(&url, client).await
     })
     .await
@@ -101,7 +102,7 @@ pub async fn fetch_stylesheets(
 async fn fetch_stylesheets_with<F, Fut>(
     html: &str,
     base_url: &url::Url,
-    allow_local_dev: bool,
+    origin: crate::network_policy::LocalOrigin,
     cache: Option<&StylesheetCache>,
     fetch_one: F,
 ) -> StylesheetFetchResult
@@ -126,7 +127,7 @@ where
             Ok(parsed) => {
                 if let Err(reason) = crate::network_policy::validate_page_subresource_target(
                     &parsed,
-                    allow_local_dev,
+                    origin.subordinate_policy(),
                 ) {
                     tracing::warn!("Skipping disallowed CSS target {}: {}", safe_url, reason);
                     return None;
@@ -278,7 +279,7 @@ mod tests {
         fetch_stylesheets_with(
             &shared_page_html(),
             &base(),
-            false,
+            crate::network_policy::LocalOrigin::Public,
             cache,
             recording_fetcher(log.clone()),
         )
@@ -393,7 +394,7 @@ mod tests {
         let first = fetch_stylesheets_with(
             &html,
             &base(),
-            false,
+            crate::network_policy::LocalOrigin::Public,
             Some(&cache),
             flaky_fetcher(log.clone(), attempts.clone()),
         )
@@ -404,7 +405,7 @@ mod tests {
         let second = fetch_stylesheets_with(
             &html,
             &base(),
-            false,
+            crate::network_policy::LocalOrigin::Public,
             Some(&cache),
             flaky_fetcher(log.clone(), attempts.clone()),
         )
@@ -476,7 +477,7 @@ mod tests {
         let first = fetch_stylesheets_with(
             &page(&[A_CSS, B_CSS, C_CSS]),
             &base(),
-            false,
+            crate::network_policy::LocalOrigin::Public,
             Some(&cache),
             sized_fetcher(log.clone()),
         )
@@ -487,7 +488,7 @@ mod tests {
         let second = fetch_stylesheets_with(
             &page(&[C_CSS, B_CSS]),
             &base(),
-            false,
+            crate::network_policy::LocalOrigin::Public,
             Some(&cache),
             sized_fetcher(log.clone()),
         )
@@ -508,7 +509,7 @@ mod tests {
         fetch_stylesheets_with(
             &page(&[A_CSS]),
             &base(),
-            false,
+            crate::network_policy::LocalOrigin::Public,
             Some(&cache),
             sized_fetcher(log.clone()),
         )
@@ -568,8 +569,14 @@ mod tests {
         let html: String = (0..MAX_CSS_FILES + 1)
             .map(|i| format!(r#"<link rel="stylesheet" href="http://127.0.0.1/s{i}.css">"#))
             .collect();
-        let result =
-            fetch_stylesheets(&html, &base(), crate::http_client::client(), false, None).await;
+        let result = fetch_stylesheets(
+            &html,
+            &base(),
+            crate::http_client::client(),
+            crate::network_policy::LocalOrigin::Public,
+            None,
+        )
+        .await;
         assert_eq!(result.stylesheets_discovered, MAX_CSS_FILES + 1);
         assert!(
             !result.coverage_complete(),
@@ -592,7 +599,14 @@ mod tests {
     async fn skips_ssrf_stylesheet_targets_without_fetching() {
         let html = r#"<link rel="stylesheet" href="http://169.254.169.254/latest/meta-data/">
             <link rel="stylesheet" href="http://127.0.0.1:11434/style.css">"#;
-        let css = fetch_stylesheets(html, &base(), crate::http_client::client(), false, None).await;
+        let css = fetch_stylesheets(
+            html,
+            &base(),
+            crate::http_client::client(),
+            crate::network_policy::LocalOrigin::Public,
+            None,
+        )
+        .await;
         assert_eq!(
             css.css, "",
             "internal SSRF targets must be skipped, not fetched"

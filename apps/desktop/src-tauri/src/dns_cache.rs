@@ -107,6 +107,17 @@ pub fn shared() -> Arc<CachedDnsResolver> {
     RESOLVER.clone()
 }
 
+/// Resolver for a scan whose target the person named inside their own
+/// networks. Every connection this resolver serves belongs to that scan, so
+/// the reach it grants stops at the client that holds it: a public scan uses
+/// `shared` and cannot resolve a hostname into private space.
+pub fn scan_target_resolver() -> Arc<CachedDnsResolver> {
+    use std::sync::LazyLock;
+    static RESOLVER: LazyLock<Arc<CachedDnsResolver>> =
+        LazyLock::new(|| Arc::new(CachedDnsResolver::for_policy(UrlPolicy::ScanTarget)));
+    RESOLVER.clone()
+}
+
 /// Shared resolver enforcing external-callback policy at connection time.
 pub fn external_callback_resolver() -> Arc<CachedDnsResolver> {
     use std::sync::LazyLock;

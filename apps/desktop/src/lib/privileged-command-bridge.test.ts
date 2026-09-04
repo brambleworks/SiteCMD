@@ -127,6 +127,22 @@ describe("resolveCommandTimeoutMs", () => {
 });
 
 describe("native user-intent commands", () => {
+  it("keeps browser links brokered without a system confirmation", () => {
+    const registry = JSON.parse(readFileSync(commandSecurityPath(), "utf8")) as {
+      elevatedCommands: string[];
+      nativeConfirmedCommands: Array<{ command: string }>;
+    };
+    expect(registry.elevatedCommands).toContain("open_external_url");
+    expect(registry.nativeConfirmedCommands.map(({ command }) => command)).not.toContain(
+      "open_external_url",
+    );
+    expect(NATIVE_INTENT_CONNECTOR_COMMANDS.has("open_external_url")).toBe(false);
+    expect(nativeIntentManifest().run_external_connector_command).not.toContain(
+      "open_external_url",
+    );
+    expect(resolveCommandTimeoutMs("open_external_url")).toBe(15_000);
+  });
+
   it("does not put a system dialog in front of the coding agent handoff", () => {
     // The handoff opens the agent's app with a prompt staged in its
     // composer; nothing runs until the person sends it there.

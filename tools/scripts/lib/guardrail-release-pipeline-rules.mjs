@@ -157,9 +157,15 @@ export function releasePipelineSafetyFailures(read) {
       // `tauri build` consumes TAURI_SIGNING_PRIVATE_KEY, not the signer CLI's path flag.
       buildCommands.includes('TAURI_SIGNING_PRIVATE_KEY="$EPHEMERAL_KEY"') &&
       !buildJob.includes("${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}") &&
-      !buildJob.includes("${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}") &&
-      !releaseWorkflow.includes("GOOGLE_CLIENT_SECRET"),
-    "release.yml product builds must require candidate approval, use only a throwaway updater key, and exclude reusable updater and desktop OAuth secrets.",
+      !buildJob.includes("${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"),
+    "release.yml product builds must require candidate approval, use only a throwaway updater key, and exclude reusable updater secrets.",
+  );
+
+  check(
+    buildJob.includes("GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}") &&
+      buildJob.includes("GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}") &&
+      buildCommands.includes("node tools/scripts/check-google-oauth-config.mjs"),
+    "release.yml product builds must supply both Google Desktop OAuth credentials and validate them before packaging.",
   );
 
   // Expose the permanent updater key only to its probe and isolated signer.

@@ -63,6 +63,25 @@ describe("inferProjectEnvironmentFromUrl", () => {
   it("keeps a public host that merely contains a dev suffix on production", () => {
     expect(inferProjectEnvironmentFromUrl("https://ddev.site.example.com")).toBe("production");
   });
+
+  it("labels a dev server on the local network as local", () => {
+    // Rust grades these Local because a scan may reach them. If this surface
+    // disagreed, the same URL would read Local in one place and Production in
+    // the other. Mirrors `is_private_network_ip` in network_policy.rs.
+    expect(inferProjectEnvironmentFromUrl("http://192.168.1.40:8080")).toBe("local");
+    expect(inferProjectEnvironmentFromUrl("http://10.0.0.5:3000")).toBe("local");
+    expect(inferProjectEnvironmentFromUrl("http://172.16.4.2")).toBe("local");
+    expect(inferProjectEnvironmentFromUrl("http://100.100.4.7")).toBe("local");
+    expect(inferProjectEnvironmentFromUrl("http://[fd00::1]:8080")).toBe("local");
+  });
+
+  it("leaves a public address and a link-local address off local", () => {
+    // Link-local is refused at the scan boundary rather than graded, and
+    // 172.32 is outside the private block that 172.16-31 covers.
+    expect(inferProjectEnvironmentFromUrl("http://93.184.216.34")).toBe("production");
+    expect(inferProjectEnvironmentFromUrl("http://169.254.169.254")).toBe("production");
+    expect(inferProjectEnvironmentFromUrl("http://172.32.0.1")).toBe("production");
+  });
 });
 
 describe("resolveProjectEnvironmentForUrl", () => {

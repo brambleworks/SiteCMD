@@ -6,7 +6,9 @@ use tauri::{AppHandle, State};
 
 use super::ensure_within_home;
 use super::exports::write_export_contents;
-use crate::commands::{confirm_sensitive_action, run_blocking, sanitize_error};
+use crate::commands::{
+    confirm_sensitive_action, run_blocking, sanitize_error, SensitiveActionTone,
+};
 use crate::{api_cache, db::Database};
 
 fn validate_existing_read_path(path: &str) -> Result<PathBuf, String> {
@@ -82,6 +84,7 @@ pub async fn export_database(
     if let Err(e) = confirm_sensitive_action(
         app,
         "Export SiteCMD database?",
+        SensitiveActionTone::Warning,
         if allow_overwrite {
             format!(
                 "This will export a full SiteCMD database backup and replace the existing file at {}.",
@@ -155,6 +158,7 @@ pub async fn import_database(
     if let Err(e) = confirm_sensitive_action(
         app.clone(),
         "Restore SiteCMD backup?",
+        SensitiveActionTone::Warning,
         "This will replace the current SiteCMD database with the selected backup file. Current projects, scans, settings, and integrations may change.".to_string(),
         "Restore Backup",
     )

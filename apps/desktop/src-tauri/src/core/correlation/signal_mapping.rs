@@ -355,6 +355,14 @@ pub const SIGNAL_MAPPINGS: &[SignalMapping] = &[
         source_signal: "polish.missing-og-tags",
         check_id: "seo.open_graph",
     },
+    // Fires only when the canonical link, the robots meta, and the sitemap
+    // link are all absent, so `seo.canonical` has already reported the
+    // missing canonical that this signal re-reports.
+    SignalMapping {
+        source: "web_scan",
+        source_signal: "polish.no-sitemap-robots",
+        check_id: "seo.canonical",
+    },
     SignalMapping {
         source: "web_scan",
         source_signal: "polish.default-favicon",
@@ -372,17 +380,27 @@ pub const SIGNAL_MAPPINGS: &[SignalMapping] = &[
     },
 ];
 
+/// The canonical check id a Web Scan signal is filed under, when the table
+/// renames it. Borrowed rather than owned so the score can key on it without
+/// allocating for every finding.
+pub fn web_scan_check_id(signal: &str) -> Option<&'static str> {
+    SIGNAL_MAPPINGS
+        .iter()
+        .find(|m| m.source == "web_scan" && m.source_signal == signal)
+        .map(|m| m.check_id)
+}
+
 #[tracing::instrument(fields(source = %source, signal = %signal))]
 pub fn resolve_check_id(source: &str, signal: &str) -> String {
+    // Web Scan signals are already canonical unless the table renames them.
+    if source == "web_scan" {
+        return web_scan_check_id(signal).unwrap_or(signal).to_string();
+    }
     if let Some(m) = SIGNAL_MAPPINGS
         .iter()
         .find(|m| m.source == source && m.source_signal == signal)
     {
         return m.check_id.to_string();
-    }
-    // Web Scan signals already use canonical check ids.
-    if source == "web_scan" {
-        return signal.to_string();
     }
     format!("{source}.{signal}")
 }

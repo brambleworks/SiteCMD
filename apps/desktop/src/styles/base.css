@@ -172,6 +172,7 @@
   button,
   [role="button"],
   a[href],
+  [role="link"],
   select,
   summary,
   input[type="checkbox"],

@@ -821,9 +821,24 @@ describe.concurrent(
             fixtureRoot,
             actionLanguagePath,
             source.replace(
-              "`Open ${CATEGORY_LABELS.compliance} Results`",
+              "`Open ${CATEGORY_SHORT_LABELS.compliance} Results`",
               '"Open Compliance Results"',
             ),
+          );
+        },
+        "Desktop category labels/domain styles must use lib/tokens.ts or scan/code-scan-result-model.ts instead of local maps",
+      );
+
+      // The stage strip may take either accessor, but never a literal.
+      expectGuardrailFailure(
+        desktopCategoryLabelFailures,
+        (fixtureRoot) => {
+          const stagesPath = "apps/desktop/src/components/scan/scan-overlay-stages.ts";
+          const source = readFixtureFile(fixtureRoot, stagesPath);
+          writeFixtureFile(
+            fixtureRoot,
+            stagesPath,
+            source.replace("label: CATEGORY_SHORT_LABELS.compliance,", 'label: "Compliance",'),
           );
         },
         "Desktop category labels/domain styles must use lib/tokens.ts or scan/code-scan-result-model.ts instead of local maps",

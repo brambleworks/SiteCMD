@@ -10,17 +10,15 @@ use sitecmd_engine::probe::{ProbeFailure, ProbeFailureClass, ProbeOutcome, Probe
 /// probe per hop, until the engine walker declares the walk complete.
 /// Called once per scan via `CheckContext::redirect_chain`.
 pub(crate) async fn walk_redirect_chain(ctx: &CheckContext) -> RedirectWalk {
-    walk_redirect_chain_with_probe(
-        ctx.requested_url(),
-        crate::network_policy::scan_origin_allows_local_dev(ctx.requested_url()),
-        |request| probe(&ctx.client, request),
-    )
+    walk_redirect_chain_with_probe(ctx.requested_url(), ctx.subordinate_policy(), |request| {
+        probe(&ctx.client, request)
+    })
     .await
 }
 
 async fn walk_redirect_chain_with_probe<F, Fut>(
     start_url: &url::Url,
-    allow_local_dev: bool,
+    policy: crate::network_policy::UrlPolicy,
     mut execute_probe: F,
 ) -> RedirectWalk
 where
@@ -31,7 +29,7 @@ where
     loop {
         let request = walker.request();
         let allowed = url::Url::parse(&request.url).ok().and_then(|target| {
-            crate::network_policy::validate_page_subresource_target(&target, allow_local_dev).ok()
+            crate::network_policy::validate_page_subresource_target(&target, policy).ok()
         });
         let outcome = if allowed.is_some() {
             execute_probe(request).await
@@ -181,7 +179,10 @@ mod tests {
         let probe_observed = observed.clone();
         let start = url::Url::parse("https://example.com/start").expect("static public URL");
 
-        let walk = super::walk_redirect_chain_with_probe(&start, false, move |request| {
+        let public = crate::network_policy::UrlPolicy::Redirect {
+            allow_local_dev: false,
+        };
+        let walk = super::walk_redirect_chain_with_probe(&start, public, move |request| {
             let probe_observed = probe_observed.clone();
             async move {
                 probe_observed

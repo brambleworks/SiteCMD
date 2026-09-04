@@ -4,7 +4,9 @@ use crate::integrations::{self, IntegrationConfig, IntegrationData, IntegrationT
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
-use super::{confirm_sensitive_action, emit_event, run_blocking, sanitize_error};
+use super::{
+    confirm_sensitive_action, emit_event, run_blocking, sanitize_error, SensitiveActionTone,
+};
 
 /// Notify the renderer that project-wide integration badges must refresh.
 /// `source: "integration"` selects the forced refresh path.
@@ -380,6 +382,7 @@ pub async fn delete_integration(
     confirm_sensitive_action(
         app.clone(),
         "Delete this integration?",
+        SensitiveActionTone::Warning,
         format!(
             "This removes the saved {display_name} integration and deletes its stored credentials."
         ),

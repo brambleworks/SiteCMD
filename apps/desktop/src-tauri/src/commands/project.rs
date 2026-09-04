@@ -8,7 +8,7 @@ use super::project_signal_state::{load_relevant_code_scan, take_monitored_integr
 #[cfg(test)]
 use super::project_work_items::build_update_work_items;
 use super::validate_url_async;
-use super::{confirm_sensitive_action, run_blocking, sanitize_error};
+use super::{confirm_sensitive_action, run_blocking, sanitize_error, SensitiveActionTone};
 
 fn normalize_environment_for_url(url: &str, environment: &str) -> String {
     crate::core::localhost::resolve_environment_name(url, Some(environment)).to_string()
@@ -168,6 +168,7 @@ pub async fn delete_project(
     confirm_sensitive_action(
         app,
         "Delete this project?",
+        SensitiveActionTone::Warning,
         format!(
             "This permanently removes {subject}, along with its environments, scan history, issues, reports, and saved workflow data."
         ),
@@ -210,6 +211,7 @@ pub async fn delete_environment(
     confirm_sensitive_action(
         app,
         "Remove this environment?",
+        SensitiveActionTone::Warning,
         "This removes the selected site URL from the project and may hide scan history tied to that environment.".to_string(),
         "Remove Environment",
     )
