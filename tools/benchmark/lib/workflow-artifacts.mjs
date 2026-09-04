@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { requireCondition, requireText } from "./workflow-contract.mjs";
 import { canonicalJson, digest } from "./workflow-plan.mjs";
@@ -30,8 +30,15 @@ export function artifactPath(root, name, { directory = false } = {}) {
 
 export function readArtifact(root, name) {
   const file = artifactPath(root, name);
-  requireCondition(lstatSync(file).size <= 64 * 1024 * 1024, "artifact exceeds 64 MiB");
-  return readFileSync(file);
+  // Size the descriptor rather than the path, so the bytes measured and the
+  // bytes read are the same inode even if the path is swapped underneath.
+  const handle = openSync(file, "r");
+  try {
+    requireCondition(fstatSync(handle).size <= 64 * 1024 * 1024, "artifact exceeds 64 MiB");
+    return readFileSync(handle);
+  } finally {
+    closeSync(handle);
+  }
 }
 
 export function sameEvidence(actual, expected, label) {

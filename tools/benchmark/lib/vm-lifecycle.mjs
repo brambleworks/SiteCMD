@@ -49,7 +49,7 @@ function lima(
   return result.stdout;
 }
 
-function verifyFrozenConfig(workRoot) {
+export function verifyFrozenConfig(workRoot) {
   assertPrivateState(workRoot);
   const instance = path.join(workRoot, "lima", VM_NAME);
   const receipt = JSON.parse(readFileSync(path.join(instance, "sitecmd-config.json"), "utf8"));
@@ -74,8 +74,13 @@ export async function setupVm(workRoot) {
   if (!existsSync(instance)) {
     const config = createVmConfig();
     const file = path.join(workRoot, `sitecmd-vm-${digest(config).slice(0, 16)}.yaml`);
-    if (!existsSync(file))
+    // "wx" already fails when the template exists, so let the write decide
+    // rather than checking first and racing whoever writes between the two.
+    try {
       writeFileSync(file, JSON.stringify(config, null, 2), { flag: "wx", mode: 0o600 });
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
     if (digest(JSON.parse(readFileSync(file, "utf8"))) !== digest(config))
       throw new Error("A different VM template already exists; inspect it before setup");
     lima(workRoot, ["validate", file], { capture: true, timeout: 30000 });
