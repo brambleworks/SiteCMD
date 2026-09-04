@@ -204,6 +204,36 @@ fn a_public_page_never_earns_reach_the_person_did_not_ask_for() {
 }
 
 #[test]
+fn a_name_earns_private_reach_only_when_every_answer_is_private() {
+    let resolved = |answers: &[&str]| {
+        LocalOrigin::from_resolved_addresses(
+            LocalOrigin::Public,
+            answers.iter().map(|ip| ip.parse::<IpAddr>().expect("ip")),
+        )
+    };
+    assert_eq!(resolved(&["192.168.1.40"]), LocalOrigin::PrivateNetwork);
+    assert_eq!(
+        resolved(&["10.0.0.5", "fd00::5"]),
+        LocalOrigin::PrivateNetwork
+    );
+    assert_eq!(resolved(&["100.64.0.9"]), LocalOrigin::PrivateNetwork);
+
+    // A public answer beside a private one is a public site whose owner chose
+    // the private record; its pages must not gain the LAN.
+    assert_eq!(
+        resolved(&["93.184.216.34", "10.0.0.5"]),
+        LocalOrigin::Public
+    );
+    assert_eq!(
+        resolved(&["10.0.0.5", "93.184.216.34"]),
+        LocalOrigin::Public
+    );
+    assert_eq!(resolved(&["10.0.0.5", "127.0.0.1"]), LocalOrigin::Public);
+    assert_eq!(resolved(&["169.254.169.254"]), LocalOrigin::Public);
+    assert_eq!(resolved(&[]), LocalOrigin::Public);
+}
+
+#[test]
 fn ip_target_rejects_link_local_and_metadata_addresses() {
     // 169.254.169.254 is the cloud metadata service that DNS rebinding
     // attacks classically target.

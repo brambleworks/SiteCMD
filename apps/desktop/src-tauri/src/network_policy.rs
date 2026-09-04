@@ -131,14 +131,27 @@ impl LocalOrigin {
         let Ok(addrs) = tokio::net::lookup_host((normalized.as_str(), port)).await else {
             return sync;
         };
-        // Loopback behind a public name is DNS rebinding, refused elsewhere in
-        // this file; it must not be promoted to a reach here.
-        for addr in addrs {
-            if !is_loopback_ip(addr.ip()) && is_private_network_ip(addr.ip()) {
-                return Self::PrivateNetwork;
+        Self::from_resolved_addresses(sync, addrs.map(|addr| addr.ip()))
+    }
+
+    /// Private reach is earned only when every address a name answers with
+    /// is private. A name that also answers publicly is a public site, and
+    /// promoting it would hand that site's pages the LAN and loopback reach
+    /// `ScanTarget` grants. Loopback behind a public name is DNS rebinding,
+    /// refused elsewhere in this file; it must not be promoted to a reach.
+    fn from_resolved_addresses(sync: Self, addrs: impl IntoIterator<Item = IpAddr>) -> Self {
+        let mut private_only = false;
+        for ip in addrs {
+            if is_loopback_ip(ip) || !is_private_network_ip(ip) {
+                return sync;
             }
+            private_only = true;
         }
-        sync
+        if private_only {
+            Self::PrivateNetwork
+        } else {
+            sync
+        }
     }
 
     /// The policy for a URL this origin's page steers the scan to. A page can
