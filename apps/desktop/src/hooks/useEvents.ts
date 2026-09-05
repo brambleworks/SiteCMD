@@ -88,11 +88,6 @@ export function useEvents(projectId: number | null) {
     enabled: projectId != null && activeRange != null,
   });
   const events = useMemo(() => query.data?.events ?? [], [query.data?.events]);
-  const eventsRef = useRef<SiteEvent[]>(events);
-
-  useEffect(() => {
-    eventsRef.current = events;
-  }, [events]);
 
   useEffect(() => {
     currentProjectIdRef.current = projectId;
@@ -158,7 +153,7 @@ export function useEvents(projectId: number | null) {
     if (!projectId || !range) return;
     const queryKey = rangeQueryKey(projectId, range);
     const current = queryClient.getQueryData<EventRangeResult>(queryKey);
-    const newest = current?.events[0] ?? eventsRef.current[0] ?? null;
+    const newest = current?.events[0] ?? null;
     try {
       const raw = await getEvents({
         projectId,
@@ -170,9 +165,12 @@ export function useEvents(projectId: number | null) {
         limit: EVENTS_PAGE_SIZE,
       });
       const incoming = (Array.isArray(raw) ? raw : []).map(withParsedDetail);
-      queryClient.setQueryData<EventRangeResult>(queryKey, {
-        events: mergeEvents(current?.events ?? eventsRef.current, incoming),
-        hasMore: current?.hasMore ?? false,
+      queryClient.setQueryData<EventRangeResult>(queryKey, (latest) => {
+        const merged = mergeEvents(latest?.events ?? [], incoming);
+        return {
+          events: merged.slice(0, EVENTS_PAGE_SIZE),
+          hasMore: (latest?.hasMore ?? false) || merged.length > EVENTS_PAGE_SIZE,
+        };
       });
     } catch {
       // Silent polling keeps the last good cached range visible.

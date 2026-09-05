@@ -189,6 +189,18 @@ function parseCliConfig(input: unknown): CliConfig | null {
   const url = requiredString(input.url);
   const name = requiredString(input.name);
   if (version === null || !url || !name) return null;
+  if (
+    Array.from(url).some(
+      (character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127,
+    )
+  )
+    return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  } catch {
+    return null;
+  }
 
   const environments = isRecord(input.environments)
     ? Object.fromEntries(

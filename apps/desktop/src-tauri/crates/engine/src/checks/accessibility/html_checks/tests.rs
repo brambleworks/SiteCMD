@@ -457,6 +457,28 @@ fn test_form_labels_all_labeled_pass() {
 }
 
 #[test]
+fn form_labels_remain_responsive_on_large_forms() {
+    for (markup, expected) in [
+        (
+            "<label>Name</label><input aria-label=Name>",
+            CheckStatus::Pass,
+        ),
+        ("<label>Name</label><input>", CheckStatus::Fail),
+    ] {
+        let context = ctx(&markup.repeat(80_000));
+        let started = std::time::Instant::now();
+        let results = FormLabelsCheck.run(&context);
+        let elapsed = started.elapsed();
+        assert_eq!(results[0].status, expected);
+        assert_eq!(results[0].raw_data.as_ref().unwrap()["inputs"], 80_000);
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "form labels took {elapsed:?}"
+        );
+    }
+}
+
+#[test]
 fn test_form_labels_missing_fail() {
     let html = r#"<html><body><input type="text"><input type="email"><input type="password"></body></html>"#;
     let check = FormLabelsCheck;

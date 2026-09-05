@@ -317,18 +317,13 @@ export function getActiveIssueGroupsEnriched(
   const crossEnvRows = db
     .prepare(
       `SELECT wi.check_id,
-                MIN(wi.first_seen_at) AS staging_first_seen_ms,
-                MIN(prod_wi.first_seen_at) AS prod_first_seen_ms
+                MIN(CASE WHEN env.environment != 'production'
+                         THEN wi.first_seen_at END) AS staging_first_seen_ms,
+                MIN(CASE WHEN env.environment = 'production' AND wi.resolved_at IS NULL
+                         THEN wi.first_seen_at END) AS prod_first_seen_ms
          FROM work_items wi
          JOIN environments env ON env.project_id = wi.project_id
-                               AND env.environment != 'production'
                                AND env.url = wi.env_url
-         JOIN work_items prod_wi ON prod_wi.project_id = wi.project_id
-                                 AND prod_wi.check_id = wi.check_id
-                                 AND prod_wi.resolved_at IS NULL
-         JOIN environments prod_env ON prod_env.project_id = prod_wi.project_id
-                                    AND prod_env.environment = 'production'
-                                    AND prod_env.url = prod_wi.env_url
          WHERE wi.project_id = ?
          GROUP BY wi.check_id
          HAVING staging_first_seen_ms < prod_first_seen_ms`,

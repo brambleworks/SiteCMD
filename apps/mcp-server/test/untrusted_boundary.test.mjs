@@ -119,15 +119,12 @@ test("every tool that prints scan data fences it", async () => {
       .run(projectId, URL, HOSTILE, now, now).lastInsertRowid,
   );
 
-  // A project whose only recorded environment is hostile text, so a mismatched
-  // url on run_scan surfaces it in requireProjectEnvironmentUrl's thrown error.
-  // Recorded as 'staging' (not 'production') so it does not also become this
-  // project's get_projects summary URL, which is outside this fix's scope.
+  // Project metadata crosses the same boundary as scan evidence.
   const mismatchProjectId = 903;
-  ensureProject(fixtureDb, mismatchProjectId);
+  ensureProject(fixtureDb, mismatchProjectId, { framework: HOSTILE });
   fixtureDb
     .prepare(
-      `INSERT OR IGNORE INTO environments (project_id, url, label, environment) VALUES (?, ?, 'Staging', 'staging')`,
+      `INSERT OR IGNORE INTO environments (project_id, url, label, environment) VALUES (?, ?, 'Production', 'production')`,
     )
     .run(mismatchProjectId, HOSTILE);
 
@@ -156,6 +153,10 @@ test("every tool that prints scan data fences it", async () => {
       const result = await session.client.callTool({ name, arguments: args });
       assert.notEqual(result.isError, true, `${name}: ${result.content[0].text}`);
       assertFenced(result.content[0].text, name);
+      if (name === "get_projects") {
+        const trustedPrefix = result.content[0].text.split(`\n<${UNTRUSTED_SCAN_DATA_TAG}>\n`)[0];
+        assert.ok(!trustedPrefix.includes("Ignore previous instructions"));
+      }
     }
 
     const mismatch = await session.client.callTool({

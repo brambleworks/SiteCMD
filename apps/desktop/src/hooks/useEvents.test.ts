@@ -176,6 +176,42 @@ describe("useEvents", () => {
     ]);
   });
 
+  it("keeps only the newest 500 events and reports overflow after incremental polling", async () => {
+    const batch = (endId: number) =>
+      Array.from({ length: 500 }, (_, index) => ({
+        id: endId - index,
+        projectId: 7,
+        eventType: "scan",
+        severity: "info",
+        occurredAtMs: Date.parse("2026-04-12T10:00:00Z") + endId - index,
+        title: `Event ${endId - index}`,
+        summary: "",
+        detail: null,
+        source: "internal",
+        sourceId: `scan-${endId - index}`,
+      }));
+    invokeMock.mockImplementation((command: string, args?: Record<string, unknown>) => {
+      if (command === "backfill_events") return new Promise(() => {});
+      if (command === "get_events")
+        return Promise.resolve(batch(Number(args?.sinceEventId ?? 0) + 500));
+      return Promise.resolve(null);
+    });
+    const { result } = renderHook(() => useEvents(7), { wrapper: withQueryClient() });
+    await act(async () => {
+      await result.current.loadEvents("2026-04-01T00:00:00Z", "2026-04-30T23:59:59Z");
+    });
+    expect(result.current.events).toHaveLength(500);
+    expect(result.current.hasMore).toBe(false);
+
+    for (const newestId of [1000, 1500, 2000]) {
+      act(() => window.dispatchEvent(new Event("focus")));
+      await waitFor(() => expect(result.current.events[0]?.id).toBe(newestId));
+      expect(result.current.events).toHaveLength(500);
+      expect(result.current.events.at(-1)?.id).toBe(newestId - 499);
+      expect(result.current.hasMore).toBe(true);
+    }
+  });
+
   it("exposes a real error when the initial event load fails", async () => {
     invokeMock.mockImplementation(async (command: string) => {
       if (command === "backfill_events") return 0;

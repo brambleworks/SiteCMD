@@ -138,6 +138,7 @@ export function useAppShellOrchestration({
 }: UseAppShellOrchestrationOptions) {
   // Long-lived tray and CLI listeners read current projects without resubscribing.
   const projectsRef = useRef(projects);
+  const desktopWatchInFlightRef = useRef(false);
   useEffect(() => {
     projectsRef.current = projects;
   }, [projects]);
@@ -305,6 +306,7 @@ export function useAppShellOrchestration({
     let cancelled = false;
 
     const checkDesktopSignals = async (allowNotify: boolean) => {
+      if (cancelled || desktopWatchInFlightRef.current) return;
       const requests: DesktopWatchRequest[] = projectsRef.current
         .filter((project) => Boolean(project.path))
         .map((project) => ({
@@ -314,12 +316,13 @@ export function useAppShellOrchestration({
         }));
       if (requests.length === 0) return;
 
+      desktopWatchInFlightRef.current = true;
       try {
-        const snapshot = loadDesktopWatchSnapshot();
         const signals = (await inspectDesktopWatchFiles({
           requests,
         })) as DesktopWatchSignal[];
         if (cancelled) return;
+        const snapshot = loadDesktopWatchSnapshot();
         const changedProjects = new Map<string, ProjectSignalsChangedEvent>();
 
         for (const signal of signals) {
@@ -415,6 +418,8 @@ export function useAppShellOrchestration({
         }
       } catch {
         // Desktop watch suggestions are best-effort.
+      } finally {
+        desktopWatchInFlightRef.current = false;
       }
     };
 

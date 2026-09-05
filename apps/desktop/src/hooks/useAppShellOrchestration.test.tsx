@@ -170,6 +170,55 @@ describe("useAppShellOrchestration listener stability", () => {
     latest.projectsLoading = true;
   });
 
+  it("coalesces overlapping watch triggers and notifies once per file change", async () => {
+    const project = buildProject(1);
+    const signal = {
+      projectId: 1,
+      url: project.environments[0]?.url,
+      kind: "dependency-manifest",
+      relativePath: "package.json",
+      absolutePath: "/tmp/project-1/package.json",
+      modifiedMs: 2,
+      page: "updates",
+      title: "Dependencies changed",
+      detail: "package.json changed",
+    };
+    window.localStorage.setItem(
+      "sitecmd_desktop_watch_snapshot_v1",
+      JSON.stringify({ "1:package.json": 1 }),
+    );
+    const inspections: Array<(signals: (typeof signal)[]) => void> = [];
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "inspect_desktop_watch_files") {
+        return new Promise((resolve) => inspections.push(resolve));
+      }
+      return Promise.resolve(null);
+    });
+    const options = {
+      ...buildHookOptions({ projects: [project] }),
+      desktopPrefs: { ...desktopPrefs, backgroundMonitoring: true, fileWatchSuggestions: true },
+    };
+    const { unmount } = renderHook(() => useAppShellOrchestration(options));
+    try {
+      expect(inspections).toHaveLength(1);
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(inspections).toHaveLength(1);
+      await act(async () => inspections[0]?.([signal]));
+      expect(toast.info).toHaveBeenCalledTimes(1);
+
+      act(() => window.dispatchEvent(new Event("focus")));
+      expect(inspections).toHaveLength(2);
+      await act(async () => inspections[1]?.([signal]));
+      expect(toast.info).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      window.localStorage.clear();
+    }
+  });
+
   it("startup runs one get_projects and registers each shell listener once", async () => {
     const backendProjects = [buildProject(1), buildProject(2)];
     invokeMock.mockImplementation(async (command: string) => {

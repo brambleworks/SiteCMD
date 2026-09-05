@@ -5,6 +5,8 @@ use std::fmt;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+mod loopback_tls;
+
 const REDIRECT_LIMIT: usize = 10;
 
 #[derive(Debug)]
@@ -181,11 +183,11 @@ pub fn client() -> &'static Client {
 }
 
 /// Shared HTTP client for localhost URLs.
-/// Skips TLS certificate verification for self-signed local dev servers.
+/// Permits self-signed certificates only when the TLS destination is loopback.
 pub fn localhost_client() -> &'static Client {
     static CLIENT: LazyLock<Client> = LazyLock::new(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        negotiate_bounded_compression(Client::builder())
+        loopback_tls::configure(negotiate_bounded_compression(Client::builder()))
             .timeout(crate::constants::HTTP_CLIENT_TIMEOUT)
             .user_agent(crate::constants::USER_AGENT.as_str())
             .redirect(safe_redirect_policy(
@@ -193,7 +195,6 @@ pub fn localhost_client() -> &'static Client {
                     allow_local_dev: true,
                 },
             ))
-            .danger_accept_invalid_certs(true)
             .dns_resolver(crate::dns_cache::shared())
             .build()
             .expect("Failed to build localhost HTTP client")
@@ -278,7 +279,12 @@ pub fn no_decompress_client(is_strict_local: bool) -> &'static Client {
 
 fn build_no_decompress_client(is_strict_local: bool) -> Client {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    Client::builder()
+    let builder = if is_strict_local {
+        loopback_tls::configure(Client::builder())
+    } else {
+        Client::builder()
+    };
+    builder
         .timeout(crate::constants::API_TIMEOUT_SHORT)
         .user_agent(crate::constants::USER_AGENT.as_str())
         .redirect(safe_redirect_policy(
@@ -287,7 +293,6 @@ fn build_no_decompress_client(is_strict_local: bool) -> Client {
             },
         ))
         .dns_resolver(crate::dns_cache::shared())
-        .danger_accept_invalid_certs(is_strict_local)
         .no_gzip()
         .no_brotli()
         .no_deflate()

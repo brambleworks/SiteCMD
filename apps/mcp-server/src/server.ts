@@ -45,6 +45,7 @@ import {
 } from "./untrusted.js";
 import { describeScanAge } from "./freshness.js";
 import { formatRescanGuidance } from "./rescan_guidance.js";
+import { formatFixPromptBatch } from "./fix_prompt_format.js";
 import { readDesktopHeartbeat, desktopStatusLine } from "./heartbeat.js";
 import { deriveFixStatus, DEPLOY_WAIT_NOTE } from "./fix_status.js";
 import {
@@ -384,18 +385,15 @@ function registerCoreTools(server: McpServer): void {
         if (projects.length === 0) {
           return text("No projects found. Open SiteCMD and add a project first.");
         }
-        const summary = projects.map(
-          (p) => `- #${p.id} ${p.url || "(no URL)"}${p.framework ? ` [${p.framework}]` : ""}`,
-        );
         const body = projects
           .map(
             (p) =>
-              `#${p.id}\n    name: ${quoteUntrustedText(p.name, 200)}\n    path: ${quoteUntrustedText(p.path ?? "", 500)}`,
+              `#${p.id}\n    name: ${quoteUntrustedText(p.name, 200)}\n    url: ${quoteUntrustedText(p.url || "(no URL)", 2000)}\n    framework: ${quoteUntrustedText(p.framework ?? "", 200)}\n    path: ${quoteUntrustedText(p.path ?? "", 500)}`,
           )
           .join("\n");
         return text(
           [
-            `${projects.length} project(s):\n\n${summary.join("\n")}`,
+            `${projects.length} project(s):`,
             UNTRUSTED_DATA_INSTRUCTION,
             untrustedScanData(body),
           ].join("\n\n"),
@@ -672,9 +670,10 @@ function registerCoreTools(server: McpServer): void {
 
         const ranked = rankWithCausalReach(prompts, activeCheckIds);
 
-        const shown = check_id
-          ? ranked.filter((p) => p.check_id === check_id)
-          : ranked.slice(0, limit);
+        const shown = (check_id ? ranked.filter((p) => p.check_id === check_id) : ranked).slice(
+          0,
+          limit,
+        );
         if (shown.length === 0) {
           return text(
             check_id
@@ -682,24 +681,16 @@ function registerCoreTools(server: McpServer): void {
               : `No fix prompts available for ${url}; call get_issues to see open checks.`,
           );
         }
-        const body = shown
-          .map((p) => {
-            const causal = formatCausalityBlock(p.check_id, activeCheckIds);
-            const blocks = [
-              `## ${quoteUntrustedText(p.title, 500)}`,
-              `**Severity:** ${p.severity} | **Category:** ${p.category} | **Check:** ${quoteUntrustedText(p.check_id, 200)}`,
-            ];
-            if (causal) blocks.push("", causal);
-            blocks.push("", quoteUntrustedText(p.fix_prompt, 20000), "", "---");
-            return blocks.join("\n");
-          })
-          .join("\n\n");
-        const moreHint =
-          !check_id && ranked.length > shown.length
+        const batch = formatFixPromptBatch(shown, activeCheckIds);
+        const moreHint = batch.shortened
+          ? "; response shortened to fit the size limit; use get_issue for focused guidance"
+          : !check_id && ranked.length > batch.count
             ? "; pass check_id or raise limit (max 20) for more"
             : "";
-        const header = `${shown.length} of ${ranked.length} fix prompt(s) for ${url}${moreHint}:`;
-        return text([header, UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(body)].join("\n\n"));
+        const header = `${batch.count} of ${ranked.length} fix prompt(s) for ${quoteUntrustedText(url, 500)}${moreHint}:`;
+        return text(
+          [header, UNTRUSTED_DATA_INSTRUCTION, untrustedScanData(batch.body)].join("\n\n"),
+        );
       }),
   );
 
