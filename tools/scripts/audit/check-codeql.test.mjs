@@ -12,6 +12,7 @@ const WORK_PREFIX = "sitecmd-codeql-";
 let scratch;
 let fakeBin;
 let argsLog;
+let fixture;
 
 /**
  * A codeql stand-in, so these tests exercise the gate's own logic without the
@@ -42,6 +43,39 @@ function installFakeCodeql() {
   fs.chmodSync(stub, 0o755);
 }
 
+/**
+ * A two-commit repository the gate analyzes instead of this checkout, so the
+ * tests do not depend on how deeply CI cloned. The second commit adds lines,
+ * which is what puts the gate on its analysis path.
+ */
+function createFixtureRepository() {
+  const repo = path.join(scratch, "repo");
+  fs.mkdirSync(repo);
+  const git = (...args) => {
+    const result = spawnSync("git", args, {
+      cwd: repo,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_CONFIG_GLOBAL: os.devNull,
+        GIT_CONFIG_SYSTEM: os.devNull,
+        GIT_AUTHOR_NAME: "fixture",
+        GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+        GIT_COMMITTER_NAME: "fixture",
+        GIT_COMMITTER_EMAIL: "fixture@example.invalid",
+      },
+    });
+    if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+  };
+  git("init", "-q", "-b", "main");
+  fs.writeFileSync(path.join(repo, "app.js"), "export const base = 1;\n");
+  git("add", "app.js");
+  git("commit", "-q", "-m", "base");
+  fs.appendFileSync(path.join(repo, "app.js"), "export const added = 2;\n");
+  git("commit", "-q", "-a", "-m", "add lines");
+  return repo;
+}
+
 /** Age a directory past the staleness cutoff without waiting an hour. */
 function makeOld(directory) {
   const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -57,12 +91,13 @@ function seedWorkDirectory(name) {
 
 function runGate(env = {}) {
   return spawnSync(process.execPath, [SCRIPT], {
-    cwd: ROOT,
+    cwd: fixture,
     encoding: "utf8",
     env: {
       ...process.env,
       PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`,
       TMPDIR: scratch,
+      SITECMD_CODEQL_ROOT: fixture,
       SITECMD_CODEQL_BASE: "HEAD",
       ...env,
     },
@@ -75,6 +110,7 @@ beforeEach(() => {
   fs.mkdirSync(fakeBin);
   argsLog = path.join(scratch, "codeql-args.log");
   installFakeCodeql();
+  fixture = createFixtureRepository();
 });
 
 afterEach(() => {
@@ -108,6 +144,17 @@ describe("check-codeql stale database sweep", () => {
     runGate();
 
     expect(fs.existsSync(directory)).toBe(true);
+  });
+});
+
+describe("check-codeql analysis root", () => {
+  it("analyzes the repository it is pointed at, not this checkout", () => {
+    // CI clones shallowly, so HEAD~1 has to come from the fixture.
+    const result = runGate({ SITECMD_CODEQL_BASE: "HEAD~1" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("1 changed file(s)");
+    expect(fs.readFileSync(argsLog, "utf8")).toContain(`--source-root=${fixture}`);
   });
 });
 

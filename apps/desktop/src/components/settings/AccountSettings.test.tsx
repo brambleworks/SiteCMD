@@ -128,6 +128,13 @@ describe("AccountSettings commercial boundary", () => {
     expect(screen.queryByText(/\$\d+/)).not.toBeInTheDocument();
   });
 
+  it("shows the terms and privacy policy beside license activation", () => {
+    render(<AccountSettings />, { wrapper: withQueryClient() });
+
+    expect(screen.getByRole("link", { name: "Terms of Service" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toBeInTheDocument();
+  });
+
   it("does not expose a checkout even when legacy checkout URLs are configured", () => {
     render(<AccountSettings />, { wrapper: withQueryClient() });
 

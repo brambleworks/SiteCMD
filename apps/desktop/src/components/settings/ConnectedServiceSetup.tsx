@@ -3,6 +3,7 @@ import type { ConnectedSiteChallenge, ConnectedStatus } from "@/generated/ipc-bi
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/useToast";
+import { LegalNotice } from "./LegalNotice";
 import {
   activateConnectedService,
   createConnectedSite,
@@ -113,6 +114,7 @@ export function ConnectedServiceSetup({
           Creates a new connected site for this production URL. You will be asked to prove you own
           the domain before anything is scanned.
         </p>
+        <LegalNotice action="activating the connected service or connecting a site" />
         {status.hasInstallationToken ? (
           <p className="body-muted">
             This desktop already holds its connected-service credential, so no token is needed
@@ -175,6 +177,7 @@ export function ConnectedServiceSetup({
           Pair the encrypted connection from the site-owning desktop with this installation's own
           token. The export authorizes nothing by itself.
         </p>
+        <LegalNotice action="importing a site connection" />
         <div className="stack-base connected-form">
           <label className="form-label" htmlFor="connected-import-payload">
             Encrypted connection export

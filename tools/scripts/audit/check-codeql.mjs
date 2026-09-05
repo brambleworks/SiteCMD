@@ -18,7 +18,10 @@ import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+// Tests point the gate at a fixture repository; a push always analyzes this checkout.
+const ROOT =
+  process.env.SITECMD_CODEQL_ROOT ??
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const LANGUAGE = "javascript-typescript";
 const SUITE = "codeql/javascript-queries:codeql-suites/javascript-security-extended.qls";
 const BASE_REF = process.env.SITECMD_CODEQL_BASE ?? "origin/main";
