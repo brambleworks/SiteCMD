@@ -68,7 +68,7 @@ pub(super) fn configure(builder: reqwest::ClientBuilder) -> reqwest::ClientBuild
         .with_no_client_auth();
     // Preconfigured TLS bypasses reqwest's usual protocol negotiation defaults.
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    builder.use_preconfigured_tls(config)
+    builder.no_proxy().use_preconfigured_tls(config)
 }
 
 #[cfg(test)]

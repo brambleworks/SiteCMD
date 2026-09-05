@@ -79,7 +79,6 @@ async fn tls_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<bool>) {
 fn local_scan_client(address: std::net::SocketAddr) -> reqwest::Client {
     let _ = rustls::crypto::ring::default_provider().install_default();
     configure(reqwest::Client::builder())
-        .no_proxy()
         .resolve("public.example", address)
         .timeout(crate::constants::CHECK_PROBE_TIMEOUT)
         .build()
@@ -123,6 +122,29 @@ async fn accepts_self_signed_loopback_server() {
         .await
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert!(served.await.unwrap());
+}
+
+#[tokio::test]
+async fn loopback_certificate_exceptions_ignore_proxy_routing() {
+    let (address, served) = tls_server().await;
+    let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+    let proxy_task = tokio::spawn(async move {
+        let (mut stream, _) = proxy.accept().await.unwrap();
+        stream
+            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let client =
+        configure(reqwest::Client::builder().proxy(reqwest::Proxy::all(proxy_url).unwrap()))
+            .timeout(crate::constants::CHECK_PROBE_TIMEOUT)
+            .build()
+            .unwrap();
+    let response = client.get(format!("https://{address}/")).send().await;
+    proxy_task.abort();
+    assert_eq!(response.unwrap().status(), reqwest::StatusCode::OK);
     assert!(served.await.unwrap());
 }
 

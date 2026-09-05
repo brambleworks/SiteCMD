@@ -139,6 +139,7 @@ export function useAppShellOrchestration({
   // Long-lived tray and CLI listeners read current projects without resubscribing.
   const projectsRef = useRef(projects);
   const desktopWatchInFlightRef = useRef(false);
+  const desktopWatchPendingRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     projectsRef.current = projects;
   }, [projects]);
@@ -420,10 +421,20 @@ export function useAppShellOrchestration({
         // Desktop watch suggestions are best-effort.
       } finally {
         desktopWatchInFlightRef.current = false;
+        const pendingInspection = desktopWatchPendingRef.current;
+        desktopWatchPendingRef.current = null;
+        pendingInspection?.();
       }
     };
 
-    void checkDesktopSignals(false);
+    const inspectOnSetup = () => {
+      void checkDesktopSignals(false);
+    };
+    if (desktopWatchInFlightRef.current) {
+      desktopWatchPendingRef.current = inspectOnSetup;
+    } else {
+      inspectOnSetup();
+    }
     const interval = window.setInterval(() => {
       void checkDesktopSignals(true);
     }, 45000);
@@ -441,6 +452,9 @@ export function useAppShellOrchestration({
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
+      if (desktopWatchPendingRef.current === inspectOnSetup) {
+        desktopWatchPendingRef.current = null;
+      }
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);

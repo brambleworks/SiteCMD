@@ -162,7 +162,7 @@ export function useEvents(projectId: number | null) {
         eventTypes: range.eventTypes ?? null,
         sinceMs: newest?.occurredAtMs ?? null,
         sinceEventId: newest?.id ?? null,
-        limit: EVENTS_PAGE_SIZE,
+        limit: EVENTS_PAGE_SIZE + 1,
       });
       const incoming = (Array.isArray(raw) ? raw : []).map(withParsedDetail);
       queryClient.setQueryData<EventRangeResult>(queryKey, (latest) => {

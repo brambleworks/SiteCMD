@@ -13,6 +13,21 @@ vi.mock("@/lib/tauri-invoke", () => ({
 
 import { useEvents } from "./useEvents";
 
+function eventBatch(count: number, endId = count) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: endId - index,
+    projectId: 7,
+    eventType: "scan",
+    severity: "info",
+    occurredAtMs: Date.parse("2026-04-12T10:00:00Z") + endId - index,
+    title: `Event ${endId - index}`,
+    summary: "",
+    detail: null,
+    source: "internal",
+    sourceId: `scan-${endId - index}`,
+  }));
+}
+
 describe("useEvents", () => {
   beforeEach(() => {
     invokeMock.mockReset();
@@ -115,7 +130,7 @@ describe("useEvents", () => {
         if (args?.sinceMs != null) {
           expect(args.sinceMs).toBe(firstEvent.occurredAtMs);
           expect(args.sinceEventId).toBe(firstEvent.id);
-          expect(args.limit).toBe(500);
+          expect(args.limit).toBe(501);
           return [secondEvent];
         }
         expect(args?.limit).toBe(501);
@@ -177,23 +192,10 @@ describe("useEvents", () => {
   });
 
   it("keeps only the newest 500 events and reports overflow after incremental polling", async () => {
-    const batch = (endId: number) =>
-      Array.from({ length: 500 }, (_, index) => ({
-        id: endId - index,
-        projectId: 7,
-        eventType: "scan",
-        severity: "info",
-        occurredAtMs: Date.parse("2026-04-12T10:00:00Z") + endId - index,
-        title: `Event ${endId - index}`,
-        summary: "",
-        detail: null,
-        source: "internal",
-        sourceId: `scan-${endId - index}`,
-      }));
     invokeMock.mockImplementation((command: string, args?: Record<string, unknown>) => {
       if (command === "backfill_events") return new Promise(() => {});
       if (command === "get_events")
-        return Promise.resolve(batch(Number(args?.sinceEventId ?? 0) + 500));
+        return Promise.resolve(eventBatch(500, Number(args?.sinceEventId ?? 0) + 500));
       return Promise.resolve(null);
     });
     const { result } = renderHook(() => useEvents(7), { wrapper: withQueryClient() });
@@ -210,6 +212,31 @@ describe("useEvents", () => {
       expect(result.current.events.at(-1)?.id).toBe(newestId - 499);
       expect(result.current.hasMore).toBe(true);
     }
+  });
+
+  it("reports overflow when more than 500 events arrive after an empty initial load", async () => {
+    let polling = false;
+    const incoming = eventBatch(501);
+    invokeMock.mockImplementation((command: string, args?: Record<string, unknown>) => {
+      if (command === "backfill_events") return new Promise(() => {});
+      if (command === "get_events") {
+        return Promise.resolve(polling ? incoming.slice(0, Number(args?.limit)) : []);
+      }
+      return Promise.resolve(null);
+    });
+    const { result } = renderHook(() => useEvents(7), { wrapper: withQueryClient() });
+    await act(async () => {
+      await result.current.loadEvents("2026-04-01T00:00:00Z", "2026-04-30T23:59:59Z");
+    });
+    expect(result.current.events).toEqual([]);
+    expect(result.current.hasMore).toBe(false);
+
+    polling = true;
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(result.current.hasMore).toBe(true));
+    expect(result.current.events).toHaveLength(500);
+    expect(result.current.events[0]?.id).toBe(501);
+    expect(result.current.events.at(-1)?.id).toBe(2);
   });
 
   it("exposes a real error when the initial event load fails", async () => {
