@@ -16,11 +16,13 @@ import { join } from "node:path";
 
 import {
   classifyBindError,
+  isolatedGitEnvironment,
   missingBrowserPaths,
   resolveRepositoryRoot,
 } from "./verify-push-lib.mjs";
 
 const ROOT = resolveRepositoryRoot(import.meta.url);
+const CHECK_ENV = isolatedGitEnvironment(ROOT, process.env);
 
 const NO_BAIL = process.argv.slice(2).some((arg) => arg === "--no-bail" || arg === "--all");
 
@@ -41,6 +43,8 @@ const RESET = "\x1b[0m";
 
 /** @type {Array<Check[]>} */
 const TIERS = [
+  // Knip resolves MCP test imports through the compiled output.
+  [{ name: "mcp-build", cmd: "pnpm --filter sitecmd-mcp run build" }],
   [
     { name: "typecheck", cmd: "pnpm run typecheck" },
     { name: "lint", cmd: "pnpm run lint" },
@@ -184,7 +188,7 @@ function runCheck(check) {
       cwd: check.cwd ? join(ROOT, check.cwd) : ROOT,
       stdio: ["ignore", logFd, logFd],
       env: {
-        ...process.env,
+        ...CHECK_ENV,
         CI: "1",
         // Reuse the verified production build on the dedicated push-gate port.
         SITECMD_VERIFY_PUSH: "1",
@@ -292,7 +296,7 @@ function preflightBrowserCheck() {
   const probe = spawnSync(
     "bash",
     ["-lc", "pnpm --filter @sitecmd/desktop exec playwright install chromium --dry-run"],
-    { cwd: ROOT },
+    { cwd: ROOT, env: CHECK_ENV },
   );
   if (probe.status !== 0) return;
   const missing = missingBrowserPaths(probe.stdout.toString(), existsSync);
