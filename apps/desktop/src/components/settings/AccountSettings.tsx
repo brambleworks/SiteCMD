@@ -9,6 +9,7 @@ import { useTier, type BillingInterval, type Tier } from "@/hooks/useTier";
 import { useToast } from "@/hooks/useToast";
 import { Key, Check, Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LegalNotice } from "./LegalNotice";
 import { openUrl } from "@/lib/open-url";
 import { SUPPORT_EMAIL } from "@/lib/support";
 import {
@@ -305,6 +306,7 @@ export function AccountSection() {
                 paste the key from its confirmation email to activate connected-service access on
                 this device.
               </p>
+              <LegalNotice action="activating a license" />
               <div className="account-license-input-row">
                 <div className="field-shell account-license-field">
                   <Key className="icon-muted account-inline-icon" />
