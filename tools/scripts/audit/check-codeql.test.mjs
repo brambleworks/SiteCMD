@@ -34,8 +34,10 @@ function installFakeCodeql() {
       "if (process.env.FAKE_CODEQL_FAIL === args[1]) process.exit(9);",
       'if (args[1] === "create") { fs.mkdirSync(args[2], { recursive: true }); process.exit(0); }',
       'if (args[1] === "analyze") {',
-      '  const out = args.find((a) => a.startsWith("--output="));',
-      '  fs.writeFileSync(out.slice("--output=".length), JSON.stringify({ runs: [] }));',
+      '  const out = args.find((a) => a.startsWith("--output=")).slice("--output=".length);',
+      "  // FAKE_CODEQL_SARIF names a prepared result set; otherwise the analysis is clean.",
+      "  if (process.env.FAKE_CODEQL_SARIF) fs.copyFileSync(process.env.FAKE_CODEQL_SARIF, out);",
+      "  else fs.writeFileSync(out, JSON.stringify({ runs: [] }));",
       "}",
       "process.exit(0);",
     ].join("\n"),
@@ -87,6 +89,26 @@ function seedWorkDirectory(name) {
   fs.mkdirSync(path.join(directory, "db"), { recursive: true });
   makeOld(directory);
   return directory;
+}
+
+/** Work directories the gate left behind in its temp directory. */
+function leftovers() {
+  return fs.readdirSync(scratch).filter((name) => name.startsWith(WORK_PREFIX));
+}
+
+/** A SARIF result set with one alert at `file`:`line`, as CodeQL would report it. */
+function sarifWithAlert(file, line) {
+  const sarif = path.join(scratch, "alert.sarif");
+  const rule = { id: "js/fixture-rule", properties: { "security-severity": "7.5" } };
+  const location = {
+    physicalLocation: { artifactLocation: { uri: `file://${file}` }, region: { startLine: line } },
+  };
+  const result = { ruleId: rule.id, message: { text: "fixture finding" }, locations: [location] };
+  fs.writeFileSync(
+    sarif,
+    JSON.stringify({ runs: [{ tool: { driver: { rules: [rule] } }, results: [result] }] }),
+  );
+  return sarif;
 }
 
 function runGate(env = {}) {
@@ -201,12 +223,37 @@ describe("check-codeql memory budget", () => {
   });
 });
 
-describe("check-codeql cleanup discipline", () => {
+describe("check-codeql alert reporting", () => {
   const analyzed = { SITECMD_CODEQL_BASE: "HEAD~1" };
 
-  function leftovers() {
-    return fs.readdirSync(scratch).filter((name) => name.startsWith(WORK_PREFIX));
-  }
+  it("reports an alert on an added line and still frees the database", () => {
+    const result = runGate({
+      ...analyzed,
+      FAKE_CODEQL_SARIF: sarifWithAlert(path.join(fixture, "app.js"), 2),
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("1 new alert(s)");
+    expect(result.stderr).toContain("app.js:2");
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("matches absolute SARIF paths when the root carries a trailing separator", () => {
+    // normalizeUri strips `${ROOT}/`; an unresolved "repo/" root would never
+    // match "repo/app.js", and every alert would be silently dropped.
+    const result = runGate({
+      ...analyzed,
+      SITECMD_CODEQL_ROOT: fixture + path.sep,
+      FAKE_CODEQL_SARIF: sarifWithAlert(path.join(fixture, "app.js"), 2),
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("app.js:2");
+  });
+});
+
+describe("check-codeql cleanup discipline", () => {
+  const analyzed = { SITECMD_CODEQL_BASE: "HEAD~1" };
 
   // die() calls process.exit, which skips the finally that frees the database,
   // so it has to remove the directory itself. Both failures happen after the
@@ -223,9 +270,9 @@ describe("check-codeql cleanup discipline", () => {
   });
 
   it("exits through die(), so no path skips the finally that frees the database", () => {
-    // The alert path cannot be driven here without a controlled diff, so its
-    // cleanup is guarded structurally: process.exit belongs only to die(),
-    // which removes the directory before it runs.
+    // The alert path is driven above; this guards the failure paths that are
+    // not: process.exit belongs only to die(), which removes the directory
+    // before it runs.
     const source = fs.readFileSync(SCRIPT, "utf8");
     const callers = source
       .split("\n")
