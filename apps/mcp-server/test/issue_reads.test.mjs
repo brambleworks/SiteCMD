@@ -246,6 +246,42 @@ test("get_fix_prompts with zero prompts and no check_id never prints undefined",
   assert.doesNotMatch(output, /undefined/);
 });
 
+test("get_fix_prompts applies the requested limit to repeated occurrences of one check", async () => {
+  seedProject(809);
+  for (let index = 0; index < 100; index += 1) {
+    addWorkItem({
+      projectId: 809,
+      envUrl: URL,
+      signalId: `prompt-occurrence-${index}`,
+      checkId: "seo.repeated",
+      title: `Repeated prompt ${index}`,
+      fixPrompt: `Fix occurrence ${index}`,
+    });
+  }
+  const output = await call("get_fix_prompts", { url: URL, check_id: "seo.repeated", limit: 1 });
+  assert.match(output, /^1 of 100 fix prompt\(s\)/);
+  assert.equal((output.match(/^## Repeated prompt /gm) ?? []).length, 1);
+});
+
+test("get_fix_prompts bounds the complete response after escaping large prompts", async () => {
+  seedProject(810);
+  for (let index = 0; index < 20; index += 1) {
+    addWorkItem({
+      projectId: 810,
+      envUrl: URL,
+      signalId: `large-prompt-${index}`,
+      checkId: "seo.large-prompt",
+      title: `Large prompt ${index}`,
+      fixPrompt: "<&>".repeat(10000),
+    });
+  }
+  const output = await call("get_fix_prompts", { url: URL, limit: 20 });
+  assert.ok(output.length < 65000, `response contains ${output.length} characters`);
+  assert.match(output, /shortened/);
+  assert.ok(output.endsWith("</sitecmd_untrusted_scan_data>"));
+  assert.equal((output.match(/<\/sitecmd_untrusted_scan_data>/g) ?? []).length, 1);
+});
+
 test("get_scan_score prints one SiteCMD Score and mentions the web scan grade in one clause", async () => {
   seedProject(805);
   seedWebScan(805, URL, 62, "2026-08-15T09:00:00.000Z");

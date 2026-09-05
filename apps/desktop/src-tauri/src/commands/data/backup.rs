@@ -37,29 +37,22 @@ fn read_sqlite_header(path: &Path) -> Result<[u8; 16], String> {
     Ok(header)
 }
 
-fn export_database_to_path(
+async fn export_database_to_path(
     db: &Database,
     dest_path: &str,
     allow_overwrite: bool,
 ) -> Result<u64, String> {
-    let src = db.path().to_string();
-    // Checkpoint WAL into main DB file for a clean copy
-    db.execute(move |conn| {
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
-            .map_err(|e| format!("WAL checkpoint failed: {}", e))
+    let mut snapshot = db.backup_snapshot().await.map_err(sanitize_error)?;
+    let dest_path = dest_path.to_string();
+    run_blocking(move || {
+        write_export_contents(&dest_path, allow_overwrite, |file| {
+            std::io::copy(snapshot.as_file_mut(), file)
+                .map_err(|e| sanitize_error(format!("Failed to copy database: {}", e)))?;
+            Ok(())
+        })?;
+        Ok(std::fs::metadata(dest_path).map(|m| m.len()).unwrap_or(0))
     })
-    .map_err(sanitize_error)?
-    .map_err(sanitize_error)?;
-
-    write_export_contents(dest_path, allow_overwrite, |file| {
-        let mut src_file = File::open(&src)
-            .map_err(|e| sanitize_error(format!("Failed to read database backup source: {}", e)))?;
-        std::io::copy(&mut src_file, file)
-            .map_err(|e| sanitize_error(format!("Failed to copy database: {}", e)))?;
-        Ok(())
-    })?;
-
-    Ok(std::fs::metadata(dest_path).map(|m| m.len()).unwrap_or(0))
+    .await?
 }
 
 fn format_import_database_result(size: u64, warnings: &[String]) -> String {
@@ -72,7 +65,7 @@ fn format_import_database_result(size: u64, warnings: &[String]) -> String {
 }
 
 /// Export the database to a user-chosen file path.
-/// Runs a WAL checkpoint first to ensure the backup is self-contained.
+/// Uses SQLite's online backup API to capture a self-contained snapshot.
 #[tracing::instrument(skip(app, db, dest_path), fields(dest_path_len = dest_path.len()))]
 pub async fn export_database(
     app: AppHandle,
@@ -104,13 +97,7 @@ pub async fn export_database(
         crate::audit_log::record("data.export", audit_detail, "fail");
         return Err(e.into());
     }
-    let db_ref = db.inner().clone();
-    let dest_path_for_export = dest_path.clone();
-    let size = match run_blocking(move || {
-        export_database_to_path(db_ref.as_ref(), &dest_path_for_export, allow_overwrite)
-    })
-    .await?
-    {
+    let size = match export_database_to_path(db.as_ref(), &dest_path, allow_overwrite).await {
         Ok(s) => s,
         Err(e) => {
             crate::audit_log::record("data.export", audit_detail, "fail");
@@ -259,8 +246,8 @@ mod tests {
         assert_eq!(&header, b"SQLite format 3\0");
     }
 
-    #[test]
-    fn export_database_to_path_writes_restorable_backup() {
+    #[tokio::test]
+    async fn export_database_to_path_writes_restorable_backup() {
         let db = temp_db();
         db.upsert_project("Export Test", "/tmp/export-test", Some("astro"))
             .expect("seed project");
@@ -273,6 +260,7 @@ mod tests {
         let export_path = dir.path().join("backup.sqlite");
 
         let size = export_database_to_path(&db, export_path.to_str().expect("utf8 path"), false)
+            .await
             .expect("export database");
 
         assert!(size > 0);
@@ -282,6 +270,39 @@ mod tests {
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].name, "Export Test");
         assert_eq!(projects[0].framework.as_deref(), Some("astro"));
+    }
+
+    #[tokio::test]
+    async fn export_includes_committed_wal_rows_while_a_reader_holds_an_old_snapshot() {
+        let db = temp_db();
+        db.upsert_project("Before reader", "/tmp/before-reader", None)
+            .unwrap();
+        db.execute(move |conn| {
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                .unwrap();
+            conn.busy_timeout(std::time::Duration::ZERO).unwrap();
+        })
+        .unwrap();
+        let reader = rusqlite::Connection::open(db.path()).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        let count: i64 = reader
+            .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        db.upsert_project("Committed in WAL", "/tmp/committed-wal", None)
+            .unwrap();
+
+        let dir = tempfile::tempdir_in(std::env::var("HOME").unwrap()).unwrap();
+        let export_path = dir.path().join("backup.sqlite");
+        export_database_to_path(&db, export_path.to_str().unwrap(), false)
+            .await
+            .unwrap();
+
+        let exported = Database::open(export_path).unwrap();
+        let projects = exported.get_projects().unwrap();
+        assert_eq!(projects.len(), 2, "backup must include committed WAL data");
+        assert!(projects.iter().any(|p| p.name == "Committed in WAL"));
+        reader.execute_batch("ROLLBACK").unwrap();
     }
 
     #[test]

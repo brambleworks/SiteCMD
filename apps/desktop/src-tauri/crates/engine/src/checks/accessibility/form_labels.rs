@@ -49,6 +49,14 @@ pub fn label_spans(body: &str) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Look up a control in the ordered, non-overlapping spans returned by `label_spans`.
+pub fn is_wrapped_by_label(spans: &[(usize, usize)], tag_start: usize) -> bool {
+    spans
+        .partition_point(|(start, _)| *start < tag_start)
+        .checked_sub(1)
+        .is_some_and(|index| tag_start < spans[index].1)
+}
+
 fn label_content_has_name(content: &str) -> bool {
     let text = LABEL_CONTENT_TAG_RE.replace_all(content, " ");
     let normalized = text
@@ -129,14 +137,13 @@ impl Check for FormLabelsCheck {
                 .map(|id| labeled_ids.contains(&id))
                 .unwrap_or(false);
             let tag_start = cap.get(0).map(|m| m.start()).unwrap_or(0);
-            let is_wrapped = spans.iter().any(|(s, e)| tag_start > *s && tag_start < *e);
             if has_aria_name {
                 aria_named_count += 1;
             } else if has_title_name {
                 title_named_count += 1;
             } else if has_id_label {
                 for_labeled_count += 1;
-            } else if is_wrapped {
+            } else if is_wrapped_by_label(&spans, tag_start) {
                 wrapped_count += 1;
             } else {
                 unlabeled_count += 1;

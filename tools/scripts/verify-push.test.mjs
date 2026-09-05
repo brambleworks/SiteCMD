@@ -1,14 +1,67 @@
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { devNull, tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import {
   classifyBindError,
+  isolatedGitEnvironment,
   missingBrowserPaths,
   parseBrowserInstallLocations,
   resolveRepositoryRoot,
 } from "./verify-push-lib.mjs";
+
+describe("push-hook Git environment", () => {
+  it("keeps a dependency repository reset from changing the checkout being verified", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "sitecmd-push-git-"));
+    const checkout = join(scratch, "checkout");
+    const dependency = join(scratch, "dependency");
+    const environment = {
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
+      GIT_CONFIG_GLOBAL: devNull,
+      GIT_CONFIG_SYSTEM: devNull,
+      GIT_AUTHOR_NAME: "Fixture",
+      GIT_AUTHOR_EMAIL: "fixture@example.invalid",
+      GIT_COMMITTER_NAME: "Fixture",
+      GIT_COMMITTER_EMAIL: "fixture@example.invalid",
+      CI: "1",
+    };
+    const git = (cwd, args, env = environment) =>
+      execFileSync("git", args, {
+        cwd,
+        env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+    try {
+      mkdirSync(checkout);
+      git(checkout, ["init", "-q", "-b", "main"]);
+      git(checkout, ["commit", "--allow-empty", "-qm", "Initial"]);
+      const base = git(checkout, ["rev-parse", "HEAD"]);
+      git(checkout, ["commit", "--allow-empty", "-qm", "Next"]);
+      const head = git(checkout, ["rev-parse", "HEAD"]);
+      git(scratch, ["clone", "-q", checkout, dependency]);
+      const hookEnvironment = {
+        ...environment,
+        GIT_DIR: join(checkout, ".git"),
+        GIT_INDEX_FILE: join(checkout, ".git", "index"),
+        GIT_PREFIX: "",
+      };
+      const isolated = isolatedGitEnvironment(checkout, hookEnvironment);
+      git(dependency, ["reset", "--hard", base], isolated);
+      expect(git(checkout, ["rev-parse", "HEAD"])).toBe(head);
+      expect(git(dependency, ["rev-parse", "HEAD"])).toBe(base);
+      expect(isolated.CI).toBe("1");
+      expect(isolated).not.toHaveProperty("GIT_INDEX_FILE");
+      expect(hookEnvironment.GIT_DIR).toBe(join(checkout, ".git"));
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("push-gate port preflight", () => {
   it("distinguishes an occupied port from other bind failures", () => {

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { StrictMode, useEffect } from "react";
 import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +98,37 @@ function buildHookOptions(overrides: { projects: ProjectRecord[] }) {
   };
 }
 
+function mockDesktopWatch() {
+  const project = buildProject(1);
+  const signal = {
+    projectId: 1,
+    url: project.environments[0]?.url,
+    kind: "dependency-manifest",
+    relativePath: "package.json",
+    absolutePath: "/tmp/project-1/package.json",
+    modifiedMs: 2,
+    page: "updates",
+    title: "Dependencies changed",
+    detail: "package.json changed",
+  };
+  window.localStorage.setItem(
+    "sitecmd_desktop_watch_snapshot_v1",
+    JSON.stringify({ "1:package.json": 1 }),
+  );
+  const inspections: Array<(signals: (typeof signal)[]) => void> = [];
+  invokeMock.mockImplementation((command: string) => {
+    if (command === "inspect_desktop_watch_files") {
+      return new Promise((resolve) => inspections.push(resolve));
+    }
+    return Promise.resolve(null);
+  });
+  const options = {
+    ...buildHookOptions({ projects: [project] }),
+    desktopPrefs: { ...desktopPrefs, backgroundMonitoring: true, fileWatchSuggestions: true },
+  };
+  return { options, signal, inspections };
+}
+
 const latest: {
   projects: ProjectRecord[];
   activeProject: ProjectRecord | null;
@@ -168,6 +199,56 @@ describe("useAppShellOrchestration listener stability", () => {
     latest.activeProject = null;
     latest.activeEnv = null;
     latest.projectsLoading = true;
+  });
+
+  it("coalesces overlapping watch triggers and notifies once per file change", async () => {
+    const { options, signal, inspections } = mockDesktopWatch();
+    const { unmount } = renderHook(() => useAppShellOrchestration(options));
+    try {
+      expect(inspections).toHaveLength(1);
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(inspections).toHaveLength(1);
+      await act(async () => inspections[0]?.([signal]));
+      expect(toast.info).toHaveBeenCalledTimes(1);
+
+      act(() => window.dispatchEvent(new Event("focus")));
+      expect(inspections).toHaveLength(2);
+      await act(async () => inspections[1]?.([signal]));
+      expect(toast.info).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      window.localStorage.clear();
+    }
+  });
+
+  it("immediately resumes watching after a StrictMode effect restart", async () => {
+    const { options, signal, inspections } = mockDesktopWatch();
+    renderHook(() => useAppShellOrchestration(options), { wrapper: StrictMode });
+    expect(inspections).toHaveLength(1);
+
+    await act(async () => inspections[0]?.([signal]));
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(inspections).toHaveLength(2);
+
+    await act(async () => inspections[1]?.([signal]));
+    expect(toast.info).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a queued watch restart when monitoring is disabled", async () => {
+    const { options, signal, inspections } = mockDesktopWatch();
+    const { rerender } = renderHook((props) => useAppShellOrchestration(props), {
+      initialProps: options,
+      wrapper: StrictMode,
+    });
+    expect(inspections).toHaveLength(1);
+
+    rerender({ ...options, desktopPrefs });
+    await act(async () => inspections[0]?.([signal]));
+    expect(inspections).toHaveLength(1);
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it("startup runs one get_projects and registers each shell listener once", async () => {

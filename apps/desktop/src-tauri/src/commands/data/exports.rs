@@ -172,11 +172,11 @@ mod tests {
     fn validate_export_write_path_rejects_symlink_targets() {
         use std::os::unix::fs::symlink;
 
-        let base = std::env::current_dir().expect("cwd");
+        let home = std::env::var("HOME").expect("home");
         let dir = tempfile::Builder::new()
             .prefix("sitecmd-data-tests")
-            .tempdir_in(&base)
-            .expect("tempdir in workspace");
+            .tempdir_in(home)
+            .expect("tempdir in home");
         let target = dir.path().join("real.txt");
         let symlink_path = dir.path().join("export.txt");
         std::fs::write(&target, "ok").expect("write target");

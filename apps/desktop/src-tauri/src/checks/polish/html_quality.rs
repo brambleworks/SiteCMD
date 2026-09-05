@@ -1,8 +1,9 @@
 //! Structural HTML quality signals for Polish Scan.
 
 use super::{PolishContext, PolishResult, SignalCategory, SignalWeight};
-use crate::checks::accessibility::form_labels::{captured_value, label_spans};
+use crate::checks::accessibility::form_labels::{captured_value, is_wrapped_by_label, label_spans};
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 const CATEGORY: SignalCategory = SignalCategory::HtmlQuality;
@@ -167,7 +168,7 @@ pub fn heading_hierarchy(ctx: &PolishContext) -> PolishResult {
 /// Flag forms where more than half of the inputs lack labels (Medium, 8).
 pub fn form_accessibility(ctx: &PolishContext) -> PolishResult {
     // Collect all label `for` attribute values
-    let label_fors: Vec<String> = LABEL_FOR_RE
+    let label_fors: HashSet<String> = LABEL_FOR_RE
         .captures_iter(&ctx.html)
         .filter_map(|cap| captured_value(&cap))
         .collect();
@@ -203,11 +204,7 @@ pub fn form_accessibility(ctx: &PolishContext) -> PolishResult {
         let has_aria_label = tag.to_lowercase().contains("aria-label");
 
         let tag_start = cap.get(0).map(|m| m.start()).unwrap_or(0);
-        let is_wrapped = wrapping_spans
-            .iter()
-            .any(|(s, e)| tag_start > *s && tag_start < *e);
-
-        if !has_label && !has_aria_label && !is_wrapped {
+        if !has_label && !has_aria_label && !is_wrapped_by_label(&wrapping_spans, tag_start) {
             unlabeled += 1;
         }
     }

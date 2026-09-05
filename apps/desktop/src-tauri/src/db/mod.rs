@@ -62,6 +62,7 @@ mod schedules;
 mod score_snapshots;
 mod sessions;
 mod sites;
+mod snapshot;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 mod verified_good;
