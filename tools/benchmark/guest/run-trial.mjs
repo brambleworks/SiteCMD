@@ -82,7 +82,7 @@ let result;
 let finalSnapshot;
 let agentInvoked = false;
 let setupStage = "environment";
-const socket = `/run/sitecmd-benchmark/${assignment.id}.sock`;
+const channel = `/run/sitecmd-benchmark/${assignment.id}`;
 const assertNotCancelled = () => {
   if (existsSync(`/run/sitecmd-benchmark-cancel-${assignment.id}`))
     throw new Error("Trial cancelled by the operator");
@@ -109,16 +109,17 @@ try {
   setupStage = "environment";
   mkdirSync("/run/sitecmd-benchmark", { recursive: true, mode: 0o755 });
   mkdirSync(publicTools, { recursive: true, mode: 0o755 });
-  for (const name of ["bridge-client.mjs", "mcp-proxy.mjs", "submit.mjs"])
+  for (const name of ["bridge-files.mjs", "bridge-client.mjs", "mcp-proxy.mjs", "submit.mjs"])
     copyFileSync(new URL(`./${name}`, import.meta.url), path.join(publicTools, name));
   mcp =
     assignment.arm === "mcp"
       ? openMcp(product.mcp, desktop.database, (event) => evidence.log("mcp.jsonl", event))
       : null;
   bridge = await createTrialBridge({
-    socket,
+    channel,
     arm: assignment.arm,
     mcp,
+    onError: (error) => agent?.stop(error.message),
     owner: {
       uid: Number(systemCommand("id", ["-u", "runner"])),
       gid: Number(systemCommand("id", ["-g", "runner"])),
@@ -165,16 +166,17 @@ try {
   });
   const invocation = trialInvocation({
     agent: configuration.agent,
+    model: configuration.model,
     arm: assignment.arm,
     workspace,
-    socket,
+    channel,
     proxy: `${publicTools}/mcp-proxy.mjs`,
   });
   writeNewJson(`${directory}/configuration.json`, { configuration, invocation, accounts });
   const submission =
     assignment.arm === "mcp" && item.kind === "repair"
       ? "Submit each candidate with the SiteCMD request_verification tool. Read get_fix_brief first and use get_fix_status to check the result."
-      : `Submit each candidate, including an intentional no-op, with: node ${publicTools}/submit.mjs ${socket} "short summary"`;
+      : `Submit each candidate, including an intentional no-op, with: node ${publicTools}/submit.mjs ${channel} "short summary"`;
   const prompt = [
     task.prompt,
     task.requirements,
@@ -202,6 +204,7 @@ try {
     currentQuota: `${directory}/quota-current.json`,
     requestedModel: configuration.model,
     log: evidence.log,
+    initialized: evidence.initialized,
   });
   agentInvoked = true;
   result = await agent.done;
@@ -214,7 +217,10 @@ try {
   });
   const finalHash = digest(
     Object.fromEntries(
-      Object.entries(final.files).map(([name, bytes]) => [name, bytes.toString("base64")]),
+      Object.entries(evidence.normalize(final).files).map(([name, bytes]) => [
+        name,
+        bytes.toString("base64"),
+      ]),
     ),
   );
   if (!evidence.submissions.length || finalHash !== finalSnapshot || final.violations.length)

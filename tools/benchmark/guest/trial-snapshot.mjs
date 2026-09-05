@@ -36,7 +36,10 @@ export function readCandidate(directory) {
       // Refuse to follow a link on the way in, then judge and read the
       // descriptor itself, so a path swapped after the listing cannot redirect
       // the read or change the bytes behind the size limit.
-      const handle = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const handle = openSync(
+        file,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
       try {
         const opened = fstatSync(handle);
         if (!opened.isFile() || opened.nlink > 1) {

@@ -7,18 +7,18 @@ import { bridgeRequest } from "../guest/bridge-client.mjs";
 import { createTrialBridge } from "../guest/trial-bridge.mjs";
 
 test("baseline has an explicit submission boundary but no SiteCMD access", async () => {
-  const socket = path.join(mkdtempSync(path.join(tmpdir(), "scb-")), "s");
+  const channel = path.join(mkdtempSync(path.join(tmpdir(), "scb-")), "channel");
   const bridge = await createTrialBridge({
-    socket,
+    channel,
     arm: "normal",
     submit: async (summary) => ({ summary }),
   });
   try {
-    assert.deepEqual(await bridgeRequest(socket, "/submit", { summary: "No changes needed" }), {
+    assert.deepEqual(await bridgeRequest(channel, "/submit", { summary: "No changes needed" }), {
       summary: "No changes needed",
     });
     await assert.rejects(
-      bridgeRequest(socket, "/mcp", { method: "tools/list" }),
+      bridgeRequest(channel, "/mcp", { method: "tools/list" }),
       /does not expose/,
     );
   } finally {
@@ -28,10 +28,10 @@ test("baseline has an explicit submission boundary but no SiteCMD access", async
 
 test("verification snapshots precede real MCP forwarding and replies remain unchanged", async () => {
   const order = [];
-  const socket = path.join(mkdtempSync(path.join(tmpdir(), "scb-")), "s");
+  const channel = path.join(mkdtempSync(path.join(tmpdir(), "scb-")), "channel");
   const expected = { content: [{ type: "text", text: "Verification requested" }] };
   const bridge = await createTrialBridge({
-    socket,
+    channel,
     arm: "mcp",
     submit: async () => order.push("snapshot"),
     mcp: {
@@ -42,7 +42,7 @@ test("verification snapshots precede real MCP forwarding and replies remain unch
     },
   });
   try {
-    const result = await bridgeRequest(socket, "/mcp", {
+    const result = await bridgeRequest(channel, "/mcp", {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",

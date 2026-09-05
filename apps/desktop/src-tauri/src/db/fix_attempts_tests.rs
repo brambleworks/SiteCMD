@@ -405,7 +405,6 @@ fn canonical_group_activity_uses_exact_identity() {
 // fix_attempt_watcher is desktop-gated, so this test only compiles when
 // the default `desktop` feature is enabled (it still runs under default).
 #[test]
-#[cfg(feature = "desktop")]
 fn canonical_group_activity_does_not_match_longer_rule_names() {
     let db = temp_db();
     let project_id = db
@@ -454,7 +453,6 @@ fn canonical_group_activity_does_not_match_longer_rule_names() {
 }
 
 #[test]
-#[cfg(feature = "desktop")]
 fn occurrence_activity_scopes_attempts_to_their_structured_file_target() {
     let db = temp_db();
     let project_id = db

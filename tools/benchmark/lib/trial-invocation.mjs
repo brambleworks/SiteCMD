@@ -1,9 +1,14 @@
+import { pilotPolicy } from "./workflow-pilot.mjs";
+
 export const agentVersions = { codex: "0.153.0-alpha.5", claude: "2.1.260" };
 export const reasoning = "high";
 
-export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
-  if (!["codex", "claude"].includes(agent) || !["normal", "report", "mcp"].includes(arm))
-    throw new Error("Unsupported benchmark agent or arm");
+export function trialInvocation({ agent, model, arm, workspace, channel, proxy }) {
+  if (
+    !pilotPolicy.models.some((item) => item.agent === agent && item.model === model) ||
+    !["normal", "report", "mcp"].includes(arm)
+  )
+    throw new Error("Unsupported benchmark agent, model or arm");
   if (agent === "codex") {
     const config = [
       'forced_login_method="chatgpt"',
@@ -16,11 +21,11 @@ export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
       "features.hooks=false",
       "features.apps=false",
       'default_permissions="benchmark"',
-      `permissions.benchmark={extends=":workspace",filesystem={"/home/runner"="deny","/opt/sitecmd-benchmark/products"="deny",${JSON.stringify(workspace)}="write"},network={unix_sockets={${JSON.stringify(socket)}="allow"}}}`,
+      `permissions.benchmark={extends=":workspace",filesystem={"/home/runner"="deny","/opt/sitecmd-benchmark/products"="deny",${JSON.stringify(workspace)}="write",${JSON.stringify(channel)}="read",${JSON.stringify(`${channel}/requests`)}="write"}}`,
       ...(arm === "mcp"
         ? [
             'mcp_servers.sitecmd.command="node"',
-            `mcp_servers.sitecmd.args=${JSON.stringify([proxy, socket])}`,
+            `mcp_servers.sitecmd.args=${JSON.stringify([proxy, channel])}`,
             "mcp_servers.sitecmd.required=true",
             "mcp_servers.sitecmd.tool_timeout_sec=120",
           ]
@@ -39,7 +44,7 @@ export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
         "--color",
         "never",
         "--model",
-        "gpt-5.6-sol",
+        model,
         "--cd",
         workspace,
         ...config.flatMap((value) => ["-c", value]),
@@ -48,7 +53,7 @@ export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
       env: {},
     };
   }
-  const mcpServers = arm === "mcp" ? { sitecmd: { command: "node", args: [proxy, socket] } } : {};
+  const mcpServers = arm === "mcp" ? { sitecmd: { command: "node", args: [proxy, channel] } } : {};
   const settings = {
     sandbox: {
       enabled: true,
@@ -57,9 +62,10 @@ export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
       allowUnsandboxedCommands: false,
       filesystem: {
         denyRead: ["/home/runner", "/opt/sitecmd-benchmark/products"],
-        allowRead: [workspace],
+        allowRead: [workspace, channel],
+        allowWrite: [`${channel}/requests`],
       },
-      network: { allowedDomains: [], strictAllowlist: true, allowUnixSockets: [socket] },
+      network: { allowedDomains: [], strictAllowlist: true },
     },
     permissions: {
       deny: [
@@ -76,6 +82,10 @@ export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
     command: "claude",
     args: [
       "--print",
+      "--name",
+      "Benchmark",
+      "--input-format",
+      "stream-json",
       "--verbose",
       "--output-format",
       "stream-json",
@@ -93,10 +103,18 @@ export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
       "dontAsk",
       "--tools",
       "Bash,Read,Edit,Write,Glob,Grep",
+      "--allowedTools",
+      [
+        "Bash",
+        `Read(/${workspace}/**)`,
+        `Edit(/${workspace}/**)`,
+        `Write(/${workspace}/**)`,
+        ...(arm === "mcp" ? ["mcp__sitecmd__*"] : []),
+      ].join(","),
       "--disallowedTools",
       "Agent,Task,WebFetch,WebSearch",
       "--model",
-      "claude-opus-5",
+      model,
       "--effort",
       reasoning,
     ],
@@ -105,6 +123,8 @@ export function trialInvocation({ agent, arm, workspace, socket, proxy }) {
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1",
     },
   };
 }

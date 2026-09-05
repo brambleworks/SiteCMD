@@ -77,7 +77,12 @@ data directory per assignment. Guest-only bind mounts expose the same candidate
 under that user's home because Code Scan requires a source path inside its home.
 No host filesystem is mounted. WebDriver control ports are blocked for `runner`
 on every guest address; the controller checks the firewall and connection denial
-before launching an agent. Only the MCP arm gets a socket proxy to the real server.
+before launching an agent. A per-trial file channel carries submissions and,
+only for the MCP arm, requests to the real server. Agents can write the request
+directory but cannot replace its root-owned parent or forge controller responses.
+Messages are published atomically, size-limited, read without following links,
+and deduplicated. Each channel has a 32 MiB temporary filesystem, an inode cap,
+a 128-entry queue cap and a 256-request lifetime cap. Unix sockets stay blocked.
 
 Each candidate workspace has a 128 MiB temporary filesystem and an inode cap.
 Agent processes have a 2 GiB memory limit, a 128-task limit, bounded temporary

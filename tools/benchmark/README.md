@@ -18,7 +18,7 @@ credentials must be created through login inside the guest.
 pnpm benchmark pilot
 ```
 
-`pilot` prints the approved 30-trial settings from `pilot-policy.json`. It is a
+`pilot` prints the approved models and limits from `pilot-policy.json`. It is a
 policy, not an execution command. Once the VM is prepared and running,
 `pnpm benchmark:vm doctor` reads the guest's installed
 Codex/Claude versions and saved authentication status without issuing prompts.
@@ -51,9 +51,11 @@ build without compiling again. The smoke test uses the shipped desktop/MCP flow
 and an owned reference repair, not an AI agent. Validation runs baseline and
 reference checks three times each. Scanning records actual full reports, including
 missed defects; a clean scan is not independent proof that a case is safe.
-The executor self-test uses explicitly synthetic Node clients and quota fixtures
-to exercise submission grading, evidence validation and timeout handling. It
-does not log in, contact models, or create measured usage evidence.
+The executor self-test checks file submissions through the Codex sandbox and a
+pinned Anthropic sandbox runtime, including denied credential access, response
+tampering, and Unix sockets. Synthetic Node clients and quota fixtures then test
+submission grading, evidence validation and timeout handling. These tests make
+no model calls and do not establish end-to-end inference success.
 
 Use the exact evidence paths printed by validation and scanning as the first two
 arguments, and choose a new run directory:
@@ -63,7 +65,9 @@ pnpm benchmark:prepare GRADES_JSON SCANS_JSON tools/benchmark/.work/calibration-
 ```
 
 Replace `GRADES_JSON` and `SCANS_JSON` with those paths. Preparation freezes the
-30 assignments, product, sources, graders, reports, protocol and runner. Client
+assignments, product, sources, graders, reports, protocol and runner. Each exact
+model gets all five cases in all three workflows; models sharing a client remain
+separate configurations in the plan and report. Client
 versions are Codex `0.153.0-alpha.5` and Claude Code `2.1.260`, both at explicit
 high reasoning. Changed runner or grader bytes require a new registration, not
 editing an existing plan. No agent has run merely because a plan exists.
@@ -85,8 +89,8 @@ claude auth login --claudeai
 
 Follow each login's instructions, opening its URL in the host browser if needed.
 Do not select Console/API billing or copy host credential files. Exit the guest
-shell, then run `pnpm benchmark:vm doctor`. Login success does not prove either
-requested model is available. The first real assignment must establish that;
+shell, then run `pnpm benchmark:vm doctor`. Login success does not prove all
+requested models are available. Their first real assignments must establish that;
 an unavailable or different model is a failure, never permission to fall back.
 
 ### Account quota evidence

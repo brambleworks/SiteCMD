@@ -37,7 +37,7 @@ export function probeAgentAccounts({ environment = process.env, run = spawnSync 
       return { status: null };
     }
   };
-  const accounts = pilotPolicy.models.map(({ agent, model }) => {
+  const accounts = [...new Set(pilotPolicy.models.map(({ agent }) => agent))].map((agent) => {
     const versionResult = invoke(agent, ["--version"]);
     const status = invoke(
       agent,
@@ -58,7 +58,7 @@ export function probeAgentAccounts({ environment = process.env, run = spawnSync 
         : parseClaudeStatus(status);
     return {
       agent,
-      model,
+      models: pilotPolicy.models.filter((item) => item.agent === agent).map((item) => item.model),
       version,
       subscriptionAuthenticated: subscription,
       modelAvailabilityVerified: false,

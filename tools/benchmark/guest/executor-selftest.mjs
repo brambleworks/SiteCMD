@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { writeNewJson } from "../lib/workflow-store.mjs";
 import { collectEvidence } from "../lib/workflow-artifacts.mjs";
 import { createEvidence } from "./trial-evidence.mjs";
@@ -44,13 +44,18 @@ writeNewJson(`${directory}/configuration.json`, {
 });
 writeFileSync(`${directory}/prompt.txt`, "Synthetic executor test; no model call", { mode: 0o600 });
 mkdirSync("/run/sitecmd-benchmark", { recursive: true, mode: 0o755 });
-const socket = `/run/sitecmd-benchmark/${assignment.id}.sock`;
+const channel = `/run/sitecmd-benchmark/${assignment.id}`;
+const publicTools = "/usr/local/lib/sitecmd-benchmark";
+mkdirSync(publicTools, { recursive: true, mode: 0o755 });
+for (const name of ["bridge-client.mjs", "bridge-files.mjs"])
+  copyFileSync(new URL(`./${name}`, import.meta.url), `${publicTools}/${name}`);
 let agent, bridge;
 try {
   bridge = await createTrialBridge({
-    socket,
+    channel,
     arm: "normal",
     mcp: null,
+    onError: (error) => agent?.stop(error.message),
     owner: {
       uid: Number(systemCommand("id", ["-u", "runner"])),
       gid: Number(systemCommand("id", ["-g", "runner"])),
@@ -70,15 +75,11 @@ try {
     mode === "timeout"
       ? "setInterval(() => {}, 1000)"
       : `
-    const fs = require('node:fs'), http = require('node:http');
-    const { socket, reference } = JSON.parse(process.argv[1]);
-    const submit = summary => new Promise((resolve, reject) => {
-      const request = http.request({socketPath:socket,path:'/submit',method:'POST'}, response => {
-        response.resume(); response.on('end', () => response.statusCode === 200 ? resolve() : reject(new Error('Submission failed')));
-      });
-      request.on('error', reject); request.end(JSON.stringify({summary}));
-    });
+    const fs = require('node:fs');
+    const { channel, reference, client } = JSON.parse(process.argv[1]);
     (async () => {
+      const {bridgeRequest} = await import(client);
+      const submit = summary => bridgeRequest(channel, '/submit', {summary});
       console.log(JSON.stringify({type:'turn.started',model:'fixture-model',synthetic:true}));
       await submit('Owned baseline fixture, deliberately still broken');
       for (const [name, contents] of Object.entries(reference)) fs.writeFileSync(name, contents);
@@ -98,7 +99,11 @@ try {
     prompt: "Synthetic self-test, not an AI prompt",
     invocation: {
       command: "node",
-      args: ["-e", script, JSON.stringify({ socket, reference })],
+      args: [
+        "-e",
+        script,
+        JSON.stringify({ channel, reference, client: `${publicTools}/bridge-client.mjs` }),
+      ],
       env: {},
     },
   });

@@ -6,7 +6,7 @@ import { deployHarness } from "./lib/vm-harness.mjs";
 import { writeNewJson } from "./lib/workflow-store.mjs";
 
 const harness = deployHarness();
-const id = randomBytes(16).toString("hex");
+const id = randomBytes(12).toString("hex");
 const item = calibrationCases.find((item) => item.id === "credentialed-cors");
 const receipt = JSON.parse(
   guestCommand(

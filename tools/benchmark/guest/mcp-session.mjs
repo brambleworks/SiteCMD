@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
-export function openMcp(entry, database, log = () => {}) {
+export function openMcp(entry, database, log = () => {}, { user = "sitecmd", args = [] } = {}) {
   const child = spawn(
     "sudo",
-    ["-u", "sitecmd", "env", `SITECMD_DB_PATH=${database}`, "node", entry],
+    ["-u", user, "env", `SITECMD_DB_PATH=${database}`, "node", entry, ...args],
     {
       stdio: ["pipe", "pipe", "pipe"],
     },

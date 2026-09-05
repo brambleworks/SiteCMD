@@ -1,22 +1,36 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { digest } from "../lib/workflow-plan.mjs";
 import { writeNewJson } from "../lib/workflow-store.mjs";
 import { claudeUsage, codexUsage } from "../lib/workflow-usage.mjs";
 import { gradeCase } from "./calibration-grader.mjs";
 import { candidatePatch, compareCandidate, readCandidate } from "./trial-snapshot.mjs";
+import { captureRuntimeFiles, withoutRuntimeFiles } from "./trial-runtime-files.mjs";
 
 export function createEvidence(directory, plan, assignment, item, files, workspace) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const submissions = [];
   const attempts = new Set();
+  let runtimeFiles = [];
   const task = plan.study.tasks.find((task) => task.id === item.id);
   const log = (name, value) =>
     appendFileSync(path.join(directory, name), `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  const initialized = () => {
+    runtimeFiles = captureRuntimeFiles(files, readCandidate(workspace));
+    writeNewJson(path.join(directory, "runtime-files.json"), {
+      capturedAt: new Date().toISOString(),
+      stage: "Client initialized before first user prompt",
+      emptyProtectionFiles: runtimeFiles,
+    });
+  };
+  const normalize = (snapshot) => ({
+    ...snapshot,
+    files: withoutRuntimeFiles(snapshot.files, runtimeFiles),
+  });
   const submit = (summary, elapsedMs, attemptId) => {
     const index = submissions.length + 1;
     const prefix = `submission-${index}`;
-    const snapshot = readCandidate(workspace);
+    const snapshot = normalize(readCandidate(workspace));
     const integrity = compareCandidate(files, snapshot.files, snapshot.violations);
     const staging = path.join(directory, prefix);
     const patch = candidatePatch(staging, files, snapshot.files);
@@ -79,6 +93,7 @@ export function createEvidence(directory, plan, assignment, item, files, workspa
     quotaAllowed,
     agentInvoked = true,
     evidenceComplete = true,
+    providerCompleted = status === "completed",
     observedModels = [],
   }) => {
     const raw = readFileSync(path.join(directory, "transcript.jsonl"), "utf8");
@@ -115,13 +130,13 @@ export function createEvidence(directory, plan, assignment, item, files, workspa
         includesAllAgents: true,
         incrementalCostUsd: 0,
       };
-    } else if (configuration.agent === "claude" && status === "completed" && evidenceComplete) {
+    } else if (configuration.agent === "claude" && providerCompleted && evidenceComplete) {
       const results = events.filter((event) => event.type === "result");
       if (results.length === 1)
         usage = claudeUsage(results[0], { noSubagents: true, billingMode: "subscription" });
     } else {
       const turns = events.filter((event) => event.type === "turn.completed");
-      if (turns.length && status === "completed" && evidenceComplete) {
+      if (turns.length && providerCompleted && evidenceComplete) {
         const rows = turns.map((event) =>
           codexUsage(event, { noSubagents: true, billingMode: "subscription" }),
         );
@@ -150,6 +165,7 @@ export function createEvidence(directory, plan, assignment, item, files, workspa
         "quota-baseline.json",
         "quota-current.json",
         ...(agentInvoked ? ["prompt.txt", "final-candidate.json"] : []),
+        ...(existsSync(path.join(directory, "runtime-files.json")) ? ["runtime-files.json"] : []),
         ...(assignment.arm === "mcp" ? ["mcp.jsonl"] : []),
       ],
     });
@@ -188,5 +204,5 @@ export function createEvidence(directory, plan, assignment, item, files, workspa
     writeNewJson(path.join(directory, "trial.json"), record);
     return record;
   };
-  return { submissions, attempts, submit, log, finish };
+  return { submissions, attempts, submit, log, finish, initialized, normalize };
 }

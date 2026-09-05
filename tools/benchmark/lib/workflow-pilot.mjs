@@ -26,7 +26,10 @@ export function validatePilotStudy(study) {
   const models = (items) =>
     items
       .map(({ agent, model }) => ({ agent, model }))
-      .sort((left, right) => left.agent.localeCompare(right.agent));
+      .sort(
+        (left, right) =>
+          left.agent.localeCompare(right.agent) || left.model.localeCompare(right.model),
+      );
   same(models(study.configurations ?? []), models(policy.models), "model configurations");
   return validateStudy(study);
 }

@@ -38,6 +38,10 @@ test("preflight checks versions and subscription status without launching a mode
     ["claude", ["auth", "status", "--json"]],
   ]);
   assert.equal(result.subscriptionAccountsVerified, true);
+  assert.deepEqual(result.accounts.find((item) => item.agent === "claude").models, [
+    "claude-opus-5",
+    "claude-fable-5-1",
+  ]);
   assert.equal(result.readyToRun, false);
   assert.doesNotMatch(JSON.stringify(result), /not-for-output/);
 });

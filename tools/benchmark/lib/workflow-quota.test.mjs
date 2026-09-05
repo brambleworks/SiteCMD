@@ -22,17 +22,17 @@ function snapshot(capturedAt = "2026-09-03T16:00:00Z") {
   };
 }
 
-test("the pilot allows only thirty assignments, exact models, and no additional spending", () => {
+test("the pilot allows only the approved assignments, exact models, and no additional spending", () => {
   assert.equal(
     pilotPolicy.caseCount *
       pilotPolicy.models.length *
       pilotPolicy.arms.length *
       pilotPolicy.repeats,
-    30,
+    45,
   );
   assert.deepEqual(
     pilotPolicy.models.map((item) => item.model),
-    ["gpt-5.6-sol", "claude-opus-5"],
+    ["gpt-5.6-sol", "claude-opus-5", "claude-fable-5-1"],
   );
   assert.equal(pilotPolicy.limits.studyCostUsd, 0);
   assert.equal(pilotPolicy.limits.trialSeconds, 1200);

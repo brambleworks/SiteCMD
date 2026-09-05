@@ -1,39 +1,37 @@
-import { request } from "node:http";
+import { randomBytes } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  bridgeTimeoutMs,
+  publishMessage,
+  readMessage,
+  removeMessage,
+  requestLimit,
+  responseLimit,
+} from "./bridge-files.mjs";
 
-export function bridgeRequest(socketPath, route, body) {
-  return new Promise((resolve, reject) => {
-    const requestBody = JSON.stringify(body);
-    const outgoing = request(
-      {
-        socketPath,
-        path: route,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(requestBody),
-        },
-      },
-      (response) => {
-        const chunks = [];
-        let size = 0;
-        response.on("data", (chunk) => {
-          size += chunk.length;
-          if (size > 8 * 1024 * 1024) outgoing.destroy(new Error("Benchmark response too large"));
-          else chunks.push(chunk);
-        });
-        response.on("end", () => {
-          try {
-            const value = JSON.parse(Buffer.concat(chunks));
-            if (response.statusCode !== 200) reject(new Error(value.error));
-            else resolve(value);
-          } catch (error) {
-            reject(error);
-          }
-        });
-      },
-    );
-    outgoing.on("error", reject);
-    outgoing.setTimeout(150000, () => outgoing.destroy(new Error("Benchmark bridge timed out")));
-    outgoing.end(requestBody);
-  });
+export async function bridgeRequest(channel, route, body, { timeoutMs = bridgeTimeoutMs } = {}) {
+  const id = randomBytes(16).toString("hex");
+  const request = `${channel}/requests/${id}.json`;
+  const response = `${channel}/responses/${id}.json`;
+  publishMessage(request, { version: 1, id, route, body }, requestLimit, 0o600);
+  try {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      let message;
+      try {
+        message = readMessage(response, responseLimit);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        await delay(25);
+        continue;
+      }
+      if (message?.version !== 1 || message.id !== id || typeof message.ok !== "boolean")
+        throw new Error("Invalid benchmark response identity");
+      if (!message.ok) throw new Error(message.error);
+      return message.value;
+    }
+    throw new Error("Benchmark bridge timed out");
+  } finally {
+    removeMessage(request);
+  }
 }

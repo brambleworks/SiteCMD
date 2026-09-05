@@ -4,6 +4,7 @@ import path from "node:path";
 import { evaluateQuota } from "../lib/workflow-quota.mjs";
 import { systemCommand } from "./desktop-session.mjs";
 import { watchProviderEvents } from "./trial-events.mjs";
+import { trialInput } from "./trial-input.mjs";
 
 export function launchAgent({
   id,
@@ -16,6 +17,7 @@ export function launchAgent({
   currentQuota,
   requestedModel,
   log,
+  initialized = () => {},
 }) {
   const unit = `sitecmd-agent-${id}`;
   const startedAt = Date.now();
@@ -69,6 +71,13 @@ export function launchAgent({
     });
   };
   const observer = watchProviderEvents(requestedModel, stop);
+  const input = trialInput({
+    agent: invocation.command,
+    stdin: child.stdin,
+    prompt,
+    initialized,
+    fail: stop,
+  });
   const capture = (name) => (chunk) => {
     size += chunk.length;
     if (size > 64 * 1024 * 1024) {
@@ -82,12 +91,14 @@ export function launchAgent({
       return;
     }
     appendFileSync(path.join(directory, name), chunk);
-    if (name === "transcript.jsonl") observer.write(chunk);
+    if (name === "transcript.jsonl") {
+      observer.write(chunk);
+      if (!failure) input.write(chunk);
+    }
   };
   child.stdout.on("data", capture("transcript.jsonl"));
   child.stderr.on("data", capture("stderr.log"));
   child.stdin.on("error", () => {});
-  child.stdin.end(prompt);
   const timer = setInterval(() => {
     if (Date.now() - startedAt >= plan.study.limits.trialSeconds * 1000) {
       stop("Trial deadline reached", "timeout");
@@ -128,6 +139,7 @@ export function launchAgent({
         failure,
         elapsedMs: Date.now() - startedAt,
         evidenceComplete,
+        providerCompleted: code === 0 && !failure,
         observedModels: observer.models(),
       });
     });

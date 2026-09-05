@@ -62,7 +62,7 @@ const study = {
     mcpSha256: scans.product.mcpSha256,
   },
   configurations: pilotPolicy.models.map(({ agent, model }) => ({
-    id: `${agent}-high`,
+    id: `${agent}-${model.replaceAll(".", "-")}-${reasoning}`,
     agent,
     model,
     agentVersion: agentVersions[agent],
